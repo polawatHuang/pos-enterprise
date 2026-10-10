@@ -67,7 +67,8 @@ async function summary({ orgId, branchId }) {
       p,
     ),
     db.one(
-      `SELECT SUM(status NOT IN ('ready','failed','draft')) AS in_progress, SUM(status = 'ready') AS ready
+      `SELECT SUM(status IN ('scripting','voicing','generating_clips','rendering_avatar','compositing')) AS in_progress,
+              SUM(status IN ('ready','parts_ready')) AS ready
          FROM video_projects WHERE org_id = :orgId`,
       p,
     ),

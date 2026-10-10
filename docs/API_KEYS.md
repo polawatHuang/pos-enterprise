@@ -17,10 +17,10 @@
 | **Shopee Affiliate Open API** | สินค้าเทรนด์ + affiliate link (5, 7) | `SHOPEE_AFFILIATE_APP_ID`, `SHOPEE_AFFILIATE_SECRET` | affiliate.shopee.co.th | ใช่ (ต้องเป็น affiliate ที่ได้รับอนุมัติ) |
 | **Meta (Facebook/Instagram)** | แชต Messenger/IG (4), โพสต์ Reels (7) | `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` (+ Page access token ต่อเพจ ใส่ในหน้า ตั้งค่า AI แชต หรือ `META_PAGE_ACCESS_TOKEN`) | developers.facebook.com | **ใช่** — App Review + Business Verification |
 | **LINE Messaging API** | แชต LINE OA (4) | `LINE_CHANNEL_SECRET` (+ Channel access token ใส่ในหน้า ตั้งค่า AI แชต หรือ `LINE_CHANNEL_ACCESS_TOKEN`) | developers.line.biz | ไม่ |
-| HeyGen (ทางเลือก) | AI avatar รีวิวสินค้า (6) | `HEYGEN_API_KEY` | app.heygen.com | ไม่ (ต้องมีแพ็กเกจ API) |
-| ElevenLabs (ทางเลือก) | เสียงพากย์ไทย + timestamp ซับ (6) | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | elevenlabs.io | ไม่ |
+| HeyGen (ทางเลือกในอนาคต) | AI avatar รีวิวสินค้า (ยังไม่ได้เชื่อม) | `HEYGEN_API_KEY` | app.heygen.com | ไม่ (ต้องมีแพ็กเกจ API) |
+| ElevenLabs (ทางเลือก) | เสียงพากย์แทน MiniMax (6) — ต้องมี R2 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | elevenlabs.io | ไม่ |
 | **Shotstack** | ประกอบคลิป 9:16 + ซับ (6) | `SHOTSTACK_API_KEY`, `SHOTSTACK_ENV` | shotstack.io | ไม่ (`stage` ฟรี มีลายน้ำ) |
-| **Cloudflare R2** | เก็บไฟล์ทั้งหมด (2–7) | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL` | dash.cloudflare.com | ไม่ |
+| **Cloudflare R2** | เก็บไฟล์วิดีโอ/เสียงถาวร (6–7) | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL` | dash.cloudflare.com | ไม่ |
 | **Apify** (สำรอง) | scrape หน้าเว็บที่ไม่มี API (5) | `APIFY_TOKEN` | apify.com | ไม่ |
 
 ## เหตุผลที่เลือกแต่ละบริการ
@@ -30,15 +30,23 @@
   - MiniMax ยังไม่มี structured output แบบ JSON schema ระบบจึงบังคับให้ตอบผ่าน tool ตัวเดียว (`tool_choice`) แทน และถ้าโมเดลตอบเป็นข้อความ ก็มีตัวแยก JSON สำรองไว้
   - MiniMax ยังรับไฟล์ PDF ไม่ได้ ถ้าจะให้ AI อ่านใบเสร็จ ต้องถ่ายรูปหรือแคปหน้าจอ (ระบบตอบ 400 พร้อมบอกวิธี)
   - ระบบตัดบล็อก `<think>…</think>` (ส่วนที่โมเดลใช้คิด) ออกก่อนส่งข้อความให้ลูกค้าเสมอ
-  - เฟส 6 (วิดีโอ) จะใช้ MiniMax Speech (TTS) และ Hailuo (วิดีโอ) เป็นค่าเริ่มต้น ส่วน ElevenLabs/HeyGen เป็นทางเลือก
-  - คุณภาพเสียงพากย์ภาษาไทยของ MiniMax **ยังไม่ได้ทดสอบยืนยัน** จะทดสอบก่อนเลือกเสียงในเฟส 6
+  - เฟส 6 (วิดีโอ) ใช้ key เดียวกันเรียก MiniMax Speech (`/v1/t2a_v2`) และ Hailuo (`/v1/video_generation`) ผ่าน native API (`MINIMAX_API_HOST`)
+  - ต้องเลือก `MINIMAX_VOICE_ID` เอง ส่วนคุณภาพการออกเสียงภาษาไทย**ยังไม่ได้ทดสอบกับ key จริง**
+    - MiniMax ระบุว่ารองรับภาษาไทย แต่ควรลองฟังก่อนใช้งานจริง
+    - ถ้าไม่พอใจ ให้สลับเสียงพากย์เป็น ElevenLabs ได้ในแต่ละโปรเจกต์
+  - Hailuo แบบ text-to-video ให้ภาพแนวนอนเป็นค่าเริ่มต้น ระบบจึงให้ Shotstack ครอปเป็น 9:16
+    - ฉากที่ใช้รูปสินค้าเป็นเฟรมแรก สัดส่วนภาพจะตามรูปสินค้า
   - เอกสารอ้างอิง: [Anthropic API compatible](https://platform.minimax.io/docs/api-reference/text-anthropic-api), [Tool use](https://platform.minimax.io/docs/guides/text-m3-function-call)
 - **Claude (ทางเลือก)** — ตั้ง `AI_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` เพื่อสลับทุกฟีเจอร์ไปใช้ Claude ได้โดยไม่ต้องแก้โค้ด
   - ฝั่ง Claude ใช้ structured output (JSON schema) ของจริง และรองรับ PDF
   - เปิด server-side refusal fallback ไว้ ถ้าโมเดลปฏิเสธคำขอ ระบบจะลองโมเดลสำรองในการเรียกครั้งเดียวกัน
 - **ฐานความรู้สินค้า** — ใช้ MySQL FULLTEXT บนตาราง `products` + `product_knowledge` แล้วส่งผลค้นหาเข้า prompt ไม่ต้องมี vector database เพิ่ม ซึ่งรันบน shared hosting ได้ และอัปเกรดเป็น embeddings ภายหลังได้
-- **HeyGen + ElevenLabs + Shotstack** — แยกหน้าที่ (avatar / เสียง / ประกอบคลิป) ทำให้เปลี่ยนทีละส่วนได้ ทั้งหมดเรนเดอร์บนคลาวด์ จึงไม่ต้องใช้ ffmpeg/GPU บน Plesk ส่วน ElevenLabs ให้ timestamp ระดับตัวอักษร จึงทำซับไตเติลไทยได้ตรงจังหวะ
-- **Cloudflare R2** — ไม่มีค่า egress เหมาะกับวิดีโอที่ต้องให้ TikTok/Meta ดึงไฟล์ไป (`PULL_FROM_URL`) และอัปโหลดตรงจาก browser ได้โดยไม่ผ่านโฮสต์
+- **ไปป์ไลน์วิดีโอ: MiniMax (สคริปต์ + เสียง + คลิป) → Shotstack (ประกอบ) → R2 (เก็บ)**
+  - แยกหน้าที่แต่ละขั้น เปลี่ยนผู้ให้บริการได้ทีละส่วน
+  - ทุกขั้นทำงานบนคลาวด์ จึงไม่ต้องใช้ ffmpeg หรือ GPU บน Plesk
+  - ถ้ายังไม่ได้ตั้ง Shotstack ระบบจะให้ชิ้นส่วน (เสียงแต่ละฉาก, คลิป, ไฟล์ซับ .srt) ไปตัดต่อใน CapCut แทน
+- **Shotstack** — `SHOTSTACK_ENV=stage` ใช้ฟรีแต่มีลายน้ำ ใช้งานจริงให้ตั้งเป็น `v1` และใช้ key แบบ production
+- **Cloudflare R2** — ลิงก์ไฟล์จาก MiniMax และ Shotstack หมดอายุภายในประมาณ 24 ชั่วโมง ระบบจึงคัดลอกไฟล์ไปเก็บใน R2 (อัปโหลดด้วย S3 SigV4 โดยไม่ต้องติดตั้ง SDK) ไม่มีค่า egress เหมาะกับวิดีโอที่ต้องให้ TikTok/Meta ดึงไฟล์ไป (`PULL_FROM_URL`) และอัปโหลดตรงจาก browser ได้โดยไม่ผ่านโฮสต์
 - **Shopee/TikTok official API ก่อน scraping** — เสถียรกว่า ไม่ผิดข้อตกลง และไม่โดนบล็อก
 
 ## ข้อควรระวังด้านข้อกำหนดการใช้งาน

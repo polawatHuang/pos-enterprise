@@ -8,6 +8,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import {
   AlertTriangle,
   Bot,
+  Clapperboard,
   Eye,
   EyeOff,
   ExternalLink,
@@ -364,6 +365,11 @@ function TrendDrawer({ id, onClose }: { id: number; onClose: () => void }) {
                   </Button>
                 )}
               </>
+            )}
+            {can("video:create") && (
+              <Button size="sm" variant="outline" onClick={() => router.push(`/videos?trend=${id}`)}>
+                <Clapperboard /> สร้างวิดีโอ
+              </Button>
             )}
             {t.platform === "shopee" &&
               (t.affiliateUrl ? (

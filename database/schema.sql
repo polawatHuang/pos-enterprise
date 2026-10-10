@@ -819,15 +819,24 @@ CREATE TABLE video_projects (
   product_id         BIGINT UNSIGNED NULL,
   trending_product_id BIGINT UNSIGNED NULL,
   title              VARCHAR(255) NOT NULL,
+  brief              JSON NULL COMMENT 'tone, length, audience, product facts used for the script',
   script             TEXT NULL,
+  script_json        JSON NULL COMMENT 'scenes: voiceover, caption, visual, durationSec',
+  post_caption       TEXT NULL,
+  hashtags           VARCHAR(500) NULL,
   avatar_id          VARCHAR(100) NULL,
   voice_id           VARCHAR(100) NULL,
+  voice_provider     VARCHAR(30) NULL,
+  visual_mode        ENUM('ai_clips','product_images') NOT NULL DEFAULT 'product_images',
   aspect_ratio       VARCHAR(10) NOT NULL DEFAULT '9:16',
   duration_sec       INT NULL,
-  status             ENUM('draft','scripting','voicing','rendering_avatar','compositing','ready','failed') NOT NULL DEFAULT 'draft',
+  status             ENUM('draft','scripting','script_ready','voicing','generating_clips','rendering_avatar','compositing','parts_ready','ready','failed') NOT NULL DEFAULT 'draft',
+  stage_detail       VARCHAR(255) NULL COMMENT 'human-readable progress',
   provider_job_ids   JSON NULL,
   output_file_id     BIGINT UNSIGNED NULL,
+  output_url         VARCHAR(1000) NULL,
   subtitle_file_id   BIGINT UNSIGNED NULL,
+  subtitle_srt       MEDIUMTEXT NULL,
   error              TEXT NULL,
   created_by         BIGINT UNSIGNED NULL,
   created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -842,10 +851,17 @@ CREATE TABLE video_assets (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   video_project_id  BIGINT UNSIGNED NOT NULL,
   kind              ENUM('voice','avatar','broll','music','subtitle','thumbnail','final') NOT NULL,
+  scene_index       INT NULL,
+  provider          VARCHAR(30) NULL,
+  external_id       VARCHAR(191) NULL COMMENT 'provider task / render id',
+  status            ENUM('pending','processing','ready','failed') NOT NULL DEFAULT 'ready',
+  duration_ms       INT NULL,
   file_id           BIGINT UNSIGNED NULL,
   external_url      VARCHAR(1000) NULL,
   meta              JSON NULL,
+  error             TEXT NULL,
   created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_va_project (video_project_id, kind, scene_index),
   CONSTRAINT fk_va_project FOREIGN KEY (video_project_id) REFERENCES video_projects(id) ON DELETE CASCADE,
   CONSTRAINT fk_va_file FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -974,6 +990,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video');
 
 SET FOREIGN_KEY_CHECKS = 1;

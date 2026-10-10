@@ -3,10 +3,11 @@
 const { defineAdapter } = require('./define');
 const { notImplemented } = require('../core/errors');
 
-// Interface is fixed now so modules can be built against it; bodies land in phase 6.
+// Optional alternative (AI avatar presenter). Not wired into the video pipeline yet:
+// MiniMax Hailuo clips + product images are the default visuals.
 const planned = (method) => () => {
   adapter.requireConfig();
-  throw notImplemented(`HeyGen API: ${method} จะเปิดใช้งานในเฟสที่ 6`);
+  throw notImplemented(`HeyGen API: ${method} ยังไม่เปิดใช้ (ทางเลือกเสริมหลังเฟส 6)`);
 };
 
 const adapter = defineAdapter(

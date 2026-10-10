@@ -392,10 +392,20 @@ insert('affiliate_links', ['id', 'org_id', 'product_id', 'platform', 'original_u
   [1, 1, 1, 'shopee', 'https://shopee.co.th/product/000/001', 'https://s.shopee.co.th/demo1', 1840, 96, 4120],
   [2, 1, 8, 'shopee', 'https://shopee.co.th/product/000/008', 'https://s.shopee.co.th/demo8', 920, 31, 2950],
 ]);
-insert('video_projects', ['id', 'org_id', 'product_id', 'title', 'script', 'status', 'duration_sec'], [
-  [1, 1, 1, 'รีวิวเซรั่มวิตซี 14 วัน', 'Hook: ผิวหมองต้องดู! ...', 'ready', 32],
-  [2, 1, 8, 'หูฟัง ANC ตัดเสียงในรถไฟฟ้า', 'Hook: ใครนั่ง BTS ทุกวันต้องมี ...', 'rendering_avatar', null],
-  [3, 1, 10, 'ขาตั้งไลฟ์สดราคาไม่ถึง 500', null, 'scripting', null],
+const scenes = (rows) => JSON.stringify({ scenes: rows.map(([voiceover, caption, visual, durationSec]) => ({ voiceover, caption, visual, durationSec })) });
+insert('video_projects', ['id', 'org_id', 'product_id', 'title', 'brief', 'script', 'script_json', 'post_caption', 'hashtags', 'visual_mode', 'status', 'stage_detail', 'duration_sec'], [
+  [1, 1, 1, 'รีวิวเซรั่มวิตซี 14 วัน', JSON.stringify({ tone: 'friendly', lengthSec: 30 }), 'Hook: ผิวหมองต้องดู! ...',
+    scenes([['ผิวหมองต้องดูคลิปนี้!', 'ผิวหมอง ต้องดู!', 'close-up of a vitamin C serum bottle on a bathroom shelf, morning light', 4],
+      ['ใช้เซรั่มวิตซีตัวนี้มา 14 วัน ผิวดูสว่างขึ้นจริง', 'ลองมาแล้ว 14 วัน', 'woman applying serum to cheek, soft daylight, vertical framing', 8],
+      ['เนื้อบางเบา ซึมไว ไม่เหนอะหนะ', 'บางเบา ซึมไว', 'serum dropper texture macro shot', 6],
+      ['กดลิงก์ในโปรไฟล์ได้เลย ตอนนี้ลดอยู่', 'ลิงก์ในโปรไฟล์', 'product on pastel background with sparkle', 5]]),
+    'ผิวหมองต้องดู! เซรั่มวิตซีที่ใช้มา 14 วัน ✨', '#รีวิวสกินแคร์ #เซรั่มวิตซี #ของดีบอกต่อ', 'product_images', 'ready', null, 32],
+  [2, 1, 8, 'หูฟัง ANC ตัดเสียงในรถไฟฟ้า', JSON.stringify({ tone: 'energetic', lengthSec: 30 }), 'Hook: ใครนั่ง BTS ทุกวันต้องมี ...', null, null, null, 'ai_clips', 'compositing', 'กำลังประกอบคลิป (Shotstack)', null],
+  [3, 1, 10, 'ขาตั้งไลฟ์สดราคาไม่ถึง 500', JSON.stringify({ tone: 'friendly', lengthSec: 15 }), null,
+    scenes([['ไลฟ์สดแล้วมือถือสั่น? ดูนี่!', 'ไลฟ์แล้วภาพสั่น?', 'phone on a wobbly stack of books during a livestream', 4],
+      ['ขาตั้งตัวนี้ปรับสูงได้ หมุนได้ 360 องศา', 'ปรับสูง หมุน 360°', 'tripod phone stand extending, studio lighting', 6],
+      ['ราคาไม่ถึง 500 กดลิงก์เลย', 'ไม่ถึง 500!', 'tripod on a desk next to a ring light', 4]]),
+    'ไลฟ์ขายของให้ภาพนิ่ง ๆ ด้วยขาตั้งราคาไม่ถึง 500', '#ไลฟ์สด #ขาตั้งมือถือ', 'product_images', 'script_ready', null, null],
 ]);
 const posts = [];
 for (let i = 0; i < 10; i += 1) {

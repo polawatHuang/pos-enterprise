@@ -66,7 +66,7 @@ export const navGroups: NavGroup[] = [
       { href: "/inbox/settings", label: "ตั้งค่า AI แชต", icon: Bot, permission: "inbox:read", phase: 1 },
       { href: "/trends", label: "สินค้าเทรนด์", icon: TrendingUp, permission: "scraping:read", phase: 1 },
       { href: "/trends/sources", label: "แหล่งข้อมูลเทรนด์", icon: DatabaseZap, permission: "scraping:read", phase: 1 },
-      { href: "/videos", label: "AI Video", icon: Clapperboard, permission: "video:create", phase: 6 },
+      { href: "/videos", label: "AI Video", icon: Clapperboard, permission: "video:create", phase: 1 },
       { href: "/social", label: "ตั้งเวลาโพสต์ & Affiliate", icon: CalendarClock, permission: "social:read", phase: 7 },
     ],
   },
