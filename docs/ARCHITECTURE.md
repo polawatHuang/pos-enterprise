@@ -167,6 +167,32 @@ replyToConversation()  ── claim lock (ai_lock_until) กันตอบซ�
 
 **การทดสอบ:** หน้า **ตั้งค่า AI แชต → ทดลองคุย** ให้คุยกับ AI ในฐานะลูกค้าผ่านช่องทาง website ภายใน ไม่ต้องมี key ของแพลตฟอร์มแชต
 
+## สินค้าเทรนด์ (เฟส 5)
+
+```
+แหล่งข้อมูล (scrape_sources)          นำเข้า CSV (export จากเครื่องมือวิเคราะห์)
+ ├ shopee_affiliate → GraphQL ทันที         │
+ ├ apify → เริ่ม run → job scrape.poll ทุก 1 นาที → dataset
+ └ custom_url → robots.txt → JSON-LD Product │
+        │ job scrape.run (cron tick)           │
+        ▼                                      ▼
+upsertItems(): trending_products (unique org+platform+external_id) + trending_snapshots
+        │
+        ▼
+ความเร็วยอดขาย = Δยอดขาย / วัน (เทียบ snapshot ล่าสุดกับครั้งที่ห่าง ≥ 20 ชม.)
+คะแนน 0–100 = ความเร็ว 40 + ยอดขายรวม 25 + รีวิว 15 + ค่าคอม 20   (backend/src/modules/scraping/score.js)
+        │
+        ▼
+AI วิเคราะห์ (MiniMax, tool บังคับ) → นำเข้าเป็นสินค้า draft / ลิงก์ affiliate → ใช้ต่อในเฟส 6–7
+```
+
+**การทำงานเบื้องหลัง**
+
+- แหล่งที่ตั้ง `interval_hours` จะถูกเข้าคิวอัตโนมัติจาก `scheduleRecurring()` ในทุก cron tick
+- แต่ละแหล่งมีงานที่กำลังรันได้ครั้งละ 1 งาน
+- Apify ใช้วิธีเริ่มงานแล้วกลับมาเช็กผลภายหลัง (poll) เพราะ cron tick มีเวลาทำงานแค่ ~45 วินาที
+- ดึงข้อมูลซ้ำภายใน 1 ชั่วโมง ระบบจะอัปเดต snapshot เดิม ไม่เพิ่มแถวใหม่
+
 ## Roadmap
 
 | เฟส | โมดูล | เหตุผลของลำดับ |
@@ -175,6 +201,6 @@ replyToConversation()  ── claim lock (ai_lock_until) กันตอบซ�
 | 2 ✅ | สินค้า + สต๊อก + POS | สินค้าเป็นข้อมูลกลางของทุกโมดูล (AI ใช้เป็นฐานความรู้, วิดีโอใช้เป็นวัตถุดิบ) |
 | 3 ✅ | บัญชี + เอกสาร + ภาษี + AI อ่านใบเสร็จ | รับข้อมูลขายจากเฟส 2 ไปลงบัญชีอัตโนมัติ |
 | 4 ✅ | Unified Inbox + AI Agent + Return/Dispute | ต้องมีสินค้า สต๊อก ออร์เดอร์ และคูปองให้ AI ใช้ |
-| 5 | Data Scraping / สินค้าเทรนด์ | ป้อนสินค้าให้การทำคอนเทนต์ |
+| 5 ✅ | Data Scraping / สินค้าเทรนด์ | ป้อนสินค้าให้การทำคอนเทนต์ |
 | 6 | AI Video | ใช้สินค้าจากเฟส 2/5 |
 | 7 | Auto-post + Affiliate | ใช้วิดีโอจากเฟส 6 + ลิงก์จากเฟส 5 |

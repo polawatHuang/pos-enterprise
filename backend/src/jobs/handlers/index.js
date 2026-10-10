@@ -5,7 +5,7 @@ const { enqueue } = require('../queue');
 
 /**
  * Job handlers keyed by type. Each receives (payload, ctx) and returns a JSON-able result.
- * Later phases register: 'social.publish', 'video.pipeline', 'scrape.run', 'inbox.ai_reply', ...
+ * Later phases register: 'social.publish', 'video.pipeline', ...
  */
 const handlers = {
   /** Housekeeping: prune expired refresh tokens and old finished jobs. */
@@ -39,6 +39,10 @@ handlers['inbox.ai_reply'] = async ({ conversationId }, { jobId }) => {
   }
 };
 
+/** Trend sources: run a fetch, or check on an async (Apify) run. Failures are recorded on the run. */
+handlers['scrape.run'] = async ({ runId }) => require('../../modules/scraping/sources').executeRun(runId);
+handlers['scrape.poll'] = async ({ runId, polls }) => require('../../modules/scraping/sources').pollRun(runId, polls);
+
 /** Recurring jobs scheduled by the cron tick (idempotent: one queued instance at a time). */
 const recurring = [{ type: 'system.cleanup', everyMinutes: 60 * 24 }];
 
@@ -51,6 +55,7 @@ async function scheduleRecurring() {
     );
     if (!existing) await enqueue(r.type, {}, { priority: -10 });
   }
+  await require('../../modules/scraping/sources').scheduleDueSources();
 }
 
 module.exports = handlers;
