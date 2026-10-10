@@ -783,3 +783,92 @@ export interface VideoMeta {
   };
   tones: Record<string, string>;
 }
+
+/* ----------------------------------------------------------------- social */
+
+export type SocialPlatform = "tiktok" | "facebook" | "instagram";
+export type PostStatus = "draft" | "scheduled" | "publishing" | "published" | "failed" | "cancelled";
+export type TikTokPrivacy = "PUBLIC_TO_EVERYONE" | "MUTUAL_FOLLOW_FRIENDS" | "FOLLOWER_OF_CREATOR" | "SELF_ONLY";
+
+export interface SocialAccount {
+  id: number;
+  platform: SocialPlatform;
+  externalId: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  status: "connected" | "expired" | "error";
+  lastError: string | null;
+  tokenExpiresAt: string | null;
+  isActive: boolean;
+  scheduledCount: number;
+  meta: { pageId?: string; pageName?: string } | null;
+}
+
+export interface SocialAccountsMeta {
+  tiktok: { configured: boolean; missing: string[] };
+  meta: { configured: boolean; missing: string[] };
+  encryption: boolean;
+  callbackUrls: { tiktok: string; meta: string };
+}
+
+export interface TikTokOptions {
+  privacyLevel: TikTokPrivacy;
+  disableComment: boolean;
+  disableDuet: boolean;
+  disableStitch: boolean;
+  brandContent: boolean;
+  brandOrganic: boolean;
+}
+
+export interface CreatorInfo {
+  nickname: string;
+  username: string;
+  avatarUrl: string | null;
+  privacyOptions: TikTokPrivacy[];
+  commentDisabled: boolean;
+  duetDisabled: boolean;
+  stitchDisabled: boolean;
+  maxDurationSec: number | null;
+}
+
+export interface ScheduledPost {
+  id: number;
+  accountId: number;
+  platform: SocialPlatform;
+  accountName: string | null;
+  accountStatus: SocialAccount["status"];
+  videoProjectId: number | null;
+  videoTitle: string | null;
+  videoStatus: string | null;
+  mediaUrl: string | null;
+  caption: string | null;
+  hashtags: string | null;
+  affiliateLinkId: number | null;
+  affiliateUrl: string | null;
+  linkPlacement: "caption" | "bio" | "none";
+  scheduledAt: string;
+  privacy: string;
+  platformOptions: TikTokOptions | null;
+  isAiGenerated: boolean;
+  status: PostStatus;
+  error: string | null;
+  publishedAt: string | null;
+  permalink: string | null;
+  finalCaption: string;
+}
+
+export interface AffiliateLink {
+  id: number;
+  label: string | null;
+  productId: number | null;
+  productName: string | null;
+  platform: string;
+  originalUrl: string;
+  shortUrl: string | null;
+  subId: string | null;
+  clicks: number;
+  conversions: number;
+  commission: number;
+  postCount: number;
+  createdAt: string;
+}

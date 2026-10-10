@@ -93,4 +93,13 @@ cd frontend && npm run lint && npx tsc --noEmit && npm run build
   - เก็บไฟล์ถาวรบน Cloudflare R2
 - ถ้ายังไม่มี Shotstack จะได้ไฟล์ชิ้นส่วนและไฟล์ซับ .srt ไปตัดต่อเอง
 
-**เฟสถัดไป:** 7 Auto-post + Affiliate
+**เฟส 7 (ส่งมอบแล้ว):**
+- เชื่อมบัญชี TikTok, Facebook Page และ Instagram ด้วย OAuth
+- ปฏิทินตั้งเวลาโพสต์ ลากเปลี่ยนวันได้
+- โพสต์คลิปเดียวไปหลายช่องทาง:
+  - TikTok Direct Post พร้อมป้าย AI และป้ายเนื้อหาเชิงพาณิชย์
+  - Facebook Reels และ Instagram Reels
+- ติดตามสถานะจนโพสต์ขึ้นจริง
+- ลิงก์ Shopee Affiliate แยกต่อโพสต์
+
+ครบทั้ง 7 เฟสตามขอบเขตแล้ว

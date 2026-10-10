@@ -362,7 +362,7 @@ describe('webhooks', () => {
     assert.ok(conv, 'conversation created');
     createdConvs.push(conv.id);
     assert.equal(conv.customer_name, 'คุณไลน์');
-    const ai = await waitFor(() => db.one("SELECT * FROM messages WHERE conversation_id = :id AND sender_type = 'ai'", { id: conv.id }));
+    const ai = await waitFor(() => db.one("SELECT * FROM messages WHERE conversation_id = :id AND sender_type = 'ai' AND delivery_status <> 'pending'", { id: conv.id }));
     assert.ok(ai, 'AI replied');
     assert.equal(ai.delivery_status, 'delivered');
     const replyCall = fetchCalls.find((c) => c.url.endsWith('/message/reply'));
@@ -414,7 +414,7 @@ describe('webhooks', () => {
     const conv = await waitFor(() => db.one("SELECT c.* FROM conversations c JOIN channels ch ON ch.id = c.channel_id WHERE ch.platform = 'facebook' AND c.external_thread_id = :t", { t: psid }));
     assert.ok(conv);
     createdConvs.push(conv.id);
-    const ai = await waitFor(() => db.one("SELECT * FROM messages WHERE conversation_id = :id AND sender_type = 'ai'", { id: conv.id }));
+    const ai = await waitFor(() => db.one("SELECT * FROM messages WHERE conversation_id = :id AND sender_type = 'ai' AND delivery_status <> 'pending'", { id: conv.id }));
     assert.equal(ai?.delivery_status, 'delivered');
     const sent = fetchCalls.find((c) => c.url.includes('/me/messages'));
     assert.equal(sent.body.recipient.id, psid);

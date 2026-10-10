@@ -17,6 +17,7 @@ import {
   Mic,
   Plus,
   Save,
+  Send,
   Sparkles,
   Trash2,
   Wand2,
@@ -378,6 +379,11 @@ function Outputs({ v }: { v: VideoDetail }) {
       <CardContent className="space-y-3 pt-0 text-sm">
         {v.outputUrl ? (
           <>
+            <Button asChild className="w-full">
+              <Link href={`/social?video=${v.id}`}>
+                <Send /> ตั้งเวลาโพสต์คลิปนี้
+              </Link>
+            </Button>
             <video src={v.outputUrl} controls playsInline className="mx-auto aspect-[9/16] w-full max-w-[240px] rounded-lg bg-black" />
             <Button asChild variant="outline" className="w-full">
               <a href={v.outputUrl} target="_blank" rel="noreferrer noopener" download>

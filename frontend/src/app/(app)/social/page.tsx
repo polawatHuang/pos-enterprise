@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
-import { ModulePlaceholder } from "@/components/layout/module-placeholder";
-import { modules } from "@/config/modules";
+import { RequirePermission } from "@/components/layout/page";
+import { CalendarView } from "@/components/social/calendar-view";
 
 export const metadata: Metadata = { title: "ตั้งเวลาโพสต์" };
 
-export default function Page() {
-  return <ModulePlaceholder spec={modules.social} />;
+export default function SocialPage() {
+  return (
+    <RequirePermission permission="social:read">
+      <CalendarView />
+    </RequirePermission>
+  );
 }
