@@ -1,0 +1,922 @@
+-- =====================================================================
+-- POS Enterprise — full database schema (all modules)
+-- Compatible with MySQL 8.0+ and MariaDB 10.6+ (phpMyAdmin import)
+--
+-- How to import via phpMyAdmin:
+--   1. Select your database in the left panel (create it in cPanel first)
+--   2. Import tab -> choose this file -> Character set: utf-8 -> Go
+--   3. Then import seed.sql the same way
+--
+-- Rules followed so phpMyAdmin imports cleanly:
+--   * No DELIMITER / triggers / stored procedures / events
+--   * No CREATE DATABASE / USE (works on shared hosting with prefixed DB names)
+--   * Tables created in dependency order; drop order reversed
+-- =====================================================================
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- ---------------------------------------------------------------------
+-- Drop (reverse dependency order) — safe re-import on an empty install.
+-- WARNING: re-importing this file DELETES ALL DATA.
+-- ---------------------------------------------------------------------
+DROP TABLE IF EXISTS scrape_runs, trending_products, scrape_sources,
+  post_results, scheduled_posts, video_assets, video_projects, affiliate_links, social_accounts,
+  ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
+  tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
+  discount_codes, promotions, pos_shifts, payments, sales_order_items, sales_orders, customers,
+  purchase_order_items, purchase_orders, suppliers, stock_movements, stock_levels, warehouses,
+  product_knowledge, product_variants, products, product_categories,
+  files, webhook_events, jobs, integration_credentials, settings, audit_logs, refresh_tokens,
+  user_roles, role_permissions, permissions, roles, users, branches, organizations,
+  schema_migrations;
+
+-- =====================================================================
+-- CORE
+-- =====================================================================
+
+CREATE TABLE schema_migrations (
+  version     VARCHAR(64)  NOT NULL PRIMARY KEY,
+  applied_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE organizations (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name          VARCHAR(191) NOT NULL,
+  legal_name    VARCHAR(191) NULL,
+  tax_id        VARCHAR(20)  NULL COMMENT 'Thai 13-digit tax ID',
+  vat_registered TINYINT(1)  NOT NULL DEFAULT 1,
+  address       TEXT NULL,
+  phone         VARCHAR(50)  NULL,
+  email         VARCHAR(191) NULL,
+  currency      CHAR(3)      NOT NULL DEFAULT 'THB',
+  timezone      VARCHAR(64)  NOT NULL DEFAULT 'Asia/Bangkok',
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE branches (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  code        VARCHAR(32)  NOT NULL,
+  name        VARCHAR(191) NOT NULL,
+  branch_no   VARCHAR(5)   NOT NULL DEFAULT '00000' COMMENT 'Revenue Dept branch number',
+  address     TEXT NULL,
+  is_active   TINYINT(1) NOT NULL DEFAULT 1,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_branch_code (org_id, code),
+  CONSTRAINT fk_branch_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE users (
+  id                    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id                BIGINT UNSIGNED NOT NULL,
+  branch_id             BIGINT UNSIGNED NULL,
+  email                 VARCHAR(191) NOT NULL,
+  password_hash         VARCHAR(255) NOT NULL,
+  full_name             VARCHAR(191) NOT NULL,
+  phone                 VARCHAR(50)  NULL,
+  avatar_url            VARCHAR(500) NULL,
+  status                ENUM('active','disabled') NOT NULL DEFAULT 'active',
+  must_change_password  TINYINT(1) NOT NULL DEFAULT 0,
+  failed_login_count    INT NOT NULL DEFAULT 0,
+  locked_until          DATETIME NULL,
+  last_login_at         DATETIME NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_user_email (email),
+  KEY idx_user_org (org_id),
+  CONSTRAINT fk_user_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_user_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE roles (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  code         VARCHAR(50)  NOT NULL,
+  name         VARCHAR(100) NOT NULL,
+  description  VARCHAR(255) NULL,
+  is_system    TINYINT(1) NOT NULL DEFAULT 1,
+  UNIQUE KEY uq_role_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE permissions (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  code         VARCHAR(100) NOT NULL COMMENT 'module:action e.g. inventory:write',
+  module       VARCHAR(50)  NOT NULL,
+  description  VARCHAR(255) NULL,
+  UNIQUE KEY uq_perm_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE role_permissions (
+  role_id        BIGINT UNSIGNED NOT NULL,
+  permission_id  BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (role_id, permission_id),
+  CONSTRAINT fk_rp_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_rp_perm FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE user_roles (
+  user_id  BIGINT UNSIGNED NOT NULL,
+  role_id  BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (user_id, role_id),
+  CONSTRAINT fk_ur_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ur_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE refresh_tokens (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id      BIGINT UNSIGNED NOT NULL,
+  token_hash   CHAR(64) NOT NULL COMMENT 'sha256 hex of the opaque token',
+  family_id    CHAR(36) NOT NULL COMMENT 'rotation family; reuse of a revoked token revokes the family',
+  expires_at   DATETIME NOT NULL,
+  revoked_at   DATETIME NULL,
+  replaced_by  BIGINT UNSIGNED NULL,
+  user_agent   VARCHAR(255) NULL,
+  ip           VARCHAR(45)  NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_rt_hash (token_hash),
+  KEY idx_rt_family (family_id),
+  CONSTRAINT fk_rt_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE audit_logs (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id       BIGINT UNSIGNED NULL,
+  user_id      BIGINT UNSIGNED NULL,
+  action       VARCHAR(100) NOT NULL,
+  entity_type  VARCHAR(50)  NULL,
+  entity_id    VARCHAR(64)  NULL,
+  metadata     JSON NULL,
+  ip           VARCHAR(45)  NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_audit_org_time (org_id, created_at),
+  KEY idx_audit_entity (entity_type, entity_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE settings (
+  org_id      BIGINT UNSIGNED NOT NULL,
+  setting_key VARCHAR(100) NOT NULL,
+  value       JSON NULL,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (org_id, setting_key),
+  CONSTRAINT fk_settings_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE integration_credentials (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id         BIGINT UNSIGNED NOT NULL,
+  provider       VARCHAR(50)  NOT NULL COMMENT 'tiktok, shopee, meta, line, anthropic, ...',
+  account_ref    VARCHAR(191) NOT NULL DEFAULT 'default' COMMENT 'shop id / page id / open id',
+  data_encrypted TEXT NOT NULL COMMENT 'AES-256-GCM JSON (access/refresh tokens)',
+  expires_at     DATETIME NULL,
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_integration (org_id, provider, account_ref),
+  CONSTRAINT fk_integ_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- MySQL-backed job queue (no Redis on shared hosting). Driven by cPanel cron -> /internal/cron/tick
+CREATE TABLE jobs (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id        BIGINT UNSIGNED NULL,
+  type          VARCHAR(100) NOT NULL COMMENT 'e.g. social.publish, video.render.poll',
+  payload       JSON NULL,
+  status        ENUM('queued','running','succeeded','failed','cancelled') NOT NULL DEFAULT 'queued',
+  priority      INT NOT NULL DEFAULT 0,
+  attempts      INT NOT NULL DEFAULT 0,
+  max_attempts  INT NOT NULL DEFAULT 5,
+  run_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  locked_at     DATETIME NULL,
+  locked_by     VARCHAR(100) NULL,
+  last_error    TEXT NULL,
+  result        JSON NULL,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_jobs_pick (status, run_at, priority),
+  KEY idx_jobs_type (type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE webhook_events (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  provider     VARCHAR(50)  NOT NULL,
+  event_id     VARCHAR(191) NULL COMMENT 'provider event id for idempotency',
+  payload      JSON NOT NULL,
+  processed_at DATETIME NULL,
+  error        TEXT NULL,
+  received_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_webhook_event (provider, event_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE files (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id       BIGINT UNSIGNED NOT NULL,
+  storage      ENUM('r2','local','external') NOT NULL DEFAULT 'r2',
+  storage_key  VARCHAR(500) NOT NULL,
+  public_url   VARCHAR(1000) NULL,
+  mime_type    VARCHAR(100) NULL,
+  size_bytes   BIGINT UNSIGNED NULL,
+  original_name VARCHAR(255) NULL,
+  uploaded_by  BIGINT UNSIGNED NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_files_org (org_id),
+  CONSTRAINT fk_files_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- PRODUCTS / INVENTORY / POS
+-- =====================================================================
+
+CREATE TABLE product_categories (
+  id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id     BIGINT UNSIGNED NOT NULL,
+  parent_id  BIGINT UNSIGNED NULL,
+  name       VARCHAR(191) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  CONSTRAINT fk_cat_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_cat_parent FOREIGN KEY (parent_id) REFERENCES product_categories(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE products (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id          BIGINT UNSIGNED NOT NULL,
+  category_id     BIGINT UNSIGNED NULL,
+  sku             VARCHAR(64)  NOT NULL,
+  barcode         VARCHAR(64)  NULL,
+  name            VARCHAR(255) NOT NULL,
+  description     TEXT NULL,
+  selling_points  TEXT NULL COMMENT 'used by AI chat agent & video scripts',
+  unit            VARCHAR(30)  NOT NULL DEFAULT 'ชิ้น',
+  price           DECIMAL(14,2) NOT NULL DEFAULT 0,
+  cost            DECIMAL(14,2) NOT NULL DEFAULT 0,
+  vat_type        ENUM('vat7','exempt','zero') NOT NULL DEFAULT 'vat7',
+  reorder_point   INT NOT NULL DEFAULT 0,
+  image_url       VARCHAR(1000) NULL,
+  shopee_item_id  VARCHAR(64) NULL,
+  tiktok_product_id VARCHAR(64) NULL,
+  status          ENUM('active','draft','archived') NOT NULL DEFAULT 'active',
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_product_sku (org_id, sku),
+  KEY idx_product_barcode (barcode),
+  FULLTEXT KEY ft_product_knowledge (name, description, selling_points),
+  CONSTRAINT fk_product_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_product_cat FOREIGN KEY (category_id) REFERENCES product_categories(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE product_variants (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  product_id  BIGINT UNSIGNED NOT NULL,
+  sku         VARCHAR(64)  NOT NULL,
+  name        VARCHAR(191) NOT NULL COMMENT 'e.g. สีแดง / XL',
+  price       DECIMAL(14,2) NULL COMMENT 'NULL = use product price',
+  cost        DECIMAL(14,2) NULL,
+  barcode     VARCHAR(64) NULL,
+  UNIQUE KEY uq_variant_sku (product_id, sku),
+  CONSTRAINT fk_variant_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Extra knowledge for the AI agent (FAQ, policies, objection handling)
+CREATE TABLE product_knowledge (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  product_id  BIGINT UNSIGNED NULL COMMENT 'NULL = store-wide knowledge (shipping, return policy)',
+  kind        ENUM('faq','policy','objection','usage','other') NOT NULL DEFAULT 'faq',
+  question    VARCHAR(500) NULL,
+  answer      TEXT NOT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FULLTEXT KEY ft_knowledge (question, answer),
+  CONSTRAINT fk_pk_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pk_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE warehouses (
+  id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id     BIGINT UNSIGNED NOT NULL,
+  branch_id  BIGINT UNSIGNED NULL,
+  code       VARCHAR(32)  NOT NULL,
+  name       VARCHAR(191) NOT NULL,
+  UNIQUE KEY uq_wh_code (org_id, code),
+  CONSTRAINT fk_wh_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_wh_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE stock_levels (
+  warehouse_id  BIGINT UNSIGNED NOT NULL,
+  product_id    BIGINT UNSIGNED NOT NULL,
+  variant_id    BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0 = base product',
+  quantity      DECIMAL(14,3) NOT NULL DEFAULT 0,
+  reserved      DECIMAL(14,3) NOT NULL DEFAULT 0,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (warehouse_id, product_id, variant_id),
+  CONSTRAINT fk_sl_wh FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sl_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE stock_movements (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id        BIGINT UNSIGNED NOT NULL,
+  warehouse_id  BIGINT UNSIGNED NOT NULL,
+  product_id    BIGINT UNSIGNED NOT NULL,
+  variant_id    BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  type          ENUM('purchase','sale','return','adjustment','transfer_in','transfer_out','opening') NOT NULL,
+  quantity      DECIMAL(14,3) NOT NULL COMMENT 'signed: + in, - out',
+  unit_cost     DECIMAL(14,2) NULL,
+  ref_type      VARCHAR(50) NULL,
+  ref_id        BIGINT UNSIGNED NULL,
+  note          VARCHAR(255) NULL,
+  created_by    BIGINT UNSIGNED NULL,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_sm_product_time (product_id, created_at),
+  CONSTRAINT fk_sm_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sm_wh FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sm_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE suppliers (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  name        VARCHAR(191) NOT NULL,
+  tax_id      VARCHAR(20)  NULL,
+  branch_no   VARCHAR(5)   NULL,
+  contact     VARCHAR(191) NULL,
+  phone       VARCHAR(50)  NULL,
+  email       VARCHAR(191) NULL,
+  address     TEXT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_sup_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE purchase_orders (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id        BIGINT UNSIGNED NOT NULL,
+  supplier_id   BIGINT UNSIGNED NULL,
+  warehouse_id  BIGINT UNSIGNED NULL,
+  po_no         VARCHAR(32) NOT NULL,
+  status        ENUM('draft','ordered','partial','received','cancelled') NOT NULL DEFAULT 'draft',
+  order_date    DATE NOT NULL,
+  expected_date DATE NULL,
+  subtotal      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  vat_amount    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total         DECIMAL(14,2) NOT NULL DEFAULT 0,
+  note          TEXT NULL,
+  created_by    BIGINT UNSIGNED NULL,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_po_no (org_id, po_no),
+  CONSTRAINT fk_po_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_po_sup FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_po_wh FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE purchase_order_items (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  po_id         BIGINT UNSIGNED NOT NULL,
+  product_id    BIGINT UNSIGNED NOT NULL,
+  variant_id    BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  quantity      DECIMAL(14,3) NOT NULL,
+  received_qty  DECIMAL(14,3) NOT NULL DEFAULT 0,
+  unit_cost     DECIMAL(14,2) NOT NULL,
+  CONSTRAINT fk_poi_po FOREIGN KEY (po_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_poi_product FOREIGN KEY (product_id) REFERENCES products(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE customers (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id         BIGINT UNSIGNED NOT NULL,
+  name           VARCHAR(191) NOT NULL,
+  phone          VARCHAR(50)  NULL,
+  email          VARCHAR(191) NULL,
+  tax_id         VARCHAR(20)  NULL,
+  branch_no      VARCHAR(5)   NULL,
+  address        TEXT NULL,
+  tags           VARCHAR(500) NULL,
+  total_spent    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  order_count    INT NOT NULL DEFAULT 0,
+  consent_marketing TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'PDPA consent',
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_cust_phone (org_id, phone),
+  CONSTRAINT fk_cust_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE pos_shifts (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id         BIGINT UNSIGNED NOT NULL,
+  branch_id      BIGINT UNSIGNED NOT NULL,
+  user_id        BIGINT UNSIGNED NOT NULL,
+  opened_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  closed_at      DATETIME NULL,
+  opening_cash   DECIMAL(14,2) NOT NULL DEFAULT 0,
+  closing_cash   DECIMAL(14,2) NULL,
+  expected_cash  DECIMAL(14,2) NULL,
+  note           VARCHAR(255) NULL,
+  CONSTRAINT fk_shift_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_shift_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
+  CONSTRAINT fk_shift_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE sales_orders (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id           BIGINT UNSIGNED NOT NULL,
+  branch_id        BIGINT UNSIGNED NULL,
+  customer_id      BIGINT UNSIGNED NULL,
+  shift_id         BIGINT UNSIGNED NULL,
+  order_no         VARCHAR(40) NOT NULL,
+  channel          ENUM('pos','shopee','tiktok','facebook','instagram','line','website','other') NOT NULL DEFAULT 'pos',
+  external_order_id VARCHAR(100) NULL,
+  status           ENUM('pending','paid','packed','shipped','completed','cancelled','refunded') NOT NULL DEFAULT 'pending',
+  subtotal         DECIMAL(14,2) NOT NULL DEFAULT 0,
+  discount         DECIMAL(14,2) NOT NULL DEFAULT 0,
+  shipping_fee     DECIMAL(14,2) NOT NULL DEFAULT 0,
+  vat_amount       DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total            DECIMAL(14,2) NOT NULL DEFAULT 0,
+  cost_total       DECIMAL(14,2) NOT NULL DEFAULT 0 COMMENT 'COGS snapshot for gross profit',
+  platform_fee     DECIMAL(14,2) NOT NULL DEFAULT 0,
+  ordered_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by       BIGINT UNSIGNED NULL,
+  conversation_id  BIGINT UNSIGNED NULL COMMENT 'set when closed by AI agent',
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_order_no (org_id, order_no),
+  KEY idx_so_time (org_id, ordered_at),
+  KEY idx_so_channel (org_id, channel, ordered_at),
+  CONSTRAINT fk_so_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_so_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL,
+  CONSTRAINT fk_so_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_so_shift FOREIGN KEY (shift_id) REFERENCES pos_shifts(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE sales_order_items (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  order_id    BIGINT UNSIGNED NOT NULL,
+  product_id  BIGINT UNSIGNED NOT NULL,
+  variant_id  BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  name        VARCHAR(255) NOT NULL COMMENT 'snapshot',
+  quantity    DECIMAL(14,3) NOT NULL,
+  unit_price  DECIMAL(14,2) NOT NULL,
+  unit_cost   DECIMAL(14,2) NOT NULL DEFAULT 0,
+  discount    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  line_total  DECIMAL(14,2) NOT NULL,
+  KEY idx_soi_product (product_id),
+  CONSTRAINT fk_soi_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_soi_product FOREIGN KEY (product_id) REFERENCES products(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE payments (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  order_id    BIGINT UNSIGNED NULL,
+  method      ENUM('cash','promptpay','card','transfer','platform','cod','other') NOT NULL,
+  amount      DECIMAL(14,2) NOT NULL,
+  reference   VARCHAR(191) NULL,
+  paid_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_pay_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pay_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE promotions (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id       BIGINT UNSIGNED NOT NULL,
+  name         VARCHAR(191) NOT NULL,
+  type         ENUM('percent','fixed','bundle','free_shipping') NOT NULL,
+  value        DECIMAL(14,2) NOT NULL DEFAULT 0,
+  rules        JSON NULL,
+  starts_at    DATETIME NULL,
+  ends_at      DATETIME NULL,
+  is_active    TINYINT(1) NOT NULL DEFAULT 1,
+  CONSTRAINT fk_promo_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE discount_codes (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id         BIGINT UNSIGNED NOT NULL,
+  code           VARCHAR(50) NOT NULL,
+  type           ENUM('percent','fixed') NOT NULL,
+  value          DECIMAL(14,2) NOT NULL,
+  min_spend      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  max_uses       INT NULL,
+  used_count     INT NOT NULL DEFAULT 0,
+  customer_id    BIGINT UNSIGNED NULL COMMENT 'single-customer code (e.g. issued by AI)',
+  issued_by      ENUM('user','ai_agent') NOT NULL DEFAULT 'user',
+  expires_at     DATETIME NULL,
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_discount_code (org_id, code),
+  CONSTRAINT fk_dc_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_dc_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- ACCOUNTING
+-- =====================================================================
+
+CREATE TABLE chart_of_accounts (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  code        VARCHAR(20)  NOT NULL,
+  name        VARCHAR(191) NOT NULL,
+  type        ENUM('asset','liability','equity','revenue','expense') NOT NULL,
+  parent_id   BIGINT UNSIGNED NULL,
+  is_active   TINYINT(1) NOT NULL DEFAULT 1,
+  UNIQUE KEY uq_coa_code (org_id, code),
+  CONSTRAINT fk_coa_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_coa_parent FOREIGN KEY (parent_id) REFERENCES chart_of_accounts(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE journal_entries (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  entry_no    VARCHAR(32) NOT NULL,
+  entry_date  DATE NOT NULL,
+  description VARCHAR(500) NULL,
+  ref_type    VARCHAR(50) NULL,
+  ref_id      BIGINT UNSIGNED NULL,
+  status      ENUM('draft','posted','void') NOT NULL DEFAULT 'posted',
+  created_by  BIGINT UNSIGNED NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_je_no (org_id, entry_no),
+  CONSTRAINT fk_je_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE journal_lines (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  entry_id    BIGINT UNSIGNED NOT NULL,
+  account_id  BIGINT UNSIGNED NOT NULL,
+  debit       DECIMAL(14,2) NOT NULL DEFAULT 0,
+  credit      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  memo        VARCHAR(255) NULL,
+  CONSTRAINT fk_jl_entry FOREIGN KEY (entry_id) REFERENCES journal_entries(id) ON DELETE CASCADE,
+  CONSTRAINT fk_jl_account FOREIGN KEY (account_id) REFERENCES chart_of_accounts(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Simple income/expense ledger (what most SME owners interact with)
+CREATE TABLE transactions (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id          BIGINT UNSIGNED NOT NULL,
+  branch_id       BIGINT UNSIGNED NULL,
+  type            ENUM('income','expense') NOT NULL,
+  category        VARCHAR(100) NOT NULL,
+  account_id      BIGINT UNSIGNED NULL,
+  amount          DECIMAL(14,2) NOT NULL COMMENT 'before VAT',
+  vat_amount      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  wht_amount      DECIMAL(14,2) NOT NULL DEFAULT 0 COMMENT 'withholding tax',
+  wht_rate        DECIMAL(5,2) NULL,
+  txn_date        DATE NOT NULL,
+  description     VARCHAR(500) NULL,
+  counterparty    VARCHAR(191) NULL,
+  counterparty_tax_id VARCHAR(20) NULL,
+  payment_method  VARCHAR(30) NULL,
+  ref_type        VARCHAR(50) NULL,
+  ref_id          BIGINT UNSIGNED NULL,
+  receipt_file_id BIGINT UNSIGNED NULL,
+  ai_extracted    TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'filled by AI receipt OCR',
+  created_by      BIGINT UNSIGNED NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_txn_date (org_id, txn_date),
+  CONSTRAINT fk_txn_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_txn_account FOREIGN KEY (account_id) REFERENCES chart_of_accounts(id) ON DELETE SET NULL,
+  CONSTRAINT fk_txn_file FOREIGN KEY (receipt_file_id) REFERENCES files(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE documents (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id        BIGINT UNSIGNED NOT NULL,
+  doc_type      ENUM('quotation','invoice','tax_invoice','receipt','tax_invoice_receipt','credit_note','debit_note','wht_certificate','purchase_order','expense_voucher') NOT NULL,
+  doc_no        VARCHAR(40) NOT NULL,
+  doc_date      DATE NOT NULL,
+  due_date      DATE NULL,
+  customer_id   BIGINT UNSIGNED NULL,
+  supplier_id   BIGINT UNSIGNED NULL,
+  party_name    VARCHAR(191) NULL,
+  party_tax_id  VARCHAR(20)  NULL,
+  party_address TEXT NULL,
+  subtotal      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  discount      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  vat_amount    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  wht_amount    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total         DECIMAL(14,2) NOT NULL DEFAULT 0,
+  status        ENUM('draft','issued','paid','void') NOT NULL DEFAULT 'draft',
+  ref_doc_id    BIGINT UNSIGNED NULL,
+  order_id      BIGINT UNSIGNED NULL,
+  pdf_file_id   BIGINT UNSIGNED NULL,
+  note          TEXT NULL,
+  created_by    BIGINT UNSIGNED NULL,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_doc_no (org_id, doc_type, doc_no),
+  KEY idx_doc_date (org_id, doc_date),
+  CONSTRAINT fk_doc_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_doc_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_doc_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_doc_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE document_items (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  document_id  BIGINT UNSIGNED NOT NULL,
+  product_id   BIGINT UNSIGNED NULL,
+  description  VARCHAR(500) NOT NULL,
+  quantity     DECIMAL(14,3) NOT NULL DEFAULT 1,
+  unit_price   DECIMAL(14,2) NOT NULL,
+  discount     DECIMAL(14,2) NOT NULL DEFAULT 0,
+  vat_type     ENUM('vat7','exempt','zero') NOT NULL DEFAULT 'vat7',
+  line_total   DECIMAL(14,2) NOT NULL,
+  CONSTRAINT fk_di_doc FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE tax_reports (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id       BIGINT UNSIGNED NOT NULL,
+  form_type    ENUM('PP30','PND1','PND3','PND53','PND50','PND51') NOT NULL,
+  period_year  SMALLINT NOT NULL,
+  period_month TINYINT NULL,
+  data         JSON NULL COMMENT 'computed form values',
+  status       ENUM('draft','ready','filed') NOT NULL DEFAULT 'draft',
+  filed_at     DATETIME NULL,
+  file_id      BIGINT UNSIGNED NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_tax_period (org_id, form_type, period_year, period_month),
+  CONSTRAINT fk_tax_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- UNIFIED INBOX / AI AGENT / RETURNS & DISPUTES
+-- =====================================================================
+
+CREATE TABLE channels (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id       BIGINT UNSIGNED NOT NULL,
+  platform     ENUM('facebook','instagram','line','tiktok','shopee','website','email') NOT NULL,
+  name         VARCHAR(191) NOT NULL,
+  external_id  VARCHAR(191) NULL COMMENT 'page id / LINE channel id / shop id',
+  ai_enabled   TINYINT(1) NOT NULL DEFAULT 1,
+  is_active    TINYINT(1) NOT NULL DEFAULT 1,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_channel_ext (org_id, platform, external_id),
+  CONSTRAINT fk_ch_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE ai_agent_profiles (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id            BIGINT UNSIGNED NOT NULL,
+  name              VARCHAR(100) NOT NULL,
+  persona           TEXT NULL COMMENT 'tone, name, speaking style (e.g. ค่ะ/ครับ)',
+  sales_rules       TEXT NULL,
+  max_discount_pct  DECIMAL(5,2) NOT NULL DEFAULT 10 COMMENT 'upper bound AI may offer without approval',
+  handoff_keywords  VARCHAR(500) NULL,
+  is_default        TINYINT(1) NOT NULL DEFAULT 0,
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_aap_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE conversations (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id            BIGINT UNSIGNED NOT NULL,
+  channel_id        BIGINT UNSIGNED NOT NULL,
+  customer_id       BIGINT UNSIGNED NULL,
+  external_thread_id VARCHAR(191) NOT NULL COMMENT 'PSID / LINE userId / buyer id',
+  customer_name     VARCHAR(191) NULL,
+  status            ENUM('open','pending','resolved','closed') NOT NULL DEFAULT 'open',
+  mode              ENUM('ai','human','hybrid') NOT NULL DEFAULT 'ai',
+  assigned_to       BIGINT UNSIGNED NULL,
+  intent            VARCHAR(50) NULL COMMENT 'inquiry, purchase, return, complaint, ...',
+  sentiment         ENUM('positive','neutral','negative') NULL,
+  unread_count      INT NOT NULL DEFAULT 0,
+  last_message_at   DATETIME NULL,
+  last_customer_message_at DATETIME NULL COMMENT 'for Meta 24h window',
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_conv_thread (channel_id, external_thread_id),
+  KEY idx_conv_status (org_id, status, last_message_at),
+  CONSTRAINT fk_conv_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_conv_channel FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+  CONSTRAINT fk_conv_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_conv_user FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE messages (
+  id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  conversation_id     BIGINT UNSIGNED NOT NULL,
+  direction           ENUM('in','out') NOT NULL,
+  sender_type         ENUM('customer','ai','agent','system') NOT NULL,
+  sender_user_id      BIGINT UNSIGNED NULL,
+  content             TEXT NULL,
+  attachments         JSON NULL,
+  external_message_id VARCHAR(191) NULL,
+  delivery_status     ENUM('pending','sent','delivered','failed') NOT NULL DEFAULT 'sent',
+  ai_meta             JSON NULL COMMENT 'model, tokens, tool calls',
+  created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_msg_conv (conversation_id, created_at),
+  CONSTRAINT fk_msg_conv FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE returns (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id           BIGINT UNSIGNED NOT NULL,
+  order_id         BIGINT UNSIGNED NULL,
+  conversation_id  BIGINT UNSIGNED NULL,
+  customer_id      BIGINT UNSIGNED NULL,
+  reason           VARCHAR(100) NOT NULL,
+  detail           TEXT NULL,
+  resolution       ENUM('pending','refund','exchange','discount','store_credit','rejected') NOT NULL DEFAULT 'pending',
+  amount           DECIMAL(14,2) NOT NULL DEFAULT 0,
+  status           ENUM('requested','approved','received','completed','rejected') NOT NULL DEFAULT 'requested',
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ret_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ret_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE SET NULL,
+  CONSTRAINT fk_ret_conv FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE disputes (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id           BIGINT UNSIGNED NOT NULL,
+  order_id         BIGINT UNSIGNED NULL,
+  conversation_id  BIGINT UNSIGNED NULL,
+  platform         VARCHAR(30) NULL,
+  external_dispute_id VARCHAR(100) NULL,
+  category         VARCHAR(100) NOT NULL,
+  summary          TEXT NULL,
+  severity         ENUM('low','medium','high') NOT NULL DEFAULT 'medium',
+  status           ENUM('open','negotiating','resolved','escalated','lost') NOT NULL DEFAULT 'open',
+  resolved_at      DATETIME NULL,
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_disp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_disp_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE SET NULL,
+  CONSTRAINT fk_disp_conv FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Offers the AI proposed (discounts / remedies) — auditable, with approval gate
+CREATE TABLE ai_offers (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id           BIGINT UNSIGNED NOT NULL,
+  conversation_id  BIGINT UNSIGNED NOT NULL,
+  return_id        BIGINT UNSIGNED NULL,
+  dispute_id       BIGINT UNSIGNED NULL,
+  offer_type       ENUM('discount_code','partial_refund','free_shipping','gift','exchange') NOT NULL,
+  value            DECIMAL(14,2) NOT NULL DEFAULT 0,
+  discount_code_id BIGINT UNSIGNED NULL,
+  rationale        TEXT NULL,
+  status           ENUM('proposed','needs_approval','accepted','declined','expired') NOT NULL DEFAULT 'proposed',
+  approved_by      BIGINT UNSIGNED NULL,
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_offer_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_offer_conv FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_offer_dc FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- SOCIAL / AI VIDEO / SCRAPING
+-- =====================================================================
+
+CREATE TABLE social_accounts (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id         BIGINT UNSIGNED NOT NULL,
+  platform       ENUM('tiktok','facebook','instagram') NOT NULL,
+  external_id    VARCHAR(191) NOT NULL COMMENT 'TikTok open_id / FB page id / IG user id',
+  display_name   VARCHAR(191) NULL,
+  credential_id  BIGINT UNSIGNED NULL,
+  is_active      TINYINT(1) NOT NULL DEFAULT 1,
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_social_acc (org_id, platform, external_id),
+  CONSTRAINT fk_sa_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sa_cred FOREIGN KEY (credential_id) REFERENCES integration_credentials(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE affiliate_links (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id        BIGINT UNSIGNED NOT NULL,
+  product_id    BIGINT UNSIGNED NULL,
+  platform      ENUM('shopee','tiktok_shop','lazada','other') NOT NULL DEFAULT 'shopee',
+  original_url  VARCHAR(1000) NOT NULL,
+  short_url     VARCHAR(500) NULL,
+  sub_id        VARCHAR(100) NULL COMMENT 'tracking sub id per post',
+  clicks        INT NOT NULL DEFAULT 0,
+  conversions   INT NOT NULL DEFAULT 0,
+  commission    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_aff_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_aff_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE video_projects (
+  id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id             BIGINT UNSIGNED NOT NULL,
+  product_id         BIGINT UNSIGNED NULL,
+  trending_product_id BIGINT UNSIGNED NULL,
+  title              VARCHAR(255) NOT NULL,
+  script             TEXT NULL,
+  avatar_id          VARCHAR(100) NULL,
+  voice_id           VARCHAR(100) NULL,
+  aspect_ratio       VARCHAR(10) NOT NULL DEFAULT '9:16',
+  duration_sec       INT NULL,
+  status             ENUM('draft','scripting','voicing','rendering_avatar','compositing','ready','failed') NOT NULL DEFAULT 'draft',
+  provider_job_ids   JSON NULL,
+  output_file_id     BIGINT UNSIGNED NULL,
+  subtitle_file_id   BIGINT UNSIGNED NULL,
+  error              TEXT NULL,
+  created_by         BIGINT UNSIGNED NULL,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_vp_status (org_id, status),
+  CONSTRAINT fk_vp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_vp_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
+  CONSTRAINT fk_vp_output FOREIGN KEY (output_file_id) REFERENCES files(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE video_assets (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  video_project_id  BIGINT UNSIGNED NOT NULL,
+  kind              ENUM('voice','avatar','broll','music','subtitle','thumbnail','final') NOT NULL,
+  file_id           BIGINT UNSIGNED NULL,
+  external_url      VARCHAR(1000) NULL,
+  meta              JSON NULL,
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_va_project FOREIGN KEY (video_project_id) REFERENCES video_projects(id) ON DELETE CASCADE,
+  CONSTRAINT fk_va_file FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE scheduled_posts (
+  id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id             BIGINT UNSIGNED NOT NULL,
+  social_account_id  BIGINT UNSIGNED NOT NULL,
+  video_project_id   BIGINT UNSIGNED NULL,
+  media_file_id      BIGINT UNSIGNED NULL,
+  caption            TEXT NULL,
+  hashtags           VARCHAR(1000) NULL,
+  affiliate_link_id  BIGINT UNSIGNED NULL,
+  scheduled_at       DATETIME NOT NULL COMMENT 'stored in UTC',
+  privacy            VARCHAR(40) NOT NULL DEFAULT 'PUBLIC_TO_EVERYONE',
+  is_ai_generated    TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'AIGC disclosure flag',
+  status             ENUM('draft','scheduled','publishing','published','failed','cancelled') NOT NULL DEFAULT 'scheduled',
+  job_id             BIGINT UNSIGNED NULL,
+  error              TEXT NULL,
+  created_by         BIGINT UNSIGNED NULL,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_sp_due (status, scheduled_at),
+  CONSTRAINT fk_sp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sp_account FOREIGN KEY (social_account_id) REFERENCES social_accounts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sp_video FOREIGN KEY (video_project_id) REFERENCES video_projects(id) ON DELETE SET NULL,
+  CONSTRAINT fk_sp_aff FOREIGN KEY (affiliate_link_id) REFERENCES affiliate_links(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE post_results (
+  id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  scheduled_post_id  BIGINT UNSIGNED NOT NULL,
+  external_post_id   VARCHAR(191) NULL,
+  permalink          VARCHAR(1000) NULL,
+  views              BIGINT NOT NULL DEFAULT 0,
+  likes              BIGINT NOT NULL DEFAULT 0,
+  comments           BIGINT NOT NULL DEFAULT 0,
+  shares             BIGINT NOT NULL DEFAULT 0,
+  fetched_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_pr_post FOREIGN KEY (scheduled_post_id) REFERENCES scheduled_posts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE scrape_sources (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  platform    ENUM('tiktok_shop','shopee','shopee_affiliate','apify','custom_url') NOT NULL,
+  method      ENUM('official_api','scraping_service','http_fetch') NOT NULL DEFAULT 'official_api',
+  name        VARCHAR(191) NOT NULL,
+  config      JSON NULL COMMENT 'category ids, keywords, url, actor id',
+  schedule_cron VARCHAR(50) NULL COMMENT 'informational; executed by job queue',
+  is_active   TINYINT(1) NOT NULL DEFAULT 1,
+  last_run_at DATETIME NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ss_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE scrape_runs (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  source_id    BIGINT UNSIGNED NOT NULL,
+  status       ENUM('running','succeeded','failed') NOT NULL DEFAULT 'running',
+  items_found  INT NOT NULL DEFAULT 0,
+  error        TEXT NULL,
+  started_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at  DATETIME NULL,
+  CONSTRAINT fk_sr_source FOREIGN KEY (source_id) REFERENCES scrape_sources(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE trending_products (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id          BIGINT UNSIGNED NOT NULL,
+  source_id       BIGINT UNSIGNED NULL,
+  platform        VARCHAR(30) NOT NULL,
+  external_id     VARCHAR(191) NOT NULL,
+  title           VARCHAR(500) NOT NULL,
+  url             VARCHAR(1000) NULL,
+  image_url       VARCHAR(1000) NULL,
+  price           DECIMAL(14,2) NULL,
+  sold_count      BIGINT NULL,
+  rating          DECIMAL(3,2) NULL,
+  commission_rate DECIMAL(5,2) NULL,
+  category        VARCHAR(191) NULL,
+  trend_score     DECIMAL(10,2) NULL,
+  raw             JSON NULL,
+  first_seen_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_trend_ext (org_id, platform, external_id),
+  KEY idx_trend_score (org_id, trend_score),
+  CONSTRAINT fk_tp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_tp_source FOREIGN KEY (source_id) REFERENCES scrape_sources(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO schema_migrations (version) VALUES ('001_initial');
+
+SET FOREIGN_KEY_CHECKS = 1;

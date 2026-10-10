@@ -1,0 +1,39 @@
+{
+  "name": "pos-enterprise-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "REST API for POS Enterprise (Node.js + MySQL). Deployed on Plesk (Atom Hosting).",
+  "main": "app.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch app.js",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
+    "lint": "eslint .",
+    "cron:tick": "node scripts/cron-tick.js",
+    "hash-password": "node scripts/hash-password.js",
+    "gen-secret": "node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\""
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.3.0",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.24.5",
+    "pino": "^10.4.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "eslint": "^10.12.0",
+    "globals": "^16.0.0",
+    "supertest": "^7.3.1"
+  }
+}
