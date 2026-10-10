@@ -59,6 +59,12 @@ if (!parsed.success) {
 }
 
 const env = parsed.data;
+
+// Refuse to boot in production with the placeholder secrets from .env.example
+if (env.NODE_ENV === 'production') {
+  const weak = ['JWT_ACCESS_SECRET', 'CRON_SECRET'].filter((k) => /change-me|dev-only/i.test(env[k]));
+  if (weak.length) throw new Error(`Replace placeholder secrets before running in production: ${weak.join(', ')}`);
+}
 env.isProd = env.NODE_ENV === 'production';
 env.isTest = env.NODE_ENV === 'test';
 env.corsOrigins = env.CORS_ORIGINS.split(',')

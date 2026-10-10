@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+/* Class-based dark mode driven by next-themes (<html class="dark">) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: oklch(0.985 0.003 264);
+  --foreground: oklch(0.21 0.02 264);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.02 264);
+  --muted: oklch(0.965 0.006 264);
+  --muted-foreground: oklch(0.52 0.02 264);
+  --border: oklch(0.92 0.008 264);
+  --input: oklch(0.9 0.01 264);
+  --ring: oklch(0.55 0.2 270);
+  --primary: oklch(0.51 0.21 272);
+  --primary-foreground: oklch(0.99 0 0);
+  --primary-soft: oklch(0.95 0.035 272);
+  --accent: oklch(0.96 0.01 264);
+  --accent-foreground: oklch(0.25 0.02 264);
+  --success: oklch(0.6 0.15 155);
+  --success-soft: oklch(0.95 0.04 155);
+  --warning: oklch(0.72 0.16 70);
+  --warning-soft: oklch(0.96 0.05 80);
+  --danger: oklch(0.58 0.21 25);
+  --danger-soft: oklch(0.96 0.03 25);
+  --sidebar: oklch(0.2 0.03 268);
+  --sidebar-foreground: oklch(0.86 0.02 268);
+  --sidebar-muted: oklch(0.62 0.03 268);
+  --sidebar-active: oklch(0.3 0.06 270);
+  --chart-1: oklch(0.55 0.2 272);
+  --chart-2: oklch(0.68 0.15 195);
+  --chart-3: oklch(0.72 0.16 70);
+  --chart-4: oklch(0.62 0.18 340);
+  --chart-5: oklch(0.6 0.15 155);
+  --chart-6: oklch(0.6 0.03 264);
+  --radius: 0.75rem;
+}
+
+.dark {
+  --background: oklch(0.16 0.015 268);
+  --foreground: oklch(0.95 0.005 264);
+  --card: oklch(0.2 0.018 268);
+  --card-foreground: oklch(0.95 0.005 264);
+  --muted: oklch(0.25 0.02 268);
+  --muted-foreground: oklch(0.7 0.02 264);
+  --border: oklch(0.3 0.02 268);
+  --input: oklch(0.34 0.02 268);
+  --ring: oklch(0.65 0.18 272);
+  --primary: oklch(0.65 0.19 272);
+  --primary-foreground: oklch(0.15 0.02 268);
+  --primary-soft: oklch(0.3 0.08 272);
+  --accent: oklch(0.26 0.02 268);
+  --accent-foreground: oklch(0.95 0.005 264);
+  --success: oklch(0.72 0.15 155);
+  --success-soft: oklch(0.3 0.06 155);
+  --warning: oklch(0.8 0.15 75);
+  --warning-soft: oklch(0.32 0.06 75);
+  --danger: oklch(0.7 0.18 25);
+  --danger-soft: oklch(0.32 0.07 25);
+  --sidebar: oklch(0.13 0.015 268);
+  --sidebar-foreground: oklch(0.86 0.02 268);
+  --sidebar-muted: oklch(0.6 0.02 268);
+  --sidebar-active: oklch(0.24 0.04 270);
+  --chart-1: oklch(0.68 0.18 272);
+  --chart-2: oklch(0.75 0.13 195);
+  --chart-3: oklch(0.8 0.15 75);
+  --chart-4: oklch(0.72 0.16 340);
+  --chart-5: oklch(0.72 0.15 155);
+  --chart-6: oklch(0.65 0.02 264);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: var(--font-plex-thai), ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "tnum" 1;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Thin scrollbars for side panels */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--sidebar-muted) 40%, transparent) transparent;
+}

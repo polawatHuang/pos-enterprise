@@ -9,6 +9,9 @@ const ACCESS_COOKIE = 'pe_at';
 const REFRESH_COOKIE = 'pe_rt';
 // Refresh cookie is only sent to auth endpoints (path survives the Vercel rewrite /api/* -> backend /api/*)
 const REFRESH_COOKIE_PATH = '/api/auth';
+// Non-secret marker readable by the frontend's proxy.ts on page requests (the refresh cookie is
+// path-scoped to /api/auth, so page navigations never carry it). Grants nothing by itself.
+const SESSION_HINT_COOKIE = 'pe_session';
 
 function signAccessToken(user) {
   return jwt.sign(
@@ -46,12 +49,14 @@ function setAuthCookies(res, accessToken, refreshToken) {
     refreshToken,
     cookieOptions(env.REFRESH_TOKEN_TTL_DAYS * 86400 * 1000, REFRESH_COOKIE_PATH),
   );
+  res.cookie(SESSION_HINT_COOKIE, '1', cookieOptions(env.REFRESH_TOKEN_TTL_DAYS * 86400 * 1000));
 }
 
 function clearAuthCookies(res) {
   const base = { domain: env.COOKIE_DOMAIN || undefined, secure: env.COOKIE_SECURE, sameSite: env.COOKIE_SAMESITE };
   res.clearCookie(ACCESS_COOKIE, { ...base, path: '/' });
   res.clearCookie(REFRESH_COOKIE, { ...base, path: REFRESH_COOKIE_PATH });
+  res.clearCookie(SESSION_HINT_COOKIE, { ...base, path: '/' });
 }
 
 function readAccessToken(req) {

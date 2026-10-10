@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { z } = require('zod');
 const env = require('../../config/env');
 const { validate } = require('../../core/http');
@@ -23,6 +23,10 @@ const loginLimiter = rateLimit({
   limit: env.isTest ? 1000 : 20,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  // Key by IP *and* email: behind the Vercel rewrite many users can share an upstream IP,
+  // so an IP-only key would let one user's typos lock out everyone. Per-account lockout
+  // in auth.service still stops password guessing against a single account.
+  keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? '')}|${String(req.body?.email ?? '').toLowerCase().slice(0, 191)}`,
   message: { error: { code: 'RATE_LIMITED', message: 'พยายามเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่' } },
 });
 
