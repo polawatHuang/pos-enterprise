@@ -1,20 +1,6 @@
 import type { ModuleSpec } from "@/components/layout/module-placeholder";
 
 export const modules: Record<string, ModuleSpec> = {
-  accounting: {
-    href: "/accounting",
-    description: "รายรับรายจ่าย เอกสารทางบัญชี และแบบภาษี ครบในระบบเดียว พร้อม AI ช่วยลงบัญชี",
-    features: [
-      "บันทึกรายรับ–รายจ่าย ผูกผังบัญชี",
-      "ใบเสนอราคา / ใบแจ้งหนี้ / ใบกำกับภาษี / ใบเสร็จ / ใบลดหนี้",
-      "หนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ)",
-      "ร่างแบบ ภ.พ.30, ภ.ง.ด.3/53 อัตโนมัติจากข้อมูลในระบบ",
-      "AI อ่านใบเสร็จ (OCR) แล้วลงบัญชีให้",
-      "สรุปงบกำไรขาดทุนรายเดือน",
-    ],
-    keys: ["Anthropic Claude API (AI อ่านใบเสร็จ)", "Cloudflare R2 (เก็บไฟล์เอกสาร)"],
-    notes: ["เอกสารภาษีที่ระบบสร้างเป็นร่างเพื่อช่วยงาน ควรให้นักบัญชีตรวจทานก่อนยื่นจริง"],
-  },
   inbox: {
     href: "/inbox",
     description: "รวมแชตลูกค้าทุกช่องทาง ให้ AI คุยปิดการขาย และดูแลการคืนสินค้า/ข้อร้องเรียน",
@@ -67,11 +53,5 @@ export const modules: Record<string, ModuleSpec> = {
     ],
     keys: ["TikTok for Developers (Content Posting API)", "Meta App", "Shopee Affiliate Open API", "Cloudflare R2"],
     notes: ["แอป TikTok ต้องผ่าน audit ก่อน จึงจะโพสต์แบบสาธารณะได้ (ก่อนผ่าน audit โพสต์ได้แค่ส่วนตัว)"],
-  },
-  reports: {
-    href: "/settings/reports",
-    description: "รายงานเชิงลึกและ audit log",
-    features: ["รายงานยอดขายตามสินค้า/ช่องทาง/พนักงาน", "ส่งออก Excel/PDF", "Audit log ทุกการเปลี่ยนแปลง"],
-    keys: [],
   },
 };

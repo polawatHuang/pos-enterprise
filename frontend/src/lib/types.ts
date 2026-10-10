@@ -294,3 +294,197 @@ export interface PosSettings {
   promptpayEnabled: boolean;
   org: { name: string; legalName: string | null; taxId: string | null; address: string | null; phone: string | null; vatRegistered: boolean };
 }
+
+/* ------------------------------------------------------------- Phase 3 */
+
+export type TxnType = "income" | "expense";
+export type VatMode = "none" | "exclusive" | "inclusive";
+
+export interface Transaction {
+  id: number;
+  type: TxnType;
+  category: string;
+  amount: number;
+  vatAmount: number;
+  vatClaimable: boolean;
+  whtAmount: number;
+  whtRate: number | null;
+  whtIncomeType: string | null;
+  netAmount: number;
+  txnDate: string;
+  description: string;
+  counterparty: string | null;
+  counterpartyTaxId: string | null;
+  counterpartyType: "individual" | "company" | null;
+  paymentMethod: string | null;
+  status: "posted" | "void";
+  aiExtracted: boolean;
+  whtCertificateId: number | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export interface TxnMeta {
+  categories: Record<TxnType, { name: string; account: string }[]>;
+  whtTypes: { code: string; label: string; rate: number }[];
+}
+
+export type DocType =
+  | "quotation"
+  | "invoice"
+  | "tax_invoice"
+  | "receipt"
+  | "tax_invoice_receipt"
+  | "credit_note"
+  | "wht_certificate";
+
+export interface DocItem {
+  id?: number;
+  productId: number | null;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  vatType: VatType;
+  lineTotal?: number;
+}
+
+export interface AccDocument {
+  id: number;
+  docType: DocType;
+  docNo: string;
+  isDraft: boolean;
+  docDate: string;
+  dueDate: string | null;
+  customerId: number | null;
+  partyName: string | null;
+  partyTaxId: string | null;
+  partyAddress: string | null;
+  subtotal: number;
+  discount: number;
+  vatAmount: number;
+  whtAmount: number;
+  total: number;
+  amountText: string;
+  status: "draft" | "issued" | "paid" | "void";
+  paidAt: string | null;
+  paymentMethod: string | null;
+  refDocId: number | null;
+  refDocNo: string | null;
+  refDocType: DocType | null;
+  transactionId: number | null;
+  note: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  items: DocItem[];
+  org?: {
+    name: string;
+    legalName: string | null;
+    taxId: string | null;
+    address: string | null;
+    phone: string | null;
+    email: string | null;
+    vatRegistered: boolean;
+    branchNo: string;
+  };
+  whtSource?: {
+    rate: number | null;
+    incomeType: string | null;
+    counterpartyType: "individual" | "company" | null;
+    paidDate: string;
+    amount: number;
+    whtAmount: number;
+  } | null;
+}
+
+export interface PP30 {
+  period: { year: number; month: number };
+  sales: {
+    base: number;
+    vat: number;
+    breakdown: Record<"orders" | "taxInvoices" | "otherIncome" | "creditNotes", { count: number; base: number; vat: number }>;
+  };
+  purchases: { base: number; vat: number; unclaimableVat: number; count: number };
+  vatPayable: number;
+  vatCredit: number;
+  dueNote: string;
+  saved: { status: "draft" | "ready" | "filed"; filed_at: string | null } | null;
+}
+
+export interface WhtReport {
+  form: "PND3" | "PND53";
+  items: {
+    seq: number;
+    transactionId: number;
+    date: string;
+    payee: string | null;
+    taxId: string | null;
+    incomeType: string | null;
+    rate: number | null;
+    amount: number;
+    wht: number;
+    description: string;
+    certificateId: number | null;
+  }[];
+  totals: { count: number; amount: number; wht: number };
+  warnings: string[];
+  dueNote: string;
+  saved: PP30["saved"];
+}
+
+export interface PnlLine {
+  code: string;
+  name: string;
+  type: string;
+  amount: number;
+}
+
+export interface Pnl {
+  from: string;
+  to: string;
+  revenue: PnlLine[];
+  cogs: PnlLine[];
+  expenses: PnlLine[];
+  totals: { revenue: number; cogs: number; grossProfit: number; expenses: number; netProfit: number };
+}
+
+export interface TrialBalance {
+  asOf: string;
+  accounts: { code: string; name: string; type: string; debit: number; credit: number }[];
+  totalDebit: number;
+  totalCredit: number;
+  balanced: boolean;
+}
+
+export interface JournalEntry {
+  id: number;
+  entryNo: string;
+  date: string;
+  description: string;
+  refType: string | null;
+  refId: number | null;
+  lines: { code: string; name: string; debit: number; credit: number }[];
+}
+
+export interface AccountingOverview {
+  month: { revenue: number; expense: number; netProfit: number };
+  vat: { output: number; input: number; estimatedPayable: number };
+  receivables: { count: number; amount: number; overdue: number };
+  whtToRemit: number;
+}
+
+export interface ReceiptExtraction {
+  vendorName: string | null;
+  vendorTaxId: string | null;
+  isFullTaxInvoice: boolean;
+  documentNo: string | null;
+  date: string | null;
+  subtotal: number | null;
+  vatAmount: number | null;
+  whtAmount: number | null;
+  total: number | null;
+  category: string;
+  description: string;
+  confidence: "high" | "medium" | "low";
+  suggestedWhtType: { code: string; label: string; rate: number } | null;
+}
