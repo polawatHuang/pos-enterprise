@@ -28,6 +28,8 @@ Webhooks (Meta / LINE / TikTok) ────────────────
 3. แท็บ **Import** → เลือกไฟล์ `database/schema.sql` → Character set `utf-8` → **Import**
 4. ทำซ้ำกับ `database/seed.sql` (ข้อมูลอ้างอิง + ข้อมูลตัวอย่าง)
 
+**อัปเกรดจากเวอร์ชันก่อน (ติดตั้งไว้ตั้งแต่เฟส 1–2):** ห้าม import `schema.sql` ซ้ำ ให้ import ไฟล์ใน `database/migrations/` ที่ยังไม่เคยรันทีละไฟล์ตามลำดับเลขแทน เช่น `002_accounting.sql` สำหรับเฟส 3 ตรวจว่ารันไฟล์ไหนไปแล้วได้ด้วย `SELECT * FROM schema_migrations;` (การติดตั้งใหม่ที่ใช้ `schema.sql` ปัจจุบันมี migration ครบแล้ว)
+
 > ⚠️ `schema.sql` มี `DROP TABLE IF EXISTS` อยู่ด้านบน — **import ซ้ำ = ข้อมูลหายหมด** ใช้กับการติดตั้งครั้งแรกเท่านั้น การเปลี่ยนโครงสร้างในอนาคตจะมาเป็นไฟล์ `database/migrations/NNN_*.sql` ให้ import ทีละไฟล์ตามลำดับ
 >
 > ไฟล์ seed ขนาด ~0.7 MB ถ้าเกิน "Max upload size" ของ phpMyAdmin ให้ zip ไฟล์ก่อน (phpMyAdmin รับ `.zip` / `.gz`) หรือแยกนำเข้าเฉพาะส่วน reference data

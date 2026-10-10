@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS document_sequences, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -533,6 +533,8 @@ CREATE TABLE journal_entries (
   created_by  BIGINT UNSIGNED NULL,
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_je_no (org_id, entry_no),
+  KEY idx_je_ref (org_id, ref_type, ref_id),
+  KEY idx_je_date (org_id, entry_date),
   CONSTRAINT fk_je_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -544,6 +546,7 @@ CREATE TABLE journal_lines (
   credit      DECIMAL(14,2) NOT NULL DEFAULT 0,
   memo        VARCHAR(255) NULL,
   CONSTRAINT fk_jl_entry FOREIGN KEY (entry_id) REFERENCES journal_entries(id) ON DELETE CASCADE,
+  KEY idx_jl_account (account_id),
   CONSTRAINT fk_jl_account FOREIGN KEY (account_id) REFERENCES chart_of_accounts(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -557,20 +560,26 @@ CREATE TABLE transactions (
   account_id      BIGINT UNSIGNED NULL,
   amount          DECIMAL(14,2) NOT NULL COMMENT 'before VAT',
   vat_amount      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  vat_claimable   TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1 = has a full tax invoice, input VAT can be claimed',
   wht_amount      DECIMAL(14,2) NOT NULL DEFAULT 0 COMMENT 'withholding tax',
   wht_rate        DECIMAL(5,2) NULL,
+  wht_income_type VARCHAR(10) NULL COMMENT 'Revenue Code section, e.g. 40(2), 40(5), 40(8)',
   txn_date        DATE NOT NULL,
   description     VARCHAR(500) NULL,
   counterparty    VARCHAR(191) NULL,
   counterparty_tax_id VARCHAR(20) NULL,
+  counterparty_type ENUM('individual','company') NULL COMMENT 'PND3 = individual, PND53 = company',
   payment_method  VARCHAR(30) NULL,
   ref_type        VARCHAR(50) NULL,
   ref_id          BIGINT UNSIGNED NULL,
+  document_id     BIGINT UNSIGNED NULL,
   receipt_file_id BIGINT UNSIGNED NULL,
   ai_extracted    TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'filled by AI receipt OCR',
+  status          ENUM('posted','void') NOT NULL DEFAULT 'posted',
   created_by      BIGINT UNSIGNED NULL,
   created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_txn_date (org_id, txn_date),
+  KEY idx_txn_wht (org_id, txn_date, wht_amount),
   CONSTRAINT fk_txn_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_txn_account FOREIGN KEY (account_id) REFERENCES chart_of_accounts(id) ON DELETE SET NULL,
   CONSTRAINT fk_txn_file FOREIGN KEY (receipt_file_id) REFERENCES files(id) ON DELETE SET NULL
@@ -594,8 +603,11 @@ CREATE TABLE documents (
   wht_amount    DECIMAL(14,2) NOT NULL DEFAULT 0,
   total         DECIMAL(14,2) NOT NULL DEFAULT 0,
   status        ENUM('draft','issued','paid','void') NOT NULL DEFAULT 'draft',
+  paid_at       DATETIME NULL,
+  payment_method VARCHAR(30) NULL,
   ref_doc_id    BIGINT UNSIGNED NULL,
   order_id      BIGINT UNSIGNED NULL,
+  transaction_id BIGINT UNSIGNED NULL COMMENT 'source transaction for WHT certificates',
   pdf_file_id   BIGINT UNSIGNED NULL,
   note          TEXT NULL,
   created_by    BIGINT UNSIGNED NULL,
@@ -917,6 +929,17 @@ CREATE TABLE trending_products (
   CONSTRAINT fk_tp_source FOREIGN KEY (source_id) REFERENCES scrape_sources(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO schema_migrations (version) VALUES ('001_initial');
+-- Gap-free document numbering per type and month (Revenue Department requires sequential numbers)
+CREATE TABLE document_sequences (
+  org_id    BIGINT UNSIGNED NOT NULL,
+  doc_type  VARCHAR(40) NOT NULL,
+  period    CHAR(6) NOT NULL COMMENT 'YYYYMM',
+  last_no   INT NOT NULL DEFAULT 0 COMMENT 'last number issued',
+  PRIMARY KEY (org_id, doc_type, period),
+  CONSTRAINT fk_docseq_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- This file already contains every migration up to the one listed last
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting');
 
 SET FOREIGN_KEY_CHECKS = 1;

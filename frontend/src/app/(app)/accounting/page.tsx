@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
-import { ModulePlaceholder } from "@/components/layout/module-placeholder";
-import { modules } from "@/config/modules";
+import { RequirePermission } from "@/components/layout/page";
+import { AccountingOverviewView } from "@/components/accounting/overview-view";
 
-export const metadata: Metadata = { title: "รายรับรายจ่ายและภาษี" };
+export const metadata: Metadata = { title: "ภาพรวมบัญชี" };
 
-export default function Page() {
-  return <ModulePlaceholder spec={modules.accounting} />;
+export default function AccountingPage() {
+  return (
+    <RequirePermission permission="accounting:read">
+      <AccountingOverviewView />
+    </RequirePermission>
+  );
 }

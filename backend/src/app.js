@@ -37,7 +37,10 @@ function createApp() {
       maxAge: 600,
     }),
   );
-  app.use(express.json({ limit: '1mb' }));
+  // Receipt photos for AI extraction are sent as base64 JSON; everything else stays small.
+  const jsonSmall = express.json({ limit: '1mb' });
+  const jsonLarge = express.json({ limit: '6mb' });
+  app.use((req, res, next) => (req.path === '/api/accounting/ai/extract-receipt' ? jsonLarge : jsonSmall)(req, res, next));
   app.use(cookieParser());
 
   app.get('/api/health', async (req, res) => {
@@ -60,10 +63,10 @@ function createApp() {
   app.use('/api/products', require('./modules/products/products.routes').router);
   app.use('/api/inventory', require('./modules/inventory/inventory.routes').router);
   app.use('/api/pos', require('./modules/pos/pos.routes').router);
+  app.use('/api/accounting', require('./modules/accounting').router);
 
   // Planned modules: URL + permission contract fixed now, implementation in later phases.
   const stubs = [
-    { path: 'accounting', name: 'accounting', phase: 3, permission: 'accounting:read', integrations: ['anthropic', 'r2'] },
     { path: 'inbox', name: 'inbox', phase: 4, permission: 'inbox:read', integrations: ['anthropic', 'meta', 'line', 'shopee', 'tiktok_shop'] },
     { path: 'scraping', name: 'scraping', phase: 5, permission: 'scraping:read', integrations: ['tiktok_shop', 'shopee', 'shopee_affiliate', 'apify'] },
     { path: 'videos', name: 'video', phase: 6, permission: 'video:create', integrations: ['anthropic', 'elevenlabs', 'heygen', 'shotstack', 'r2'] },

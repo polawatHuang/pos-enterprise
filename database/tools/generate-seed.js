@@ -211,6 +211,7 @@ out.push('\n-- Demo: 180 days of sales across channels');
 const channelWeights = [['pos', 30], ['shopee', 28], ['tiktok', 24], ['facebook', 8], ['line', 6], ['instagram', 4]];
 const feeRate = { shopee: 0.09, tiktok: 0.08 };
 const orders = [];
+const orderMeta = []; // for the demo ledger: day bucket, payment method, money
 const items = [];
 const payments = [];
 let orderId = 0;
@@ -245,7 +246,11 @@ for (let d = 179; d >= 0; d -= 1) {
     const status = d === 0 ? pick(['paid', 'paid', 'packed']) : rand() < 0.04 ? 'cancelled' : rand() < 0.02 ? 'refunded' : 'completed';
     orders.push([orderId, 1, channel === 'pos' ? int(1, 2) : 1, rand() < 0.4 ? int(1, 15) : null,
       `SO${String(orderId).padStart(6, '0')}`, channel, status, subtotal, discount, shipping, vat, total, costTotal, platformFee, agoMin(minutesAgo)]);
-    payments.push([1, orderId, channel === 'pos' ? pick(['cash', 'promptpay', 'card']) : 'platform', total, agoMin(minutesAgo)]);
+    const method = channel === 'pos' ? pick(['cash', 'promptpay', 'card']) : 'platform';
+    payments.push([1, orderId, method, total, agoMin(minutesAgo)]);
+    if (!['cancelled', 'refunded'].includes(status)) {
+      orderMeta.push({ day: Math.max(Math.round(minutesAgo / 1440), 0), method, total, vat, cost: costTotal, fee: platformFee });
+    }
   }
 }
 insert('sales_orders', ['id', 'org_id', 'branch_id', 'customer_id', 'order_no', 'channel', 'status', 'subtotal', 'discount', 'shipping_fee', 'vat_amount', 'total', 'cost_total', 'platform_fee', 'ordered_at'], orders);
@@ -257,7 +262,7 @@ out.push('\n-- Demo: income & expenses (6 months)');
 const txns = [];
 for (let m = 5; m >= 0; m -= 1) {
   const base = m * 30;
-  txns.push(['expense', 'ค่าเช่า', acct('5300'), 35000, r2(35000 * 0.07), r2(35000 * 0.05), 5, base + 1, 'ค่าเช่าหน้าร้านสยาม', 'บริษัท พร็อพเพอร์ตี้ จำกัด']);
+  txns.push(['expense', 'ค่าเช่า', acct('5300'), 35000, r2(35000 * 0.07), r2(35000 * 0.05), 5, base + 1, 'ค่าเช่าหน้าร้านสยาม', 'บริษัท พร็อพเพอร์ตี้ จำกัด', '0105560099999', 'company', '40(5)']);
   txns.push(['expense', 'เงินเดือน', acct('5200'), 120000, 0, 0, null, base + 2, 'เงินเดือนพนักงาน', null]);
   txns.push(['expense', 'ค่าโฆษณา', acct('5400'), int(15000, 30000), 0, 0, null, base + 8, 'โฆษณา TikTok Ads / Meta Ads', 'TikTok / Meta']);
   txns.push(['expense', 'ค่าสาธารณูปโภค', acct('5700'), int(4000, 7000), 0, 0, null, base + 10, 'ค่าไฟ ค่าน้ำ อินเทอร์เน็ต', 'การไฟฟ้านครหลวง']);
@@ -265,8 +270,80 @@ for (let m = 5; m >= 0; m -= 1) {
   txns.push(['expense', 'ค่าซอฟต์แวร์/AI', acct('5800'), int(3000, 6000), 0, 0, null, base + 3, 'ค่าบริการ AI และโฮสติ้ง', null]);
   txns.push(['income', 'ค่าคอมมิชชัน Affiliate', acct('4200'), int(5000, 18000), 0, 0, null, base + 20, 'Shopee Affiliate commission', 'Shopee']);
 }
-insert('transactions', ['org_id', 'branch_id', 'type', 'category', 'account_id', 'amount', 'vat_amount', 'wht_amount', 'wht_rate', 'txn_date', 'description', 'counterparty', 'created_at'],
-  txns.filter((t) => t[7] <= 179).map((t) => [1, 1, t[0], t[1], t[2], t[3], t[4], t[5], t[6], agoDate(t[7]), t[8], t[9], agoMin(t[7] * 1440)]));
+const seedTxns = txns.filter((t) => t[7] <= 179).map((t, i) => ({ id: i + 1, t }));
+insert('transactions', ['id', 'org_id', 'branch_id', 'type', 'category', 'account_id', 'amount', 'vat_amount', 'wht_amount', 'wht_rate', 'wht_income_type',
+  'txn_date', 'description', 'counterparty', 'counterparty_tax_id', 'counterparty_type', 'payment_method', 'created_at'],
+  seedTxns.map(({ id, t }) => [id, 1, 1, t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[12] ?? null, agoDate(t[7]), t[8], t[9], t[10] ?? null, t[11] ?? null, 'transfer', agoMin(t[7] * 1440)]));
+
+// ---------------------------------------------------------------- documents
+out.push('\n-- Demo: sales documents (demo numbers use a DEMO prefix; real numbering starts at 0001)');
+const docs = [
+  // id, type, no, issuedDaysAgo, creditDays, party, taxId, net (before VAT), status
+  [1, 'quotation', 'QT-DEMO-0001', 6, null, 'บริษัท ออฟฟิศดี จำกัด', '0105561111111', 12000, 'issued'],
+  [2, 'tax_invoice', 'TI-DEMO-0001', 40, 30, 'บริษัท รีเทลพลัส จำกัด', '0105562222222', 25000, 'issued'],
+  [3, 'tax_invoice_receipt', 'TR-DEMO-0001', 12, null, 'บริษัท อีเวนต์โปร จำกัด', '0105563333333', 8000, 'paid'],
+];
+insert('documents', ['id', 'org_id', 'doc_type', 'doc_no', 'doc_date', 'due_date', 'party_name', 'party_tax_id', 'party_address', 'subtotal', 'vat_amount', 'total', 'status', 'payment_method'],
+  docs.map((d) => [d[0], 1, d[1], d[2], agoDate(d[3]), d[4] == null ? null : agoDate(d[3] - d[4]), d[5], d[6], 'กรุงเทพมหานคร', d[7], r2(d[7] * 0.07), r2(d[7] * 1.07), d[8], d[8] === 'paid' ? 'transfer' : null]));
+insert('document_items', ['document_id', 'product_id', 'description', 'quantity', 'unit_price', 'vat_type', 'line_total'],
+  docs.map((d) => [d[0], 8, `หูฟังไร้สาย ANC (ขายส่ง) — ${d[5]}`, d[7] / 1000, 1000, 'vat7', d[7]]));
+
+// ---------------------------------------------------------------- ledger
+// Demo sales are summarised into one journal per day; every demo transaction gets its own entry.
+out.push('\n-- Demo: general ledger (daily sales summaries + one entry per transaction/document)');
+const journals = [];
+const jlines = [];
+let jid = 0;
+const addJournal = (daysAgo, description, refType, refId, lines) => {
+  const clean = lines.filter(([, dr, cr]) => dr || cr).map(([code, dr, cr]) => [code, r2(dr), r2(cr)]);
+  const dr = r2(clean.reduce((sum, l) => sum + l[1], 0));
+  const cr = r2(clean.reduce((sum, l) => sum + l[2], 0));
+  if (dr !== cr) throw new Error(`unbalanced demo journal: ${description} ${dr} ${cr}`);
+  jid += 1;
+  journals.push([jid, 1, `SEED-${String(jid).padStart(5, '0')}`, agoDate(daysAgo), description, refType, refId, 'posted']);
+  for (const [code, d, c] of clean) jlines.push([jid, acct(code), d, c]);
+};
+const byDay = new Map();
+for (const o of orderMeta) {
+  const a = byDay.get(o.day) ?? { cash: 0, total: 0, vat: 0, cost: 0, fee: 0 };
+  a.total += o.total;
+  a.vat += o.vat;
+  a.cost += o.cost;
+  a.fee += o.fee;
+  if (o.method === 'cash') a.cash += o.total;
+  byDay.set(o.day, a);
+}
+for (const [day, a] of [...byDay.entries()].sort((x, y) => y[0] - x[0])) {
+  const total = r2(a.total);
+  const fee = r2(a.fee);
+  const cash = r2(a.cash);
+  addJournal(day, 'สรุปยอดขายประจำวัน (ข้อมูลเดโม)', 'demo_daily_sales', null, [
+    ['1100', cash, 0],
+    ['1110', r2(total - cash - fee), 0],
+    ['5600', fee, 0],
+    ['4100', 0, r2(total - r2(a.vat))],
+    ['2200', 0, r2(a.vat)],
+    ['5100', r2(a.cost), 0],
+    ['1300', 0, r2(a.cost)],
+  ]);
+}
+const accountCode = (id) => coa[id - 1][0];
+for (const { id, t } of seedTxns) {
+  const [type, category, accountId, amount, vat, wht, , daysAgo, description] = t;
+  const net = r2(amount + vat - wht);
+  const lines = type === 'expense'
+    ? [[accountCode(accountId), amount, 0], ['1400', vat, 0], ['1110', 0, net], ['2210', 0, wht]]
+    : [['1110', net, 0], ['1410', wht, 0], [accountCode(accountId), 0, amount], ['2200', 0, vat]];
+  addJournal(daysAgo, `${type === 'expense' ? 'จ่าย' : 'รับ'}${category}: ${description}`, 'transaction', id, lines);
+}
+for (const d of docs.filter((x) => x[1] !== 'quotation')) {
+  const net = d[7];
+  const vat = r2(net * 0.07);
+  const total = r2(net + vat);
+  addJournal(d[3], `ออกเอกสาร ${d[2]} ${d[5]}`, 'document', d[0], [[d[8] === 'paid' ? '1110' : '1200', total, 0], ['4100', 0, net], ['2200', 0, vat]]);
+}
+insert('journal_entries', ['id', 'org_id', 'entry_no', 'entry_date', 'description', 'ref_type', 'ref_id', 'status'], journals);
+insert('journal_lines', ['entry_id', 'account_id', 'debit', 'credit'], jlines, 400);
 
 // ---------------------------------------------------------------- inbox
 out.push('\n-- Demo: unified inbox');
@@ -341,7 +418,7 @@ const trends = [
 insert('trending_products', ['org_id', 'source_id', 'platform', 'external_id', 'title', 'price', 'sold_count', 'commission_rate', 'trend_score', 'url'],
   trends.map((t, i) => [1, t[0] === 'shopee' ? 1 : 2, t[0], `ext_${i + 1}`, t[1], t[2], t[3], t[4], r2(t[3] / 1000 + t[4] * 2), null]));
 
-out.push('\nINSERT INTO schema_migrations (version) VALUES (\'001_seed_demo\');');
+out.push('\nINSERT INTO schema_migrations (version) VALUES (\'001_seed_demo\'), (\'002_seed_ledger\');');
 out.push('SET FOREIGN_KEY_CHECKS = 1;\n');
 
 const file = path.join(__dirname, '..', 'seed.sql');

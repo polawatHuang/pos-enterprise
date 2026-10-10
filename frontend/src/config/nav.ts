@@ -3,6 +3,9 @@ import {
   Boxes,
   Calculator,
   CalendarClock,
+  FileText,
+  Landmark,
+  Wallet,
   Clapperboard,
   LayoutDashboard,
   MessagesSquare,
@@ -44,7 +47,13 @@ export const navGroups: NavGroup[] = [
   },
   {
     label: "บัญชี",
-    items: [{ href: "/accounting", label: "รายรับรายจ่ายและภาษี", icon: Calculator, permission: "accounting:read", phase: 3 }],
+    items: [
+      { href: "/accounting", label: "ภาพรวมบัญชี", icon: Calculator, permission: "accounting:read", phase: 1 },
+      { href: "/accounting/transactions", label: "รายรับ-รายจ่าย", icon: Wallet, permission: "accounting:read", phase: 1 },
+      { href: "/accounting/documents", label: "เอกสาร", icon: FileText, permission: "accounting:read", phase: 1 },
+      { href: "/accounting/tax", label: "ภาษี", icon: Landmark, permission: "accounting:read", phase: 1 },
+      { href: "/accounting/reports", label: "รายงานการเงิน", icon: BarChart3, permission: "accounting:read", phase: 1 },
+    ],
   },
   {
     label: "ลูกค้าและการตลาด",
@@ -60,7 +69,6 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: "/settings/users", label: "ผู้ใช้และสิทธิ์", icon: Users, permission: "users:read", phase: 1 },
       { href: "/settings/integrations", label: "การเชื่อมต่อ API", icon: PlugZap, permission: "integrations:manage", phase: 1 },
-      { href: "/settings/reports", label: "รายงาน", icon: BarChart3, permission: "audit:read", phase: 3 },
     ],
   },
 ];

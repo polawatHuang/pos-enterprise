@@ -40,3 +40,22 @@ export const formatMoney = (v: number) => thb2.format(v);
 
 export const formatDateTime = (iso: string) =>
   new Date(iso).toLocaleString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+/** Today as YYYY-MM-DD in the browser's local timezone. */
+export function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** First and last day (YYYY-MM-DD) of the month `offset` months from now. */
+export function monthRange(offset = 0) {
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+  const f = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { from: f(first), to: f(last) };
+}
+
+/** Thai long date, e.g. 10 ตุลาคม 2569 */
+export const formatThaiDate = (ymd: string) =>
+  new Date(`${ymd}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });

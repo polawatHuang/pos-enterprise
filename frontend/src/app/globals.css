@@ -133,24 +133,42 @@
   scrollbar-color: color-mix(in oklch, var(--sidebar-muted) 40%, transparent) transparent;
 }
 
-/* Receipt printing: only the receipt is visible, sized for 80mm thermal printers */
+/* Printing: only the element marked for print is visible. Named pages keep the 80mm receipt
+   and A4 documents on their own paper sizes (Chrome/Edge 85+, Safari 18+). */
+@page receipt {
+  size: 80mm auto;
+  margin: 3mm;
+}
+@page a4 {
+  size: A4;
+  margin: 12mm;
+}
 @media print {
-  @page {
-    size: 80mm auto;
-    margin: 3mm;
-  }
   body * {
     visibility: hidden;
   }
   .print-receipt,
-  .print-receipt * {
+  .print-receipt *,
+  .print-a4,
+  .print-a4 * {
     visibility: visible;
   }
   .print-receipt {
+    page: receipt;
     position: fixed;
     inset: 0 auto auto 0;
     width: 74mm;
     max-width: none;
     padding: 0;
+  }
+  .print-a4 {
+    page: a4;
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    max-width: none;
+    box-shadow: none !important;
+    border: 0 !important;
+    padding: 0 !important;
   }
 }
