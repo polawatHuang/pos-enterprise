@@ -10,6 +10,7 @@ const request = require('supertest');
 const { createApp } = require('../src/app');
 const db = require('../src/db/pool');
 const anthropic = require('../src/integrations/anthropic');
+const minimax = require('../src/integrations/minimax');
 
 const app = createApp();
 const S = { txnIds: [], docIds: [], orderIds: [], shiftIds: [], productId: 0 };
@@ -65,6 +66,7 @@ after(async () => {
   if (S.shiftIds.length) await db.query('DELETE FROM pos_shifts WHERE id IN (:ids)', { ids: S.shiftIds });
   await db.query("DELETE FROM products WHERE sku LIKE 'ACCTEST-%'");
   delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.MINIMAX_API_KEY;
   await db.pool.end();
 });
 
@@ -325,33 +327,31 @@ describe('POS posts to the ledger', () => {
 
 describe('AI receipt extraction', () => {
   const png = Buffer.alloc(300, 1).toString('base64');
+  const fields = {
+    vendorName: 'ร้านเครื่องเขียน', vendorTaxId: '0-1055-00000-00-3', isFullTaxInvoice: true, documentNo: 'A001',
+    date: '2026-10-01', subtotal: 100, vatAmount: 7, whtAmount: null, total: 107, category: 'ค่าใช้จ่ายอื่น',
+    description: 'ซื้อเครื่องเขียน', confidence: 'high',
+  };
 
-  test('returns 503 when no Anthropic key is configured', async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+  test('returns 503 naming the MiniMax key when AI is not configured (MiniMax is the default)', async () => {
+    delete process.env.AI_PROVIDER;
+    delete process.env.MINIMAX_API_KEY;
     const res = await accountant.post('/api/accounting/ai/extract-receipt', { mediaType: 'image/png', data: png });
     assert.equal(res.status, 503);
     assert.equal(res.body.error.code, 'INTEGRATION_NOT_CONFIGURED');
+    assert.match(JSON.stringify(res.body), /MINIMAX_API_KEY/);
   });
 
-  test('passes the image with a JSON schema and returns parsed fields', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key';
-    const original = anthropic.createMessage;
+  test('MiniMax: forces a single tool call and returns its input as the fields', async () => {
+    process.env.MINIMAX_API_KEY = 'test-key';
+    const original = minimax.createMessage;
     let captured;
-    anthropic.createMessage = async (params) => {
+    minimax.createMessage = async (params) => {
       captured = params;
       return {
-        model: 'claude-opus-5-5',
-        stop_reason: 'end_turn',
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              vendorName: 'ร้านเครื่องเขียน', vendorTaxId: '0-1055-00000-00-3', isFullTaxInvoice: true, documentNo: 'A001',
-              date: '2026-10-01', subtotal: 100, vatAmount: 7, whtAmount: null, total: 107, category: 'ค่าใช้จ่ายอื่น',
-              description: 'ซื้อเครื่องเขียน', confidence: 'high',
-            }),
-          },
-        ],
+        model: 'MiniMax-M3',
+        stop_reason: 'tool_use',
+        content: [{ type: 'tool_use', id: 't1', name: 'submit_receipt', input: fields }],
       };
     };
     try {
@@ -359,15 +359,55 @@ describe('AI receipt extraction', () => {
       assert.equal(res.status, 200, JSON.stringify(res.body));
       assert.equal(res.body.data.total, 107);
       assert.equal(res.body.data.vendorTaxId, '0105500000003');
-      assert.equal(captured.output_config.format.type, 'json_schema');
+      assert.equal(res.body.data.provider, 'minimax');
+      assert.deepEqual(captured.toolChoice, { type: 'tool', name: 'submit_receipt' });
       assert.equal(captured.messages[0].content[0].type, 'image');
     } finally {
+      minimax.createMessage = original;
+    }
+  });
+
+  test('MiniMax: falls back to JSON in text and rejects PDFs', async () => {
+    process.env.MINIMAX_API_KEY = 'test-key';
+    const original = minimax.createMessage;
+    minimax.createMessage = async () => ({
+      model: 'MiniMax-M3',
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: `<think>reading</think>\n\`\`\`json\n${JSON.stringify(fields)}\n\`\`\`` }],
+    });
+    try {
+      const res = await accountant.post('/api/accounting/ai/extract-receipt', { mediaType: 'image/png', data: png });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal(res.body.data.vatAmount, 7);
+      const pdf = await accountant.post('/api/accounting/ai/extract-receipt', { mediaType: 'application/pdf', data: png });
+      assert.equal(pdf.status, 400);
+    } finally {
+      minimax.createMessage = original;
+    }
+  });
+
+  test('Claude (AI_PROVIDER=anthropic): uses native JSON-schema output', async () => {
+    process.env.AI_PROVIDER = 'anthropic';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    const original = anthropic.createMessage;
+    let captured;
+    anthropic.createMessage = async (params) => {
+      captured = params;
+      return { model: 'claude', stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(fields) }] };
+    };
+    try {
+      const res = await accountant.post('/api/accounting/ai/extract-receipt', { mediaType: 'image/png', data: png });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal(res.body.data.provider, 'anthropic');
+      assert.equal(captured.outputFormat.type, 'json_schema');
+    } finally {
       anthropic.createMessage = original;
+      delete process.env.AI_PROVIDER;
     }
   });
 
   test('rejects non-base64 payloads', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key';
+    process.env.MINIMAX_API_KEY = 'test-key';
     const res = await accountant.post('/api/accounting/ai/extract-receipt', { mediaType: 'image/png', data: `${'!'.repeat(200)}` });
     assert.equal(res.status, 400);
   });

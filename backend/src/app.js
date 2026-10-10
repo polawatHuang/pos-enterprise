@@ -37,6 +37,9 @@ function createApp() {
       maxAge: 600,
     }),
   );
+  // Platform webhooks need the raw body for signature checks, so they go before the JSON parser.
+  app.use('/webhooks', require('./modules/inbox/webhooks.routes').router);
+
   // Receipt photos for AI extraction are sent as base64 JSON; everything else stays small.
   const jsonSmall = express.json({ limit: '1mb' });
   const jsonLarge = express.json({ limit: '6mb' });
@@ -64,12 +67,13 @@ function createApp() {
   app.use('/api/inventory', require('./modules/inventory/inventory.routes').router);
   app.use('/api/pos', require('./modules/pos/pos.routes').router);
   app.use('/api/accounting', require('./modules/accounting').router);
+  app.use('/api/inbox', require('./modules/inbox/inbox.routes').router);
+  app.use('/api/inbox', require('./modules/inbox/aftersales.routes').router);
 
   // Planned modules: URL + permission contract fixed now, implementation in later phases.
   const stubs = [
-    { path: 'inbox', name: 'inbox', phase: 4, permission: 'inbox:read', integrations: ['anthropic', 'meta', 'line', 'shopee', 'tiktok_shop'] },
     { path: 'scraping', name: 'scraping', phase: 5, permission: 'scraping:read', integrations: ['tiktok_shop', 'shopee', 'shopee_affiliate', 'apify'] },
-    { path: 'videos', name: 'video', phase: 6, permission: 'video:create', integrations: ['anthropic', 'elevenlabs', 'heygen', 'shotstack', 'r2'] },
+    { path: 'videos', name: 'video', phase: 6, permission: 'video:create', integrations: ['minimax', 'shotstack', 'r2'] },
     { path: 'social', name: 'social', phase: 7, permission: 'social:read', integrations: ['tiktok', 'meta', 'shopee_affiliate'] },
   ];
   for (const s of stubs) app.use(`/api/${s.path}`, moduleStub(s));
