@@ -70,10 +70,10 @@ function createApp() {
   app.use('/api/inbox', require('./modules/inbox/inbox.routes').router);
   app.use('/api/inbox', require('./modules/inbox/aftersales.routes').router);
   app.use('/api/scraping', require('./modules/scraping/scraping.routes').router);
+  app.use('/api/videos', require('./modules/video/video.routes').router);
 
   // Planned modules: URL + permission contract fixed now, implementation in later phases.
   const stubs = [
-    { path: 'videos', name: 'video', phase: 6, permission: 'video:create', integrations: ['minimax', 'shotstack', 'r2'] },
     { path: 'social', name: 'social', phase: 7, permission: 'social:read', integrations: ['tiktok', 'meta', 'shopee_affiliate'] },
   ];
   for (const s of stubs) app.use(`/api/${s.path}`, moduleStub(s));

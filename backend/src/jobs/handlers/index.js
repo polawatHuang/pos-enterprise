@@ -43,6 +43,14 @@ handlers['inbox.ai_reply'] = async ({ conversationId }, { jobId }) => {
 handlers['scrape.run'] = async ({ runId }) => require('../../modules/scraping/sources').executeRun(runId);
 handlers['scrape.poll'] = async ({ runId, polls }) => require('../../modules/scraping/sources').pollRun(runId, polls);
 
+/** AI video pipeline steps (each step queues the next; see modules/video/pipeline.js). */
+const video = () => require('../../modules/video/pipeline');
+handlers['video.voice'] = (p) => video().voice(p);
+handlers['video.clips_start'] = (p) => video().clipsStart(p);
+handlers['video.clips_poll'] = (p) => video().clipsPoll(p);
+handlers['video.compose'] = (p) => video().compose(p);
+handlers['video.compose_poll'] = (p) => video().composePoll(p);
+
 /** Recurring jobs scheduled by the cron tick (idempotent: one queued instance at a time). */
 const recurring = [{ type: 'system.cleanup', everyMinutes: 60 * 24 }];
 

@@ -4,6 +4,7 @@
 const adapters = [
   require('./minimax'),
   require('./anthropic'),
+  require('./minimax-media'),
   require('./tiktok'),
   require('./tiktok-shop'),
   require('./shopee'),
