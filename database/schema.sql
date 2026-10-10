@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS document_sequences, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS document_sequences, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -895,8 +895,10 @@ CREATE TABLE scrape_sources (
   name        VARCHAR(191) NOT NULL,
   config      JSON NULL COMMENT 'category ids, keywords, url, actor id',
   schedule_cron VARCHAR(50) NULL COMMENT 'informational; executed by job queue',
+  interval_hours INT NULL COMMENT 'auto-run every N hours; NULL = manual only',
   is_active   TINYINT(1) NOT NULL DEFAULT 1,
   last_run_at DATETIME NULL,
+  last_error  TEXT NULL,
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_ss_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -906,6 +908,9 @@ CREATE TABLE scrape_runs (
   source_id    BIGINT UNSIGNED NOT NULL,
   status       ENUM('running','succeeded','failed') NOT NULL DEFAULT 'running',
   items_found  INT NOT NULL DEFAULT 0,
+  items_new    INT NOT NULL DEFAULT 0,
+  external_run_id VARCHAR(191) NULL COMMENT 'e.g. Apify run id',
+  triggered_by BIGINT UNSIGNED NULL COMMENT 'user id; NULL = schedule',
   error        TEXT NULL,
   started_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   finished_at  DATETIME NULL,
@@ -920,20 +925,42 @@ CREATE TABLE trending_products (
   external_id     VARCHAR(191) NOT NULL,
   title           VARCHAR(500) NOT NULL,
   url             VARCHAR(1000) NULL,
+  shop_name       VARCHAR(191) NULL,
   image_url       VARCHAR(1000) NULL,
   price           DECIMAL(14,2) NULL,
   sold_count      BIGINT NULL,
+  sold_velocity   DECIMAL(14,2) NULL COMMENT 'units sold per day between snapshots',
   rating          DECIMAL(3,2) NULL,
   commission_rate DECIMAL(5,2) NULL,
   category        VARCHAR(191) NULL,
   trend_score     DECIMAL(10,2) NULL,
+  status          ENUM('new','watching','imported','ignored') NOT NULL DEFAULT 'new',
+  imported_product_id BIGINT UNSIGNED NULL,
+  affiliate_link_id BIGINT UNSIGNED NULL,
+  ai_analysis     JSON NULL,
+  ai_analyzed_at  DATETIME NULL,
   raw             JSON NULL,
   first_seen_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_seen_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_trend_ext (org_id, platform, external_id),
   KEY idx_trend_score (org_id, trend_score),
+  KEY idx_trend_status (org_id, status),
   CONSTRAINT fk_tp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
-  CONSTRAINT fk_tp_source FOREIGN KEY (source_id) REFERENCES scrape_sources(id) ON DELETE SET NULL
+  CONSTRAINT fk_tp_source FOREIGN KEY (source_id) REFERENCES scrape_sources(id) ON DELETE SET NULL,
+  CONSTRAINT fk_tp_product FOREIGN KEY (imported_product_id) REFERENCES products(id) ON DELETE SET NULL,
+  CONSTRAINT fk_tp_aff FOREIGN KEY (affiliate_link_id) REFERENCES affiliate_links(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE trending_snapshots (
+  id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  trending_product_id BIGINT UNSIGNED NOT NULL,
+  captured_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  price               DECIMAL(14,2) NULL,
+  sold_count          BIGINT NULL,
+  rating              DECIMAL(3,2) NULL,
+  commission_rate     DECIMAL(5,2) NULL,
+  KEY idx_ts_product (trending_product_id, captured_at),
+  CONSTRAINT fk_ts_product FOREIGN KEY (trending_product_id) REFERENCES trending_products(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Gap-free document numbering per type and month (Revenue Department requires sequential numbers)
@@ -947,6 +974,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends');
 
 SET FOREIGN_KEY_CHECKS = 1;

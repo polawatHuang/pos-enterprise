@@ -405,20 +405,37 @@ for (let i = 0; i < 10; i += 1) {
     future ? 'scheduled' : i === 5 ? 'failed' : 'published']);
 }
 insert('scheduled_posts', ['org_id', 'social_account_id', 'video_project_id', 'caption', 'hashtags', 'affiliate_link_id', 'scheduled_at', 'status'], posts);
-insert('scrape_sources', ['id', 'org_id', 'platform', 'method', 'name', 'config'], [
-  [1, 1, 'shopee_affiliate', 'official_api', 'Shopee Affiliate — สินค้าค่าคอมสูง', JSON.stringify({ sortType: 'commission', limit: 50 })],
-  [2, 1, 'tiktok_shop', 'official_api', 'TikTok Shop — สินค้าร้านเรา', JSON.stringify({})],
+insert('scrape_sources', ['id', 'org_id', 'platform', 'method', 'name', 'config', 'interval_hours', 'is_active'], [
+  [1, 1, 'shopee_affiliate', 'official_api', 'Shopee Affiliate — สินค้าค่าคอมสูง', JSON.stringify({ sortType: 'commission', limit: 50 }), 12, 1],
+  [2, 1, 'custom_url', 'http_fetch', 'หน้าสินค้าเว็บพาร์ทเนอร์ (ตัวอย่าง)', JSON.stringify({ urls: ['https://example.com/product'] }), null, 0],
 ]);
+// [platform, title, price, sold now, commission %, rating, units/day, shop]
 const trends = [
-  ['shopee', 'ที่ดูดฝุ่นไร้สายมินิ', 459, 18200, 12], ['tiktok_shop', 'ลิปทินท์เนื้อแมตต์', 129, 54300, 15],
-  ['shopee', 'กระบอกน้ำเก็บอุณหภูมิ 1L', 299, 22100, 10], ['tiktok_shop', 'ไฟเส้น LED ตกแต่งห้อง', 199, 31800, 14],
-  ['shopee', 'แผ่นแปะสิวไฮโดรคอลลอยด์', 89, 67400, 18], ['tiktok_shop', 'พัดลมพกพาคล้องคอ', 359, 15900, 11],
-  ['shopee', 'ผ้าห่มขนนุ่ม', 390, 9800, 9], ['tiktok_shop', 'เคสมือถือกันกระแทก', 159, 41200, 20],
+  ['shopee', 'ที่ดูดฝุ่นไร้สายมินิ', 459, 18200, 12, 4.7, 140, 'HomeTech Official'],
+  ['tiktok_shop', 'ลิปทินท์เนื้อแมตต์', 129, 54300, 15, 4.8, 1150, 'Glow Beauty TH'],
+  ['shopee', 'กระบอกน้ำเก็บอุณหภูมิ 1L', 299, 22100, 10, 4.6, 210, 'Daily Gear'],
+  ['tiktok_shop', 'ไฟเส้น LED ตกแต่งห้อง', 199, 31800, 14, 4.5, 520, 'Room Vibe'],
+  ['shopee', 'แผ่นแปะสิวไฮโดรคอลลอยด์', 89, 67400, 18, 4.9, 1600, 'Skin First'],
+  ['tiktok_shop', 'พัดลมพกพาคล้องคอ', 359, 15900, 11, 4.4, 380, 'Cool Mate'],
+  ['shopee', 'ผ้าห่มขนนุ่ม', 390, 9800, 9, 4.6, 35, 'Sleep Well'],
+  ['tiktok_shop', 'เคสมือถือกันกระแทก', 159, 41200, 20, 4.3, 760, 'Case Lab'],
 ];
-insert('trending_products', ['org_id', 'source_id', 'platform', 'external_id', 'title', 'price', 'sold_count', 'commission_rate', 'trend_score', 'url'],
-  trends.map((t, i) => [1, t[0] === 'shopee' ? 1 : 2, t[0], `ext_${i + 1}`, t[1], t[2], t[3], t[4], r2(t[3] / 1000 + t[4] * 2), null]));
+const { trendScore } = require('../../backend/src/modules/scraping/score');
+insert('trending_products', ['id', 'org_id', 'source_id', 'platform', 'external_id', 'title', 'shop_name', 'price', 'sold_count', 'sold_velocity', 'rating', 'commission_rate', 'trend_score', 'status', 'url', 'first_seen_at', 'last_seen_at'],
+  trends.map((t, i) => [i + 1, 1, t[0] === 'shopee' ? 1 : null, t[0], `ext_${i + 1}`, t[1], t[7], t[2], t[3], t[6], t[5], t[4],
+    trendScore({ velocity: t[6], soldCount: t[3], rating: t[5], commissionRate: t[4] }), i === 4 ? 'watching' : 'new', null, agoMin(60 * 24 * 7), agoMin(int(30, 300))]));
+// One snapshot per day for a week, with day-to-day noise around the product's sales rate
+const snaps = [];
+trends.forEach((t, i) => {
+  let sold = t[3];
+  for (let d = 0; d < 7; d += 1) {
+    snaps.push([i + 1, agoMin(60 * 24 * d + 60), t[2], sold, t[5], t[4]]);
+    sold -= Math.round(t[6] * (0.7 + rand() * 0.6));
+  }
+});
+insert('trending_snapshots', ['trending_product_id', 'captured_at', 'price', 'sold_count', 'rating', 'commission_rate'], snaps);
 
-out.push('\nINSERT INTO schema_migrations (version) VALUES (\'001_seed_demo\'), (\'002_seed_ledger\');');
+out.push('\nINSERT INTO schema_migrations (version) VALUES (\'001_seed_demo\'), (\'002_seed_ledger\'), (\'004_seed_trends\');');
 out.push('SET FOREIGN_KEY_CHECKS = 1;\n');
 
 const file = path.join(__dirname, '..', 'seed.sql');
