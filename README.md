@@ -84,4 +84,13 @@ cd frontend && npm run lint && npx tsc --noEmit && npm run build
 - นำเข้าเป็นสินค้าแบบร่าง
 - สร้างลิงก์ Shopee affiliate
 
-**เฟสถัดไป:** 6 AI Video → 7 Auto-post + Affiliate
+**เฟส 6 (ส่งมอบแล้ว):**
+- AI Video บน MiniMax:
+  - AI เขียนสคริปต์รีวิวแบ่งเป็นฉาก แก้ไขได้
+  - เสียงพากย์ MiniMax Speech (ทางเลือก: ElevenLabs)
+  - ภาพจากรูปสินค้าแบบเคลื่อนไหว หรือคลิป AI จาก Hailuo
+  - ประกอบคลิป 9:16 พร้อมซับและป้าย "สร้างด้วย AI" ด้วย Shotstack
+  - เก็บไฟล์ถาวรบน Cloudflare R2
+- ถ้ายังไม่มี Shotstack จะได้ไฟล์ชิ้นส่วนและไฟล์ซับ .srt ไปตัดต่อเอง
+
+**เฟสถัดไป:** 7 Auto-post + Affiliate

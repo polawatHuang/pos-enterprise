@@ -706,3 +706,80 @@ export interface ScrapeRun {
   startedAt: string;
   finishedAt: string | null;
 }
+
+/* ------------------------------------------------------------------ video */
+
+export type VideoStatus =
+  | "draft"
+  | "scripting"
+  | "script_ready"
+  | "voicing"
+  | "generating_clips"
+  | "rendering_avatar"
+  | "compositing"
+  | "parts_ready"
+  | "ready"
+  | "failed";
+
+export interface VideoScene {
+  voiceover: string;
+  caption: string;
+  visual: string;
+  showProduct: boolean;
+  durationSec: number;
+}
+
+export interface VideoProject {
+  id: number;
+  title: string;
+  productId: number | null;
+  productName: string | null;
+  trendId: number | null;
+  imageUrl: string | null;
+  brief: { tone?: string; lengthSec?: number; audience?: string; notes?: string };
+  scenes: VideoScene[];
+  postCaption: string | null;
+  hashtags: string | null;
+  voiceProvider: "minimax" | "elevenlabs";
+  voiceId: string | null;
+  visualMode: "ai_clips" | "product_images";
+  status: VideoStatus;
+  stageDetail: string | null;
+  error: string | null;
+  outputUrl: string | null;
+  durationSec: number | null;
+  hasSubtitles: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VideoAsset {
+  id: number;
+  kind: "voice" | "broll" | "final" | "avatar" | "music" | "subtitle" | "thumbnail";
+  sceneIndex: number | null;
+  provider: string | null;
+  status: "pending" | "processing" | "ready" | "failed";
+  durationMs: number | null;
+  url: string | null;
+  error: string | null;
+}
+
+export interface VideoDetail extends VideoProject {
+  assets: VideoAsset[];
+}
+
+interface Capability {
+  configured: boolean;
+  missing: string[];
+}
+
+export interface VideoMeta {
+  capabilities: {
+    script: { configured: boolean; provider: string };
+    voice: { minimax: Capability & { defaultVoiceId: string | null }; elevenlabs: Capability & { defaultVoiceId: string | null } };
+    clips: Capability & { model: string };
+    compose: Capability & { env: string };
+    storage: Capability;
+  };
+  tones: Record<string, string>;
+}
