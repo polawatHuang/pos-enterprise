@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 const { defineAdapter } = require('./define');
-const { AppError, notImplemented } = require('../core/errors');
+const { AppError } = require('../core/errors');
 
 const graph = () => `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v23.0'}`;
 
@@ -13,7 +13,7 @@ const adapter = defineAdapter(
     category: 'social',
     usedBy: ['social', 'inbox'],
     phase: 4,
-    purpose: 'รับ-ตอบแชต Messenger / Instagram Direct (webhook: /webhooks/meta) และโพสต์ Reels ในเฟส 7',
+    purpose: 'รับ-ตอบแชต Messenger / Instagram Direct (webhook: /webhooks/meta) — การโพสต์ Reels อยู่ใน adapter meta_social',
     applyUrl: 'https://developers.facebook.com/apps/',
     env: [
       { name: 'META_APP_SECRET' },
@@ -55,14 +55,6 @@ const adapter = defineAdapter(
         throw new AppError(502, 'META_API_ERROR', `Meta API ${res.status}: ${body?.error?.message ?? ''}`.slice(0, 300));
       }
       return res.json();
-    },
-
-    /** Reels publishing arrives with the social module (phase 7). */
-    publishPageReel() {
-      throw notImplemented('Meta: publishPageReel จะเปิดใช้งานในเฟสที่ 7');
-    },
-    publishInstagramReel() {
-      throw notImplemented('Meta: publishInstagramReel จะเปิดใช้งานในเฟสที่ 7');
     },
   },
 );

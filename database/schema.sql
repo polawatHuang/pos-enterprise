@@ -789,9 +789,15 @@ CREATE TABLE social_accounts (
   platform       ENUM('tiktok','facebook','instagram') NOT NULL,
   external_id    VARCHAR(191) NOT NULL COMMENT 'TikTok open_id / FB page id / IG user id',
   display_name   VARCHAR(191) NULL,
+  avatar_url     VARCHAR(1000) NULL,
   credential_id  BIGINT UNSIGNED NULL,
+  status         ENUM('connected','expired','error') NOT NULL DEFAULT 'connected',
+  token_expires_at DATETIME NULL COMMENT 'UTC; NULL = does not expire',
+  last_error     TEXT NULL,
+  meta           JSON NULL COMMENT 'e.g. linked page id for Instagram',
   is_active      TINYINT(1) NOT NULL DEFAULT 1,
   created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_social_acc (org_id, platform, external_id),
   CONSTRAINT fk_sa_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_sa_cred FOREIGN KEY (credential_id) REFERENCES integration_credentials(id) ON DELETE SET NULL
@@ -801,6 +807,7 @@ CREATE TABLE affiliate_links (
   id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   org_id        BIGINT UNSIGNED NOT NULL,
   product_id    BIGINT UNSIGNED NULL,
+  label         VARCHAR(191) NULL,
   platform      ENUM('shopee','tiktok_shop','lazada','other') NOT NULL DEFAULT 'shopee',
   original_url  VARCHAR(1000) NOT NULL,
   short_url     VARCHAR(500) NULL,
@@ -872,17 +879,23 @@ CREATE TABLE scheduled_posts (
   social_account_id  BIGINT UNSIGNED NOT NULL,
   video_project_id   BIGINT UNSIGNED NULL,
   media_file_id      BIGINT UNSIGNED NULL,
+  media_url          VARCHAR(1000) NULL COMMENT 'public MP4 URL when not taken from a video project',
   caption            TEXT NULL,
   hashtags           VARCHAR(1000) NULL,
   affiliate_link_id  BIGINT UNSIGNED NULL,
+  link_placement     ENUM('caption','bio','none') NOT NULL DEFAULT 'caption',
   scheduled_at       DATETIME NOT NULL COMMENT 'stored in UTC',
   privacy            VARCHAR(40) NOT NULL DEFAULT 'PUBLIC_TO_EVERYONE',
+  platform_options   JSON NULL COMMENT 'TikTok privacy / interactions / commercial disclosure',
   is_ai_generated    TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'AIGC disclosure flag',
   status             ENUM('draft','scheduled','publishing','published','failed','cancelled') NOT NULL DEFAULT 'scheduled',
   job_id             BIGINT UNSIGNED NULL,
+  attempts           INT NOT NULL DEFAULT 0,
   error              TEXT NULL,
+  published_at       DATETIME NULL,
   created_by         BIGINT UNSIGNED NULL,
   created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_sp_due (status, scheduled_at),
   CONSTRAINT fk_sp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_sp_account FOREIGN KEY (social_account_id) REFERENCES social_accounts(id) ON DELETE CASCADE,
@@ -895,6 +908,7 @@ CREATE TABLE post_results (
   scheduled_post_id  BIGINT UNSIGNED NOT NULL,
   external_post_id   VARCHAR(191) NULL,
   permalink          VARCHAR(1000) NULL,
+  status             VARCHAR(40) NULL COMMENT 'provider publish status',
   views              BIGINT NOT NULL DEFAULT 0,
   likes              BIGINT NOT NULL DEFAULT 0,
   comments           BIGINT NOT NULL DEFAULT 0,
@@ -990,6 +1004,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social');
 
 SET FOREIGN_KEY_CHECKS = 1;

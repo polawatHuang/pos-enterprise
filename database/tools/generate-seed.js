@@ -385,12 +385,16 @@ insert('returns', ['org_id', 'order_id', 'conversation_id', 'reason', 'resolutio
 
 // ---------------------------------------------------------------- social / video / trends
 out.push('\n-- Demo: social, AI video, trends');
-insert('social_accounts', ['id', 'org_id', 'platform', 'external_id', 'display_name'], [
-  [1, 1, 'tiktok', 'tt_open_id_demo', '@demo.shop'], [2, 1, 'facebook', 'fb_page_demo', 'ร้านเดโม'], [3, 1, 'instagram', 'ig_user_demo', '@demo.shop'],
+// Demo accounts have no tokens: they show as "reconnect" and are never published to
+const demoNote = 'บัญชีตัวอย่าง — กดเชื่อมต่อเพื่อใช้งานจริง';
+insert('social_accounts', ['id', 'org_id', 'platform', 'external_id', 'display_name', 'status', 'last_error'], [
+  [1, 1, 'tiktok', 'tt_open_id_demo', '@demo.shop', 'expired', demoNote],
+  [2, 1, 'facebook', 'fb_page_demo', 'ร้านเดโม', 'expired', demoNote],
+  [3, 1, 'instagram', 'ig_user_demo', '@demo.shop', 'expired', demoNote],
 ]);
-insert('affiliate_links', ['id', 'org_id', 'product_id', 'platform', 'original_url', 'short_url', 'clicks', 'conversions', 'commission'], [
-  [1, 1, 1, 'shopee', 'https://shopee.co.th/product/000/001', 'https://s.shopee.co.th/demo1', 1840, 96, 4120],
-  [2, 1, 8, 'shopee', 'https://shopee.co.th/product/000/008', 'https://s.shopee.co.th/demo8', 920, 31, 2950],
+insert('affiliate_links', ['id', 'org_id', 'product_id', 'label', 'platform', 'original_url', 'short_url', 'clicks', 'conversions', 'commission'], [
+  [1, 1, 1, 'เซรั่มวิตซี — แคมเปญรีวิว', 'shopee', 'https://shopee.co.th/product/000/001', 'https://s.shopee.co.th/demo1', 1840, 96, 4120],
+  [2, 1, 8, 'หูฟัง ANC', 'shopee', 'https://shopee.co.th/product/000/008', 'https://s.shopee.co.th/demo8', 920, 31, 2950],
 ]);
 const scenes = (rows) => JSON.stringify({ scenes: rows.map(([voiceover, caption, visual, durationSec]) => ({ voiceover, caption, visual, durationSec })) });
 insert('video_projects', ['id', 'org_id', 'product_id', 'title', 'brief', 'script', 'script_json', 'post_caption', 'hashtags', 'visual_mode', 'status', 'stage_detail', 'duration_sec'], [

@@ -49,6 +49,8 @@ const schema = z.object({
   // Public HTTPS origin of this API (e.g. https://api.example.com), shown as the webhook URL to paste
   // into LINE/Meta consoles. Needed because browsers reach the API through the Vercel rewrite.
   PUBLIC_API_URL: z.string().url().optional(),
+  // Public origin of the web app (Vercel). OAuth callbacks redirect back here; defaults to the first CORS origin.
+  APP_PUBLIC_URL: z.string().url().optional(),
   // "cron" = shared hosting (external trigger); "inprocess" = VPS with a long-running worker
   JOB_RUNNER: z.enum(['cron', 'inprocess']).default('cron'),
 });

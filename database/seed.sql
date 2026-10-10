@@ -8455,13 +8455,13 @@ INSERT INTO returns (org_id, order_id, conversation_id, reason, resolution, amou
   (1, 40, 10, 'ได้รับสินค้าผิดสี', 'exchange', 0, 'approved');
 
 -- Demo: social, AI video, trends
-INSERT INTO social_accounts (id, org_id, platform, external_id, display_name) VALUES
-  (1, 1, 'tiktok', 'tt_open_id_demo', '@demo.shop'),
-  (2, 1, 'facebook', 'fb_page_demo', 'ร้านเดโม'),
-  (3, 1, 'instagram', 'ig_user_demo', '@demo.shop');
-INSERT INTO affiliate_links (id, org_id, product_id, platform, original_url, short_url, clicks, conversions, commission) VALUES
-  (1, 1, 1, 'shopee', 'https://shopee.co.th/product/000/001', 'https://s.shopee.co.th/demo1', 1840, 96, 4120),
-  (2, 1, 8, 'shopee', 'https://shopee.co.th/product/000/008', 'https://s.shopee.co.th/demo8', 920, 31, 2950);
+INSERT INTO social_accounts (id, org_id, platform, external_id, display_name, status, last_error) VALUES
+  (1, 1, 'tiktok', 'tt_open_id_demo', '@demo.shop', 'expired', 'บัญชีตัวอย่าง — กดเชื่อมต่อเพื่อใช้งานจริง'),
+  (2, 1, 'facebook', 'fb_page_demo', 'ร้านเดโม', 'expired', 'บัญชีตัวอย่าง — กดเชื่อมต่อเพื่อใช้งานจริง'),
+  (3, 1, 'instagram', 'ig_user_demo', '@demo.shop', 'expired', 'บัญชีตัวอย่าง — กดเชื่อมต่อเพื่อใช้งานจริง');
+INSERT INTO affiliate_links (id, org_id, product_id, label, platform, original_url, short_url, clicks, conversions, commission) VALUES
+  (1, 1, 1, 'เซรั่มวิตซี — แคมเปญรีวิว', 'shopee', 'https://shopee.co.th/product/000/001', 'https://s.shopee.co.th/demo1', 1840, 96, 4120),
+  (2, 1, 8, 'หูฟัง ANC', 'shopee', 'https://shopee.co.th/product/000/008', 'https://s.shopee.co.th/demo8', 920, 31, 2950);
 INSERT INTO video_projects (id, org_id, product_id, title, brief, script, script_json, post_caption, hashtags, visual_mode, status, stage_detail, duration_sec) VALUES
   (1, 1, 1, 'รีวิวเซรั่มวิตซี 14 วัน', '{"tone":"friendly","lengthSec":30}', 'Hook: ผิวหมองต้องดู! ...', '{"scenes":[{"voiceover":"ผิวหมองต้องดูคลิปนี้!","caption":"ผิวหมอง ต้องดู!","visual":"close-up of a vitamin C serum bottle on a bathroom shelf, morning light","durationSec":4},{"voiceover":"ใช้เซรั่มวิตซีตัวนี้มา 14 วัน ผิวดูสว่างขึ้นจริง","caption":"ลองมาแล้ว 14 วัน","visual":"woman applying serum to cheek, soft daylight, vertical framing","durationSec":8},{"voiceover":"เนื้อบางเบา ซึมไว ไม่เหนอะหนะ","caption":"บางเบา ซึมไว","visual":"serum dropper texture macro shot","durationSec":6},{"voiceover":"กดลิงก์ในโปรไฟล์ได้เลย ตอนนี้ลดอยู่","caption":"ลิงก์ในโปรไฟล์","visual":"product on pastel background with sparkle","durationSec":5}]}', 'ผิวหมองต้องดู! เซรั่มวิตซีที่ใช้มา 14 วัน ✨', '#รีวิวสกินแคร์ #เซรั่มวิตซี #ของดีบอกต่อ', 'product_images', 'ready', NULL, 32),
   (2, 1, 8, 'หูฟัง ANC ตัดเสียงในรถไฟฟ้า', '{"tone":"energetic","lengthSec":30}', 'Hook: ใครนั่ง BTS ทุกวันต้องมี ...', NULL, NULL, NULL, 'ai_clips', 'compositing', 'กำลังประกอบคลิป (Shotstack)', NULL),

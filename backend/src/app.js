@@ -7,7 +7,6 @@ const cookieParser = require('cookie-parser');
 const env = require('./config/env');
 const db = require('./db/pool');
 const { notFoundHandler, errorHandler } = require('./core/http');
-const { moduleStub } = require('./modules/_stubs/module-stub');
 
 /** "https://*.vercel.app" -> /^https:\/\/[^.]+\.vercel\.app$/ */
 function originMatcher(patterns) {
@@ -71,12 +70,7 @@ function createApp() {
   app.use('/api/inbox', require('./modules/inbox/aftersales.routes').router);
   app.use('/api/scraping', require('./modules/scraping/scraping.routes').router);
   app.use('/api/videos', require('./modules/video/video.routes').router);
-
-  // Planned modules: URL + permission contract fixed now, implementation in later phases.
-  const stubs = [
-    { path: 'social', name: 'social', phase: 7, permission: 'social:read', integrations: ['tiktok', 'meta', 'shopee_affiliate'] },
-  ];
-  for (const s of stubs) app.use(`/api/${s.path}`, moduleStub(s));
+  app.use('/api/social', require('./modules/social/social.routes').router);
 
   app.use('/internal', require('./routes/internal').router);
 
