@@ -3,6 +3,8 @@
 const db = require('../../db/pool');
 const { badRequest, conflict, forbidden, notFound } = require('../../core/errors');
 const { applyMovement } = require('../inventory/inventory.service');
+const { postJournal, reverseJournalsFor, saleLines } = require('../accounting/ledger.service');
+const { localDate } = require('../../utils/dates');
 
 const VAT_RATE = 7;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -253,6 +255,16 @@ async function checkout(user, input) {
         { total: totals.total, id: input.customerId, orgId: user.orgId },
       );
     }
+    // Same transaction as the sale: the books can never disagree with the till.
+    await postJournal(conn, {
+      orgId: user.orgId,
+      date: localDate(),
+      description: `ขายหน้าร้าน ${orderNo}`,
+      refType: 'sales_order',
+      refId: orderId,
+      userId: user.id,
+      lines: saleLines({ total: totals.total, vat: totals.vat, cost: totals.cost, method }),
+    });
     return { orderId, orderNo, ...totals, change, warehouseId };
   });
 }
@@ -337,6 +349,13 @@ async function voidOrder(user, orderId, reason) {
       );
     }
     await conn.query(`UPDATE sales_orders SET status = 'cancelled' WHERE id = :orderId`, { orderId });
+    await reverseJournalsFor(conn, {
+      orgId: user.orgId,
+      refType: 'sales_order',
+      refId: orderId,
+      reason: `ยกเลิกบิล ${o.order_no} (${reason})`,
+      userId: user.id,
+    });
     if (o.customer_id) {
       await conn.query('UPDATE customers SET total_spent = GREATEST(total_spent - :total, 0), order_count = GREATEST(order_count - 1, 0) WHERE id = :id', {
         total: o.total,

@@ -35,19 +35,28 @@ async function one(sql, params) {
   return rows[0] || null;
 }
 
-/** Run fn(conn) inside a transaction; commits on success, rolls back on throw. */
-async function tx(fn) {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const result = await fn(conn);
-    await conn.commit();
-    return result;
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
+// InnoDB deadlock / lock-wait timeout: safe to retry the whole transaction.
+const RETRYABLE = new Set(['ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT']);
+
+/**
+ * Run fn(conn) inside a transaction; commits on success, rolls back on throw.
+ * Deadlocks are retried (up to 3 attempts) because fn is re-run from scratch on a fresh transaction.
+ */
+async function tx(fn, attempts = 3) {
+  for (let attempt = 1; ; attempt += 1) {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const result = await fn(conn);
+      await conn.commit();
+      return result;
+    } catch (err) {
+      await conn.rollback();
+      if (!RETRYABLE.has(err.code) || attempt >= attempts) throw err;
+      await new Promise((r) => setTimeout(r, 20 * attempt + Math.random() * 30));
+    } finally {
+      conn.release();
+    }
   }
 }
 
