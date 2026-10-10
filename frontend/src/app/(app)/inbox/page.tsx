@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
-import { ModulePlaceholder } from "@/components/layout/module-placeholder";
-import { modules } from "@/config/modules";
+import { RequirePermission } from "@/components/layout/page";
+import { InboxView } from "@/components/inbox/inbox-view";
 
-export const metadata: Metadata = { title: "Unified Inbox" };
+export const metadata: Metadata = { title: "แชตลูกค้า" };
 
-export default function Page() {
-  return <ModulePlaceholder spec={modules.inbox} />;
+export default function InboxPage() {
+  return (
+    <RequirePermission permission="inbox:read">
+      <InboxView />
+    </RequirePermission>
+  );
 }

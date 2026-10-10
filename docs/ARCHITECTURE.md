@@ -113,7 +113,59 @@ frontend/src/config/nav.ts               # เพิ่มเมนู + permiss
 
 **เอกสารพิมพ์:** หน้าเอกสาร A4 พิมพ์หรือบันทึกเป็น PDF ผ่านเบราว์เซอร์ (`@page a4`) ภาษาไทยแสดงถูกต้องแน่นอนกว่าการสร้าง PDF บนเซิร์ฟเวอร์ และไม่ใช้ทรัพยากรของ Plesk
 
-**AI อ่านใบเสร็จ:** `POST /api/accounting/ai/extract-receipt` ส่งรูป/PDF (ย่อรูปฝั่ง browser ให้ไม่เกิน 2000px) ไปที่ Claude พร้อม JSON schema (structured output) แล้วกรอกฟอร์มให้ผู้ใช้ตรวจก่อนบันทึก ระบบไม่บันทึกเอง ถ้ายังไม่ได้ตั้ง `ANTHROPIC_API_KEY` จะตอบ 503 และให้กรอกเองแทน
+**AI อ่านใบเสร็จ:** `POST /api/accounting/ai/extract-receipt`
+- ส่งรูปที่ย่อฝั่ง browser ให้ไม่เกิน 2000px ไปที่ AI ผ่าน `ai.extractStructured()`
+  - MiniMax: บังคับให้ตอบผ่าน tool
+  - Claude: ใช้ JSON schema
+- ผลที่ได้ใช้กรอกฟอร์มให้ผู้ใช้ตรวจก่อน ระบบไม่บันทึกเอง
+- ถ้ายังไม่ได้ตั้ง key ของผู้ให้บริการ AI ที่เลือกไว้ จะตอบ 503 และให้ผู้ใช้กรอกเอง
+
+## AI provider
+
+ฟีเจอร์ AI ทุกตัวเรียกผ่าน `backend/src/integrations/ai.js`
+- ค่าเริ่มต้นคือ `AI_PROVIDER=minimax` ใช้ Anthropic-compatible endpoint ของ MiniMax
+- ตั้ง `anthropic` เพื่อใช้ Claude แทนได้
+- ทั้งสองเจ้าใช้รูปแบบ Messages API เดียวกัน (รวมถึง tool use) agent loop และรูปแบบข้อความจึงใช้โค้ดชุดเดียว
+- ความต่างของแต่ละเจ้า (structured output, การรองรับ PDF) ถูกเก็บไว้ใน `capabilities` ของ adapter
+
+## Unified Inbox + AI Agent (เฟส 4)
+
+```
+LINE / Messenger / IG ──webhook (ตรวจ HMAC จาก raw body)──► /webhooks/{line,meta}
+        │ ตอบ 200 ทันที
+        ▼
+ingestInbound()  (idempotent ด้วย external_message_id, สร้างลูกค้า + แชต)
+        │
+        ├─ ตอบทันทีใน process เดิม (LINE reply token มีอายุ ~1 นาที)
+        └─ คิวงาน inbox.ai_reply สำรองที่ +90 วินาที (กรณี Passenger recycle)
+                 │
+                 ▼
+replyToConversation()  ── claim lock (ai_lock_until) กันตอบซ้ำ
+   ├─ ข้ามถ้าโหมด human / ข้อความล่าสุดไม่ใช่ของลูกค้า
+   ├─ คำสำคัญส่งต่อ (handoff_keywords) → ส่งให้แอดมินทันที
+   ├─ system prompt: บุคลิก + กฎการขาย + เพดานส่วนลด + ฐานความรู้ร้าน
+   └─ tool loop ≤ 6 รอบ: search_products · get_product_details · lookup_orders ·
+      create_discount_code · open_return_request · escalate_to_human
+```
+
+**ขอบเขตของ AI**
+
+- ทุก tool ถูกจำกัดให้ใช้ได้แค่ร้านและลูกค้าของแชตนั้น
+- ส่วนลดไม่เกินเพดาน: AI ออกโค้ดใช้ครั้งเดียว อายุ 14 วัน ได้ 1 ครั้งต่อแชต
+- ส่วนลดเกินเพดาน: บันทึกเป็น `ai_offers` สถานะ `needs_approval` ให้ผู้จัดการอนุมัติที่หน้า **คืนสินค้า & ข้อเสนอ**
+- AI ไม่เห็นข้อมูลส่วนบุคคลจากออร์เดอร์
+
+**แอดมินกับ AI**
+
+- เมื่อแอดมินพิมพ์ตอบ แชตนั้นจะเปลี่ยนเป็นโหมด human และ AI หยุดตอบ จนกว่าจะกด "ให้ AI ตอบ"
+- หน้า Inbox ดึงข้อมูลใหม่ทุก 5 วินาที (polling) เพราะ shared hosting ทำ WebSocket ค้างไว้ไม่ได้
+
+**ข้อจำกัดของแต่ละแพลตฟอร์ม**
+
+- Meta: ตอบได้ภายใน 24 ชั่วโมงหลังข้อความล่าสุดของลูกค้าเท่านั้น ถ้าเกิน ระบบบันทึกข้อความเป็น "ส่งไม่สำเร็จ" แทนการส่ง
+- LINE: ใช้ reply token ก่อน ถ้าหมดอายุจึงใช้ push
+
+**การทดสอบ:** หน้า **ตั้งค่า AI แชต → ทดลองคุย** ให้คุยกับ AI ในฐานะลูกค้าผ่านช่องทาง website ภายใน ไม่ต้องมี key ของแพลตฟอร์มแชต
 
 ## Roadmap
 
@@ -122,7 +174,7 @@ frontend/src/config/nav.ts               # เพิ่มเมนู + permiss
 | 1 ✅ | รากฐาน: โครงสองโปรเจกต์, schema ครบทุกโมดูล, auth + RBAC, layout, Smart Dashboard, คู่มือ deploy | ทุกโมดูลใช้ร่วมกัน |
 | 2 ✅ | สินค้า + สต๊อก + POS | สินค้าเป็นข้อมูลกลางของทุกโมดูล (AI ใช้เป็นฐานความรู้, วิดีโอใช้เป็นวัตถุดิบ) |
 | 3 ✅ | บัญชี + เอกสาร + ภาษี + AI อ่านใบเสร็จ | รับข้อมูลขายจากเฟส 2 ไปลงบัญชีอัตโนมัติ |
-| 4 | Unified Inbox + AI Agent + Return/Dispute | ต้องมีสินค้า สต๊อก ออร์เดอร์ และคูปองให้ AI ใช้ |
+| 4 ✅ | Unified Inbox + AI Agent + Return/Dispute | ต้องมีสินค้า สต๊อก ออร์เดอร์ และคูปองให้ AI ใช้ |
 | 5 | Data Scraping / สินค้าเทรนด์ | ป้อนสินค้าให้การทำคอนเทนต์ |
 | 6 | AI Video | ใช้สินค้าจากเฟส 2/5 |
 | 7 | Auto-post + Affiliate | ใช้วิดีโอจากเฟส 6 + ลิงก์จากเฟส 5 |

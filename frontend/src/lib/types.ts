@@ -488,3 +488,132 @@ export interface ReceiptExtraction {
   confidence: "high" | "medium" | "low";
   suggestedWhtType: { code: string; label: string; rate: number } | null;
 }
+
+/* ------------------------------------------------------------------ inbox */
+
+export type Platform = "facebook" | "instagram" | "line" | "tiktok" | "shopee" | "website" | "email";
+export type ConvStatus = "open" | "pending" | "resolved" | "closed";
+export type ConvMode = "ai" | "human";
+
+export interface Conversation {
+  id: number;
+  channelId: number;
+  platform: Platform;
+  channelName: string;
+  customerId: number | null;
+  customerName: string | null;
+  status: ConvStatus;
+  mode: ConvMode;
+  handoffReason: string | null;
+  intent: string | null;
+  sentiment: string | null;
+  unread: number;
+  assignedTo: number | null;
+  assignedName: string | null;
+  lastMessage: string | null;
+  lastSender: string | null;
+  lastMessageAt: string | null;
+  lastCustomerMessageAt: string | null;
+}
+
+export interface InboxMessage {
+  id: number;
+  direction: "in" | "out";
+  senderType: "customer" | "ai" | "agent" | "system";
+  senderName: string | null;
+  content: string | null;
+  deliveryStatus: "pending" | "sent" | "delivered" | "read" | "failed" | null;
+  aiMeta: { provider?: string; model?: string; tools?: string[] } | null;
+  createdAt: string;
+}
+
+export interface ConversationDetail extends Conversation {
+  messages: InboxMessage[];
+  customer: { id: number; name: string; phone: string | null; email: string | null; totalSpent: number; orderCount: number; tags: string | null } | null;
+  orders: { id: number; orderNo: string; channel: string; status: string; total: number; orderedAt: string }[];
+  returns: { id: number; reason: string; detail: string | null; resolution: string; status: string; amount: number; created_at: string }[];
+  offers: { id: number; type: string; value: number; status: string; rationale: string | null; code: string | null; createdAt: string }[];
+}
+
+export interface InboxSummary {
+  open: number;
+  needsHuman: number;
+  unread: number;
+  pendingApprovals: number;
+  newReturns: number;
+  aiProvider: string;
+  aiConfigured: boolean;
+}
+
+export interface InboxChannelConfig {
+  id: number;
+  platform: Platform;
+  name: string;
+  externalId: string | null;
+  aiEnabled: boolean;
+  isActive: boolean;
+  openCount: number;
+  hasToken: boolean;
+  webhookUrl: string | null;
+  supported: boolean;
+}
+
+export interface AgentProfile {
+  name: string;
+  persona: string;
+  salesRules: string;
+  maxDiscountPct: number;
+  handoffKeywords: string;
+  provider: string;
+  configured: boolean;
+}
+
+export interface KnowledgeItem {
+  id: number;
+  kind: string;
+  question: string | null;
+  answer: string;
+}
+
+export interface ReturnCase {
+  id: number;
+  orderId: number | null;
+  orderNo: string | null;
+  orderTotal: number | null;
+  conversationId: number | null;
+  customerName: string | null;
+  platform: Platform | null;
+  reason: string;
+  detail: string | null;
+  resolution: string;
+  resolutionNote: string | null;
+  amount: number;
+  status: "requested" | "approved" | "received" | "completed" | "rejected";
+  createdAt: string;
+}
+
+export interface DisputeCase {
+  id: number;
+  orderNo: string | null;
+  platform: string | null;
+  category: string;
+  summary: string | null;
+  severity: "low" | "medium" | "high";
+  status: "open" | "negotiating" | "resolved" | "escalated" | "lost";
+  resolutionNote: string | null;
+  conversationId: number | null;
+  createdAt: string;
+}
+
+export interface AiOffer {
+  id: number;
+  conversationId: number;
+  customerName: string | null;
+  platform: Platform;
+  type: string;
+  value: number;
+  rationale: string | null;
+  status: "proposed" | "accepted" | "declined" | "expired" | "needs_approval";
+  code: string | null;
+  createdAt: string;
+}

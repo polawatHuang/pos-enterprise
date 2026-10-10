@@ -1,20 +1,6 @@
 import type { ModuleSpec } from "@/components/layout/module-placeholder";
 
 export const modules: Record<string, ModuleSpec> = {
-  inbox: {
-    href: "/inbox",
-    description: "รวมแชตลูกค้าทุกช่องทาง ให้ AI คุยปิดการขาย และดูแลการคืนสินค้า/ข้อร้องเรียน",
-    features: [
-      "Facebook Messenger, Instagram, LINE OA, Shopee, TikTok Shop ในหน้าเดียว",
-      "AI ตอบเป็นธรรมชาติ รู้จักสินค้าทุกตัวจากฐานความรู้",
-      "AI สร้างออร์เดอร์/คูปองได้เอง ภายใต้เพดานส่วนลดที่กำหนด",
-      "Return & Dispute: AI เสนอทางแก้หรือส่วนลดเพื่อรักษาลูกค้า",
-      "ส่งต่อให้แอดมินอัตโนมัติเมื่อเจอคำสำคัญหรือลูกค้าไม่พอใจ",
-      "ประวัติลูกค้าและออร์เดอร์ข้างหน้าต่างแชต",
-    ],
-    keys: ["Anthropic Claude API", "Meta App (Messenger/Instagram)", "LINE Messaging API", "Shopee / TikTok Shop (แชตร้าน)"],
-    notes: ["Meta อนุญาตให้ตอบได้ภายใน 24 ชั่วโมงหลังข้อความล่าสุดของลูกค้าเท่านั้น (นอกเวลาต้องใช้ message tag ที่ถูกต้อง)"],
-  },
   trends: {
     href: "/trends",
     description: "ดึงข้อมูลสินค้าขายดีและค่าคอมมิชชันสูง เพื่อเลือกสินค้ามาทำคอนเทนต์",
@@ -31,13 +17,13 @@ export const modules: Record<string, ModuleSpec> = {
     href: "/videos",
     description: "สร้างคลิปแนวตั้ง 9:16 ที่มี AI คนรีวิวสินค้า เสียงพากย์ไทย และซับไตเติลอัตโนมัติ",
     features: [
-      "AI เขียนสคริปต์รีวิวจากข้อมูลสินค้า (hook–ปัญหา–ทางแก้–CTA)",
-      "เสียงพากย์ไทยด้วย ElevenLabs พร้อม timestamp",
-      "AI avatar รีวิวด้วย HeyGen",
+      "AI (MiniMax) เขียนสคริปต์รีวิวจากข้อมูลสินค้า (hook–ปัญหา–ทางแก้–CTA)",
+      "เสียงพากย์ด้วย MiniMax Speech (สำรอง: ElevenLabs) พร้อม timestamp",
+      "ภาพ/วิดีโอด้วย MiniMax Hailuo หรือ AI avatar รีวิวด้วย HeyGen",
       "ประกอบคลิป + ซับ + เพลง ด้วย Shotstack (เรนเดอร์บนคลาวด์)",
       "เก็บไฟล์บน R2 และส่งต่อไปตั้งเวลาโพสต์",
     ],
-    keys: ["Anthropic Claude API", "ElevenLabs", "HeyGen", "Shotstack", "Cloudflare R2"],
+    keys: ["MiniMax API (ค่าเริ่มต้น)", "ElevenLabs / HeyGen (ทางเลือก)", "Shotstack", "Cloudflare R2"],
     notes: ["เซิร์ฟเวอร์ Plesk ไม่เหมาะกับการเรนเดอร์วิดีโอ งานทั้งหมดจึงส่งไปประมวลผลที่บริการคลาวด์แล้วรับผลกลับผ่านคิวงาน"],
   },
   social: {
