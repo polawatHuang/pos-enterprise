@@ -51,6 +51,10 @@ handlers['video.clips_poll'] = (p) => video().clipsPoll(p);
 handlers['video.compose'] = (p) => video().compose(p);
 handlers['video.compose_poll'] = (p) => video().composePoll(p);
 
+/** Social posting: publish a due post, then poll the platform until the video is live. */
+handlers['social.publish'] = (p) => require('../../modules/social/publish').publish(p);
+handlers['social.status'] = (p) => require('../../modules/social/publish').checkStatus(p);
+
 /** Recurring jobs scheduled by the cron tick (idempotent: one queued instance at a time). */
 const recurring = [{ type: 'system.cleanup', everyMinutes: 60 * 24 }];
 
@@ -64,6 +68,7 @@ async function scheduleRecurring() {
     if (!existing) await enqueue(r.type, {}, { priority: -10 });
   }
   await require('../../modules/scraping/sources').scheduleDueSources();
+  await require('../../modules/social/publish').dispatchDue();
 }
 
 module.exports = handlers;

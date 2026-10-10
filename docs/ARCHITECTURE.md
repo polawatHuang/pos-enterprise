@@ -213,6 +213,31 @@ job video.compose_poll ── รอเรนเดอร์ → คัดลอ
 - งานที่มีค่าใช้จ่ายจะไม่ retry อัตโนมัติ ถ้าล้มเหลว โปรเจกต์จะเป็นสถานะ `failed` พร้อมข้อความ
 - กดสร้างใหม่ ระบบจะใช้คลิปที่สร้างสำเร็จแล้วซ้ำ และสร้างเฉพาะฉากที่ยังไม่มี
 
+## ตั้งเวลาโพสต์ + Affiliate (เฟส 7)
+
+```
+ผู้ใช้ ──► /api/social/oauth/{tiktok|meta}/start ──► หน้าล็อกอินของแพลตฟอร์ม
+       ◄── /api/social/oauth/{platform}/callback (ยืนยัน state ที่ลงลายเซ็น, เก็บ token แบบเข้ารหัส)
+
+POST /api/social/posts (1 คลิป → หลายบัญชี; สร้างลิงก์ Shopee แยกต่อโพสต์ sub id = แพลตฟอร์ม+id)
+cron tick ─► dispatchDue(): โพสต์ที่ถึงเวลา (บัญชีเชื่อมต่ออยู่) → job social.publish
+   TikTok    creator_info (ตรวจ privacy/ความยาว) → video/init PULL_FROM_URL (is_aigc, branded content)
+   Facebook  video_reels start → rupload (file_url) → finish PUBLISHED
+   Instagram media (REELS) → รอ container FINISHED → media_publish
+job social.status ─► เช็กทุก 30 วินาที → published + permalink / failed + เหตุผล
+```
+
+**การจัดการข้อผิดพลาด**
+
+- ไม่ลองโพสต์ซ้ำเองเมื่อเกิด error เพราะอาจได้โพสต์ซ้ำ ผู้ใช้กด "ลองใหม่" เองได้
+- token TikTok (อายุ 24 ชม.) ต่ออายุอัตโนมัติก่อนโพสต์ ถ้า token ใช้ไม่ได้ บัญชีจะขึ้นสถานะ "ต้องเชื่อมต่อใหม่"
+
+**ลิงก์ affiliate**
+
+- แคปชันของ TikTok และ Instagram คลิกลิงก์ไม่ได้ ค่าเริ่มต้นจึงเป็นข้อความว่า "ลิงก์อยู่ในโปรไฟล์"
+- Facebook ใส่ลิงก์ในแคปชันได้
+- ทุกโพสต์ที่มีลิงก์จะมีคำว่า "ลิงก์ affiliate" ต่อท้ายให้อัตโนมัติ
+
 ## Roadmap
 
 | เฟส | โมดูล | เหตุผลของลำดับ |
@@ -223,4 +248,4 @@ job video.compose_poll ── รอเรนเดอร์ → คัดลอ
 | 4 ✅ | Unified Inbox + AI Agent + Return/Dispute | ต้องมีสินค้า สต๊อก ออร์เดอร์ และคูปองให้ AI ใช้ |
 | 5 ✅ | Data Scraping / สินค้าเทรนด์ | ป้อนสินค้าให้การทำคอนเทนต์ |
 | 6 ✅ | AI Video | ใช้สินค้าจากเฟส 2/5 |
-| 7 | Auto-post + Affiliate | ใช้วิดีโอจากเฟส 6 + ลิงก์จากเฟส 5 |
+| 7 ✅ | Auto-post + Affiliate | ใช้วิดีโอจากเฟส 6 + ลิงก์จากเฟส 5 |

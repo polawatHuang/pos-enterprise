@@ -15,7 +15,7 @@
 | **TikTok Shop Partner** | สินค้า/ออร์เดอร์/แชต (2, 4, 5) | `TIKTOK_SHOP_APP_KEY`, `TIKTOK_SHOP_APP_SECRET` | partner.tiktokshop.com | ใช่ (ต้องเป็น seller/partner) |
 | **Shopee Open Platform** | สต๊อก/ออร์เดอร์/แชต (2, 4) | `SHOPEE_PARTNER_ID`, `SHOPEE_PARTNER_KEY`, `SHOPEE_REDIRECT_URL` | open.shopee.com | ใช่ |
 | **Shopee Affiliate Open API** | สินค้าเทรนด์ + affiliate link (5, 7) | `SHOPEE_AFFILIATE_APP_ID`, `SHOPEE_AFFILIATE_SECRET` | affiliate.shopee.co.th | ใช่ (ต้องเป็น affiliate ที่ได้รับอนุมัติ) |
-| **Meta (Facebook/Instagram)** | แชต Messenger/IG (4), โพสต์ Reels (7) | `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` (+ Page access token ต่อเพจ ใส่ในหน้า ตั้งค่า AI แชต หรือ `META_PAGE_ACCESS_TOKEN`) | developers.facebook.com | **ใช่** — App Review + Business Verification |
+| **Meta (Facebook/Instagram)** | แชต Messenger/IG (4), โพสต์ Reels (7) | `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`, `META_REDIRECT_URI` (+ Page access token ต่อเพจ ใส่ในหน้า ตั้งค่า AI แชต หรือ `META_PAGE_ACCESS_TOKEN`) | developers.facebook.com | **ใช่** — App Review + Business Verification |
 | **LINE Messaging API** | แชต LINE OA (4) | `LINE_CHANNEL_SECRET` (+ Channel access token ใส่ในหน้า ตั้งค่า AI แชต หรือ `LINE_CHANNEL_ACCESS_TOKEN`) | developers.line.biz | ไม่ |
 | HeyGen (ทางเลือกในอนาคต) | AI avatar รีวิวสินค้า (ยังไม่ได้เชื่อม) | `HEYGEN_API_KEY` | app.heygen.com | ไม่ (ต้องมีแพ็กเกจ API) |
 | ElevenLabs (ทางเลือก) | เสียงพากย์แทน MiniMax (6) — ต้องมี R2 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | elevenlabs.io | ไม่ |
@@ -66,6 +66,18 @@
 - โค้ดนี้เขียนตามเอกสารของ Shopee แต่**ยังไม่ได้ทดสอบกับ key จริง**
   - ถ้า Shopee เปลี่ยนชื่อฟิลด์ ให้แก้ที่ `backend/src/integrations/shopee-affiliate.js` ไฟล์เดียว
   - endpoint เปลี่ยนได้ด้วย `SHOPEE_AFFILIATE_ENDPOINT`
+
+**การเชื่อมบัญชีโซเชียล (เฟส 7)**
+- ตั้ง `APP_PUBLIC_URL=https://<โดเมนเว็บบน Vercel>` และลงทะเบียน Redirect URI ในแอปของแต่ละแพลตฟอร์มให้ตรงตัวอักษร:
+  - TikTok: `https://<เว็บ>/api/social/oauth/tiktok/callback` (เท่ากับค่า `TIKTOK_REDIRECT_URI`)
+  - Facebook Login: `https://<เว็บ>/api/social/oauth/meta/callback` (เท่ากับค่า `META_REDIRECT_URI`)
+  - หน้า **บัญชีโซเชียล** มีปุ่มคัดลอก URL ทั้งสองให้
+- callback วิ่งผ่าน rewrite ของ Vercel ไปที่ backend
+  - ระบบยืนยันคำขอด้วย state ที่ลงลายเซ็นและหมดอายุใน 15 นาที
+  - เข้ารหัส token ด้วย `APP_ENCRYPTION_KEY` ก่อนเก็บ
+- Facebook Login ขอสิทธิ์ `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `business_management`, `instagram_basic`, `instagram_content_publish`
+  - สิทธิ์เหล่านี้ต้องผ่าน App Review ก่อนใช้กับเพจของคนที่ไม่ได้มีบทบาทในแอป
+- **ไฟล์วิดีโอต้องเป็นลิงก์สาธารณะที่ไม่หมดอายุ** (แนะนำ R2) เพราะทั้ง TikTok (`PULL_FROM_URL`) และ Meta จะดึงไฟล์จากลิงก์เอง
 
 **TikTok Content Posting API**
 - ก่อนผ่าน audit โพสต์ได้เฉพาะแบบ `SELF_ONLY` (ส่วนตัว)

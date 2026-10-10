@@ -10,6 +10,7 @@ const adapters = [
   require('./shopee'),
   require('./shopee-affiliate'),
   require('./meta'),
+  require('./meta-social'),
   require('./line'),
   require('./heygen'),
   require('./elevenlabs'),
