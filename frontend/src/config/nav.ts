@@ -20,7 +20,7 @@ export interface NavItem {
   icon: LucideIcon;
   /** User needs this permission to see the item */
   permission: string;
-  /** Delivery phase; items with phase > 1 show a "เร็วๆ นี้" badge */
+  /** Delivery phase of a module not yet built; 1 = available now (no badge) */
   phase: number;
 }
 
@@ -37,9 +37,9 @@ export const navGroups: NavGroup[] = [
   {
     label: "ขายและสต๊อก",
     items: [
-      { href: "/pos", label: "ขายหน้าร้าน (POS)", icon: ShoppingCart, permission: "pos:sell", phase: 2 },
-      { href: "/products", label: "สินค้า", icon: Package, permission: "products:read", phase: 2 },
-      { href: "/inventory", label: "สต๊อกสินค้า", icon: Boxes, permission: "inventory:read", phase: 2 },
+      { href: "/pos", label: "ขายหน้าร้าน (POS)", icon: ShoppingCart, permission: "pos:sell", phase: 1 },
+      { href: "/products", label: "สินค้า", icon: Package, permission: "products:read", phase: 1 },
+      { href: "/inventory", label: "สต๊อกสินค้า", icon: Boxes, permission: "inventory:read", phase: 1 },
     ],
   },
   {

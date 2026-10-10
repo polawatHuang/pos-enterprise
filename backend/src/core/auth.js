@@ -15,7 +15,7 @@ const SESSION_HINT_COOKIE = 'pe_session';
 
 function signAccessToken(user) {
   return jwt.sign(
-    { org: user.orgId, roles: user.roles, perms: user.permissions, name: user.fullName },
+    { org: user.orgId, br: user.branchId ?? null, roles: user.roles, perms: user.permissions, name: user.fullName },
     env.JWT_ACCESS_SECRET,
     { subject: String(user.id), expiresIn: env.ACCESS_TOKEN_TTL_SEC, issuer: 'pos-enterprise' },
   );
@@ -65,7 +65,7 @@ function readAccessToken(req) {
   return req.cookies?.[ACCESS_COOKIE] || null;
 }
 
-/** Requires a valid access token; sets req.user = { id, orgId, roles, permissions, name } */
+/** Requires a valid access token; sets req.user = { id, orgId, branchId, roles, permissions, name } */
 function authenticate(req, res, next) {
   const token = readAccessToken(req);
   if (!token) return next(unauthorized());
@@ -74,6 +74,7 @@ function authenticate(req, res, next) {
     req.user = {
       id: Number(payload.sub),
       orgId: payload.org,
+      branchId: payload.br ?? null,
       roles: payload.roles || [],
       permissions: payload.perms || [],
       name: payload.name,

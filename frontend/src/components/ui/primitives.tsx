@@ -113,3 +113,73 @@ export function Segmented<T extends string | number>({
     </div>
   );
 }
+
+export function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
+  return (
+    <textarea
+      className={cn(
+        "flex min-h-20 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/20 aria-invalid:border-danger",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+/** Underlined tab bar; content switching is up to the caller. */
+export function TabBar<T extends string>({
+  value,
+  onChange,
+  tabs,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  tabs: { value: T; label: React.ReactNode }[];
+}) {
+  return (
+    <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-border">
+      {tabs.map((t) => (
+        <button
+          key={t.value}
+          role="tab"
+          aria-selected={t.value === value}
+          onClick={() => onChange(t.value)}
+          className={cn(
+            "-mb-px whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+            t.value === value ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function Pagination({ page, pageSize, total, onChange }: { page: number; pageSize: number; total: number; onChange: (p: number) => void }) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  if (total <= pageSize) return null;
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm">
+      <span className="text-muted-foreground">
+        {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} จาก {total}
+      </span>
+      <div className="flex gap-2">
+        <button
+          className="h-8 rounded-md border border-border px-3 disabled:opacity-40"
+          disabled={page <= 1}
+          onClick={() => onChange(page - 1)}
+        >
+          ก่อนหน้า
+        </button>
+        <button
+          className="h-8 rounded-md border border-border px-3 disabled:opacity-40"
+          disabled={page >= pages}
+          onClick={() => onChange(page + 1)}
+        >
+          ถัดไป
+        </button>
+      </div>
+    </div>
+  );
+}

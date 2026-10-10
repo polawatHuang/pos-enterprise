@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
-import { ModulePlaceholder } from "@/components/layout/module-placeholder";
-import { modules } from "@/config/modules";
+import { RequirePermission } from "@/components/layout/page";
+import { InventoryView } from "@/components/inventory/inventory-view";
 
 export const metadata: Metadata = { title: "สต๊อกสินค้า" };
 
-export default function Page() {
-  return <ModulePlaceholder spec={modules.inventory} />;
+export default function InventoryPage() {
+  return (
+    <RequirePermission permission="inventory:read">
+      <InventoryView />
+    </RequirePermission>
+  );
 }

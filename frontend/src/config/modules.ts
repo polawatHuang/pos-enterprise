@@ -1,42 +1,6 @@
 import type { ModuleSpec } from "@/components/layout/module-placeholder";
 
 export const modules: Record<string, ModuleSpec> = {
-  pos: {
-    href: "/pos",
-    description: "ขายหน้าร้านแบบเร็ว รองรับสแกนบาร์โค้ด หลายช่องทางชำระเงิน และกะการขาย",
-    features: [
-      "หน้าขายแบบ touch-friendly ใช้บนแท็บเล็ตได้",
-      "สแกนบาร์โค้ด / ค้นหาสินค้า",
-      "เงินสด, PromptPay QR, บัตร, โอน",
-      "เปิด–ปิดกะ พร้อมสรุปเงินสดในลิ้นชัก",
-      "ใบเสร็จ / ใบกำกับภาษีอย่างย่อ",
-      "ตัดสต๊อกอัตโนมัติ + บันทึกบัญชีอัตโนมัติ",
-    ],
-    keys: [],
-  },
-  products: {
-    href: "/products",
-    description: "แคตตาล็อกสินค้ากลาง — เป็นฐานความรู้ให้ AI แชต และวัตถุดิบสำหรับวิดีโอรีวิว",
-    features: [
-      "สินค้า ตัวเลือก (สี/ไซซ์) บาร์โค้ด รูปภาพ",
-      "จุดขาย (selling points) และ FAQ สำหรับ AI",
-      "ผูกสินค้ากับ Shopee / TikTok Shop item id",
-      "นำเข้า/ส่งออก CSV",
-    ],
-    keys: ["Cloudflare R2 (เก็บรูปสินค้า)"],
-  },
-  inventory: {
-    href: "/inventory",
-    description: "สต๊อกหลายคลัง การรับเข้า โอนย้าย ปรับยอด และใบสั่งซื้อ",
-    features: [
-      "สต๊อกแยกคลัง/สาขา แบบเรียลไทม์",
-      "รับสินค้าจากใบสั่งซื้อ (PO)",
-      "แจ้งเตือนสินค้าต่ำกว่าจุดสั่งซื้อ",
-      "ประวัติการเคลื่อนไหวทุกรายการ (stock ledger)",
-      "Sync สต๊อกกับ Shopee / TikTok Shop",
-    ],
-    keys: ["Shopee Open Platform", "TikTok Shop Partner API"],
-  },
   accounting: {
     href: "/accounting",
     description: "รายรับรายจ่าย เอกสารทางบัญชี และแบบภาษี ครบในระบบเดียว พร้อม AI ช่วยลงบัญชี",

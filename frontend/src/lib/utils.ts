@@ -33,3 +33,10 @@ export function initials(name: string) {
   const parts = name.replace(/\(.*?\)/g, "").trim().split(/\s+/);
   return parts.slice(0, 2).map((p) => p[0]).join("").toUpperCase();
 }
+
+const thb2 = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Currency with satang, for prices, bills and receipts. */
+export const formatMoney = (v: number) => thb2.format(v);
+
+export const formatDateTime = (iso: string) =>
+  new Date(iso).toLocaleString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" });
