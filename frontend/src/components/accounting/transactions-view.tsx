@@ -49,7 +49,7 @@ export function TransactionsView() {
       setDialog(prefillFromExtraction(x));
     } catch (err) {
       if (err instanceof ApiError && err.code === "INTEGRATION_NOT_CONFIGURED") {
-        toast.error("ยังไม่ได้ตั้งค่า ANTHROPIC_API_KEY บนเซิร์ฟเวอร์ — กรอกข้อมูลเองได้ตามปกติ");
+        toast.error(`ยังไม่ได้ตั้งค่า AI บนเซิร์ฟเวอร์ (${err.message}) — กรอกข้อมูลเองได้ตามปกติ`);
         setDialog({ type: "expense" });
       } else toast.error(err instanceof Error ? err.message : "อ่านใบเสร็จไม่สำเร็จ");
     } finally {

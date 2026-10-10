@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Bot,
   Boxes,
   Calculator,
   CalendarClock,
@@ -10,6 +11,7 @@ import {
   LayoutDashboard,
   MessagesSquare,
   Package,
+  PackageX,
   PlugZap,
   ShoppingCart,
   TrendingUp,
@@ -58,7 +60,9 @@ export const navGroups: NavGroup[] = [
   {
     label: "ลูกค้าและการตลาด",
     items: [
-      { href: "/inbox", label: "Unified Inbox + AI", icon: MessagesSquare, permission: "inbox:read", phase: 4 },
+      { href: "/inbox", label: "แชตลูกค้า + AI", icon: MessagesSquare, permission: "inbox:read", phase: 1 },
+      { href: "/inbox/aftersales", label: "คืนสินค้า & ข้อเสนอ", icon: PackageX, permission: "inbox:read", phase: 1 },
+      { href: "/inbox/settings", label: "ตั้งค่า AI แชต", icon: Bot, permission: "inbox:read", phase: 1 },
       { href: "/trends", label: "สินค้าขายดี (Scraping)", icon: TrendingUp, permission: "scraping:read", phase: 5 },
       { href: "/videos", label: "AI Video", icon: Clapperboard, permission: "video:create", phase: 6 },
       { href: "/social", label: "ตั้งเวลาโพสต์ & Affiliate", icon: CalendarClock, permission: "social:read", phase: 7 },

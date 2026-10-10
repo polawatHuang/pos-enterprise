@@ -5,8 +5,8 @@ const { z } = require('zod');
 const { validate } = require('../../core/http');
 const { requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
-const { AppError, badRequest } = require('../../core/errors');
-const anthropic = require('../../integrations/anthropic');
+const { badRequest } = require('../../core/errors');
+const ai = require('../../integrations/ai');
 const { CATEGORIES, WHT_TYPES } = require('./transactions.routes');
 
 const router = express.Router();
@@ -66,37 +66,30 @@ const body = z.object({
  * the user reviews the pre-filled form and saves it through POST /transactions.
  */
 router.post('/extract-receipt', requirePermission('accounting:write'), validate({ body }), async (req, res) => {
-  if (!anthropic.isConfigured()) anthropic.requireConfig(); // 503 INTEGRATION_NOT_CONFIGURED
+  ai.requireConfig(); // 503 INTEGRATION_NOT_CONFIGURED for the active provider (MiniMax by default)
   const { mediaType, data } = req.valid.body;
   if (!/^[A-Za-z0-9+/]+=*$/.test(data)) throw badRequest('ไฟล์ไม่ถูกต้อง (ต้องเป็น base64)');
 
   const source = { type: 'base64', media_type: mediaType, data };
   const fileBlock = mediaType === 'application/pdf' ? { type: 'document', source } : { type: 'image', source };
-  const response = await anthropic.createMessage({
-    max_tokens: 4000,
+  const { data: parsed, model, provider } = await ai.extractStructured({
     system: SYSTEM,
-    output_config: { format: { type: 'json_schema', schema: RECEIPT_SCHEMA } },
-    messages: [{ role: 'user', content: [fileBlock, { type: 'text', text: 'ดึงข้อมูลจากเอกสารนี้' }] }],
+    schema: RECEIPT_SCHEMA,
+    toolName: 'submit_receipt',
+    toolDescription: 'ส่งข้อมูลที่อ่านได้จากใบเสร็จ',
+    content: [fileBlock, { type: 'text', text: 'ดึงข้อมูลจากเอกสารนี้' }],
   });
-
-  if (response.stop_reason === 'refusal') throw new AppError(422, 'AI_REFUSED', 'AI ไม่สามารถอ่านเอกสารนี้ได้');
-  const text = response.content.find((b) => b.type === 'text')?.text;
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new AppError(502, 'AI_BAD_OUTPUT', 'AI ตอบกลับในรูปแบบที่อ่านไม่ได้ กรุณาลองใหม่');
-  }
 
   // Suggest a WHT type from the category (the user confirms it in the form)
   const whtHint = { ค่าเช่า: '40(5)', ค่าโฆษณา: '40(8)-ads', ค่าขนส่ง: '40(8)-transport' }[parsed.category] ?? null;
-  audit(req, 'ai.extract_receipt', 'transaction', null, { confidence: parsed.confidence, model: response.model });
+  audit(req, 'ai.extract_receipt', 'transaction', null, { confidence: parsed.confidence, model, provider });
   res.json({
     data: {
       ...parsed,
       vendorTaxId: parsed.vendorTaxId ? String(parsed.vendorTaxId).replace(/\D/g, '') || null : null,
       suggestedWhtType: whtHint ? WHT_TYPES.find((w) => w.code === whtHint) : null,
-      model: response.model,
+      model,
+      provider,
     },
   });
 });

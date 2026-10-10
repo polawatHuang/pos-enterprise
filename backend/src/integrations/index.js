@@ -2,6 +2,7 @@
 
 // Registry of all third-party adapters (see docs/API_KEYS.md for how to obtain each key)
 const adapters = [
+  require('./minimax'),
   require('./anthropic'),
   require('./tiktok'),
   require('./tiktok-shop'),

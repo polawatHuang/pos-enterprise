@@ -1,13 +1,10 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const { defineAdapter } = require('./define');
-const { notImplemented } = require('../core/errors');
+const { AppError } = require('../core/errors');
 
-// Interface is fixed now so modules can be built against it; bodies land in phase 4.
-const planned = (method) => () => {
-  adapter.requireConfig();
-  throw notImplemented(`LINE Messaging API: ${method} จะเปิดใช้งานในเฟสที่ 4`);
-};
+const API = 'https://api.line.me/v2/bot';
 
 const adapter = defineAdapter(
   {
@@ -16,20 +13,56 @@ const adapter = defineAdapter(
     category: 'chat',
     usedBy: ['inbox'],
     phase: 4,
-    purpose: 'รับ-ตอบแชตลูกค้าจาก LINE Official Account',
+    purpose: 'รับ-ตอบแชตลูกค้าจาก LINE Official Account (webhook: /webhooks/line)',
     applyUrl: 'https://developers.line.biz/console/',
     env: [
       { name: 'LINE_CHANNEL_SECRET' },
-      { name: 'LINE_CHANNEL_ACCESS_TOKEN' },
+      // Optional here: the token can also be saved per channel in Inbox settings (encrypted in DB)
+      { name: 'LINE_CHANNEL_ACCESS_TOKEN', optional: true },
     ],
   },
   {
-    /** x-line-signature = base64(HMAC-SHA256(body, channel secret)) */
-    verifySignature: planned('verifySignature'),
-    /** POST https://api.line.me/v2/bot/message/reply (reply token valid ~1 min) */
-    reply: planned('reply'),
-    /** POST https://api.line.me/v2/bot/message/push (counts against message quota) */
-    push: planned('push'),
+    /** x-line-signature = base64(HMAC-SHA256(raw body, channel secret)) */
+    verifySignature(rawBody, signature) {
+      const { LINE_CHANNEL_SECRET } = adapter.requireConfig();
+      if (!signature) return false;
+      const expected = crypto.createHmac('sha256', LINE_CHANNEL_SECRET).update(rawBody).digest('base64');
+      const a = Buffer.from(expected);
+      const b = Buffer.from(String(signature));
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
+    },
+
+    async call(path, token, body, method = 'POST') {
+      const res = await fetch(`${API}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new AppError(502, 'LINE_API_ERROR', `LINE API ${res.status}: ${text.slice(0, 200)}`);
+      }
+      return res.status === 200 && method === 'GET' ? res.json() : null;
+    },
+
+    /** Free reply; the reply token is single-use and valid for about a minute. */
+    reply(token, replyToken, text) {
+      return adapter.call('/message/reply', token, { replyToken, messages: [{ type: 'text', text: text.slice(0, 5000) }] });
+    },
+
+    /** Push works any time but counts against the OA's monthly message quota. */
+    push(token, to, text) {
+      return adapter.call('/message/push', token, { to, messages: [{ type: 'text', text: text.slice(0, 5000) }] });
+    },
+
+    async getProfile(token, userId) {
+      try {
+        return await adapter.call(`/profile/${encodeURIComponent(userId)}`, token, null, 'GET');
+      } catch {
+        return null;
+      }
+    },
   },
 );
 

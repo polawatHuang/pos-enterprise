@@ -687,12 +687,15 @@ CREATE TABLE conversations (
   customer_name     VARCHAR(191) NULL,
   status            ENUM('open','pending','resolved','closed') NOT NULL DEFAULT 'open',
   mode              ENUM('ai','human','hybrid') NOT NULL DEFAULT 'ai',
+  handoff_reason    VARCHAR(255) NULL COMMENT 'why the AI handed this chat to a human',
+  ai_lock_until     DATETIME NULL COMMENT 'claim so only one worker replies at a time',
   assigned_to       BIGINT UNSIGNED NULL,
   intent            VARCHAR(50) NULL COMMENT 'inquiry, purchase, return, complaint, ...',
   sentiment         ENUM('positive','neutral','negative') NULL,
   unread_count      INT NOT NULL DEFAULT 0,
   last_message_at   DATETIME NULL,
   last_customer_message_at DATETIME NULL COMMENT 'for Meta 24h window',
+  last_ai_reply_at  DATETIME NULL,
   created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_conv_thread (channel_id, external_thread_id),
   KEY idx_conv_status (org_id, status, last_message_at),
@@ -715,6 +718,7 @@ CREATE TABLE messages (
   ai_meta             JSON NULL COMMENT 'model, tokens, tool calls',
   created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_msg_conv (conversation_id, created_at),
+  KEY idx_msg_external (external_message_id),
   CONSTRAINT fk_msg_conv FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -727,9 +731,11 @@ CREATE TABLE returns (
   reason           VARCHAR(100) NOT NULL,
   detail           TEXT NULL,
   resolution       ENUM('pending','refund','exchange','discount','store_credit','rejected') NOT NULL DEFAULT 'pending',
+  resolution_note  TEXT NULL,
   amount           DECIMAL(14,2) NOT NULL DEFAULT 0,
   status           ENUM('requested','approved','received','completed','rejected') NOT NULL DEFAULT 'requested',
   created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_ret_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_ret_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE SET NULL,
   CONSTRAINT fk_ret_conv FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
@@ -746,6 +752,7 @@ CREATE TABLE disputes (
   summary          TEXT NULL,
   severity         ENUM('low','medium','high') NOT NULL DEFAULT 'medium',
   status           ENUM('open','negotiating','resolved','escalated','lost') NOT NULL DEFAULT 'open',
+  resolution_note  TEXT NULL,
   resolved_at      DATETIME NULL,
   created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_disp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
@@ -940,6 +947,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox');
 
 SET FOREIGN_KEY_CHECKS = 1;

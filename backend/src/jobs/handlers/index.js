@@ -21,6 +21,24 @@ const handlers = {
   },
 };
 
+/**
+ * AI reply fallback for chats whose immediate (in-request) reply did not complete, e.g. the
+ * app was recycled by Passenger. replyToConversation is idempotent, so a double run is harmless.
+ */
+handlers['inbox.ai_reply'] = async ({ conversationId }, { jobId }) => {
+  const { replyToConversation } = require('../../modules/inbox/agent.service');
+  try {
+    return await replyToConversation(conversationId);
+  } catch (err) {
+    const job = await db.one('SELECT attempts, max_attempts FROM jobs WHERE id = :jobId', { jobId });
+    if (job && job.attempts >= job.max_attempts) {
+      const { handoff } = require('../../modules/inbox/inbox.service');
+      await handoff(conversationId, 'AI ตอบไม่สำเร็จหลายครั้ง');
+    }
+    throw err;
+  }
+};
+
 /** Recurring jobs scheduled by the cron tick (idempotent: one queued instance at a time). */
 const recurring = [{ type: 'system.cleanup', everyMinutes: 60 * 24 }];
 

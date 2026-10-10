@@ -28,7 +28,7 @@ Webhooks (Meta / LINE / TikTok) ────────────────
 3. แท็บ **Import** → เลือกไฟล์ `database/schema.sql` → Character set `utf-8` → **Import**
 4. ทำซ้ำกับ `database/seed.sql` (ข้อมูลอ้างอิง + ข้อมูลตัวอย่าง)
 
-**อัปเกรดจากเวอร์ชันก่อน (ติดตั้งไว้ตั้งแต่เฟส 1–2):** ห้าม import `schema.sql` ซ้ำ ให้ import ไฟล์ใน `database/migrations/` ที่ยังไม่เคยรันทีละไฟล์ตามลำดับเลขแทน เช่น `002_accounting.sql` สำหรับเฟส 3 ตรวจว่ารันไฟล์ไหนไปแล้วได้ด้วย `SELECT * FROM schema_migrations;` (การติดตั้งใหม่ที่ใช้ `schema.sql` ปัจจุบันมี migration ครบแล้ว)
+**อัปเกรดจากเวอร์ชันก่อน (ติดตั้งไว้ตั้งแต่เฟส 1–2):** ห้าม import `schema.sql` ซ้ำ ให้ import ไฟล์ใน `database/migrations/` ที่ยังไม่เคยรันทีละไฟล์ตามลำดับเลขแทน เช่น `002_accounting.sql` สำหรับเฟส 3 และ `003_inbox.sql` สำหรับเฟส 4 ตรวจว่ารันไฟล์ไหนไปแล้วได้ด้วย `SELECT * FROM schema_migrations;` (การติดตั้งใหม่ที่ใช้ `schema.sql` ปัจจุบันมี migration ครบแล้ว)
 
 > ⚠️ `schema.sql` มี `DROP TABLE IF EXISTS` อยู่ด้านบน — **import ซ้ำ = ข้อมูลหายหมด** ใช้กับการติดตั้งครั้งแรกเท่านั้น การเปลี่ยนโครงสร้างในอนาคตจะมาเป็นไฟล์ `database/migrations/NNN_*.sql` ให้ import ทีละไฟล์ตามลำดับ
 >
@@ -93,6 +93,14 @@ COOKIE_SAMESITE=lax
 TRUST_PROXY=1
 JOB_RUNNER=cron
 APP_TZ_OFFSET=+07:00
+# AI (MiniMax เป็นค่าเริ่มต้น)
+AI_PROVIDER=minimax
+MINIMAX_API_KEY=<key จาก platform.minimax.io>
+# Inbox webhooks
+PUBLIC_API_URL=https://api.example.com
+LINE_CHANNEL_SECRET=<ถ้าใช้ LINE OA>
+META_APP_SECRET=<ถ้าใช้ Messenger/IG>
+META_WEBHOOK_VERIFY_TOKEN=<ตั้งเองแล้วใส่ค่าเดียวกันใน Meta App>
 ```
    สร้าง secret ได้ด้วย `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` (หรือ `npm run gen-secret` บนเครื่องตัวเอง)
    และ `APP_ENCRYPTION_KEY` ด้วย `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
@@ -125,6 +133,16 @@ https://api.example.com/internal/cron/tick?key=<CRON_SECRET>
 - Notify: เฉพาะเมื่อ error
 
 แต่ละ tick ทำงานได้สูงสุด ~45 วินาที / 20 งาน แล้วคืนผล งานที่ล้มเหลวจะ retry อัตโนมัติแบบ backoff (1, 4, 9, 16 นาที)
+
+## ขั้นที่ 5.1 — Webhook แชต (เฟส 4)
+
+ให้ webhook ชี้ไปที่ **โดเมน API บน Plesk โดยตรง** ไม่ต้องผ่าน Vercel เพื่อลดจุดที่อาจแก้ไข body (ลายเซ็น HMAC ตรวจจาก body ต้นฉบับ) และตอบทันอายุ reply token ของ LINE
+
+- LINE Developers → Messaging API → Webhook URL: `https://api.example.com/webhooks/line` แล้วเปิด **Use webhook**
+- Meta App → Webhooks → Page/Instagram: Callback URL `https://api.example.com/webhooks/meta` และใช้ Verify token เดียวกับ `META_WEBHOOK_VERIFY_TOKEN`
+  - subscribe field `messages`
+- ใส่ access token ของแต่ละเพจ/OA ในหน้า **ตั้งค่า AI แชต → ช่องทางแชต** (ระบบเข้ารหัสด้วย `APP_ENCRYPTION_KEY` ก่อนเก็บ)
+  - ID ของช่องทางต้องตรงกับ Page ID / LINE Bot user ID
 
 ## ขั้นที่ 6 — เชื่อมกับ Vercel
 

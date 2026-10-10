@@ -9,22 +9,33 @@
 
 | บริการ | ใช้ในโมดูล (เฟส) | ตัวแปร | ขอที่ | ต้องรอ review? |
 |---|---|---|---|---|
-| **Anthropic Claude API** | Inbox AI (4), บัญชี AI (3), สคริปต์วิดีโอ (6) | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | console.anthropic.com | ไม่ |
+| **MiniMax API** (ค่าเริ่มต้นของ AI ทุกส่วน) | AI แชตปิดการขาย (4), AI อ่านใบเสร็จ (3), สคริปต์/เสียง/วิดีโอ (6) | `MINIMAX_API_KEY`, `MINIMAX_MODEL`, `MINIMAX_BASE_URL` (`AI_PROVIDER=minimax`) | platform.minimax.io | ไม่ |
+| Anthropic Claude API (ทางเลือก) | ใช้แทน MiniMax ได้ทุกจุดเมื่อตั้ง `AI_PROVIDER=anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | console.anthropic.com | ไม่ |
 | **TikTok for Developers** — Login Kit + Content Posting API | ตั้งเวลาโพสต์ (7) | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI` | developers.tiktok.com | **ใช่** — ต้องผ่าน audit จึงโพสต์แบบ public ได้ |
 | **TikTok Shop Partner** | สินค้า/ออร์เดอร์/แชต (2, 4, 5) | `TIKTOK_SHOP_APP_KEY`, `TIKTOK_SHOP_APP_SECRET` | partner.tiktokshop.com | ใช่ (ต้องเป็น seller/partner) |
 | **Shopee Open Platform** | สต๊อก/ออร์เดอร์/แชต (2, 4) | `SHOPEE_PARTNER_ID`, `SHOPEE_PARTNER_KEY`, `SHOPEE_REDIRECT_URL` | open.shopee.com | ใช่ |
 | **Shopee Affiliate Open API** | สินค้าเทรนด์ + affiliate link (5, 7) | `SHOPEE_AFFILIATE_APP_ID`, `SHOPEE_AFFILIATE_SECRET` | affiliate.shopee.co.th | ใช่ (ต้องเป็น affiliate ที่ได้รับอนุมัติ) |
-| **Meta (Facebook/Instagram)** | แชต Messenger/IG (4), โพสต์ Reels (7) | `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` | developers.facebook.com | **ใช่** — App Review + Business Verification |
-| **LINE Messaging API** | แชต LINE OA (4) | `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN` | developers.line.biz | ไม่ |
-| **HeyGen** | AI avatar รีวิวสินค้า (6) | `HEYGEN_API_KEY` | app.heygen.com | ไม่ (ต้องมีแพ็กเกจ API) |
-| **ElevenLabs** | เสียงพากย์ไทย + timestamp ซับ (6) | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | elevenlabs.io | ไม่ |
+| **Meta (Facebook/Instagram)** | แชต Messenger/IG (4), โพสต์ Reels (7) | `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` (+ Page access token ต่อเพจ ใส่ในหน้า ตั้งค่า AI แชต หรือ `META_PAGE_ACCESS_TOKEN`) | developers.facebook.com | **ใช่** — App Review + Business Verification |
+| **LINE Messaging API** | แชต LINE OA (4) | `LINE_CHANNEL_SECRET` (+ Channel access token ใส่ในหน้า ตั้งค่า AI แชต หรือ `LINE_CHANNEL_ACCESS_TOKEN`) | developers.line.biz | ไม่ |
+| HeyGen (ทางเลือก) | AI avatar รีวิวสินค้า (6) | `HEYGEN_API_KEY` | app.heygen.com | ไม่ (ต้องมีแพ็กเกจ API) |
+| ElevenLabs (ทางเลือก) | เสียงพากย์ไทย + timestamp ซับ (6) | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | elevenlabs.io | ไม่ |
 | **Shotstack** | ประกอบคลิป 9:16 + ซับ (6) | `SHOTSTACK_API_KEY`, `SHOTSTACK_ENV` | shotstack.io | ไม่ (`stage` ฟรี มีลายน้ำ) |
 | **Cloudflare R2** | เก็บไฟล์ทั้งหมด (2–7) | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE_URL` | dash.cloudflare.com | ไม่ |
 | **Apify** (สำรอง) | scrape หน้าเว็บที่ไม่มี API (5) | `APIFY_TOKEN` | apify.com | ไม่ |
 
 ## เหตุผลที่เลือกแต่ละบริการ
 
-- **Claude (Anthropic)** — สำหรับแชตขายของภาษาไทยที่ต้องเป็นธรรมชาติและต้องเรียกเครื่องมือ (ค้นสินค้า, เช็กสต๊อก, ออกคูปองภายในเพดาน) ได้แม่นยำ ค่าเริ่มต้นใช้ `claude-opus-5-5` ซึ่งเปลี่ยนได้ทาง `ANTHROPIC_MODEL` adapter เปิด **server-side refusal fallback** (`fallbacks: "default"`) ไว้ ถ้าโมเดลปฏิเสธคำขอ ลูกค้าจะยังได้คำตอบจากโมเดลสำรองในการเรียกครั้งเดียวกัน
+- **MiniMax (ค่าเริ่มต้น)** — AI ทุกส่วนของระบบเรียกผ่าน `backend/src/integrations/ai.js` จุดเดียว ซึ่งใช้ MiniMax เป็นค่าเริ่มต้น ระบบเรียก MiniMax ผ่าน **Anthropic-compatible endpoint** (`https://api.minimax.io/anthropic`, โมเดล `MiniMax-M3`) ด้วย SDK ตัวเดียวกับ Claude จึงใช้ข้อความ รูปภาพ และ tool use (ค้นสินค้า เช็กออร์เดอร์ ออกคูปองภายในเพดาน) ได้เหมือนกัน
+  - บัญชีที่สมัครฝั่งจีนแผ่นดินใหญ่ให้ตั้ง `MINIMAX_BASE_URL=https://api.minimaxi.com/anthropic`
+  - MiniMax ยังไม่มี structured output แบบ JSON schema ระบบจึงบังคับให้ตอบผ่าน tool ตัวเดียว (`tool_choice`) แทน และถ้าโมเดลตอบเป็นข้อความ ก็มีตัวแยก JSON สำรองไว้
+  - MiniMax ยังรับไฟล์ PDF ไม่ได้ ถ้าจะให้ AI อ่านใบเสร็จ ต้องถ่ายรูปหรือแคปหน้าจอ (ระบบตอบ 400 พร้อมบอกวิธี)
+  - ระบบตัดบล็อก `<think>…</think>` (ส่วนที่โมเดลใช้คิด) ออกก่อนส่งข้อความให้ลูกค้าเสมอ
+  - เฟส 6 (วิดีโอ) จะใช้ MiniMax Speech (TTS) และ Hailuo (วิดีโอ) เป็นค่าเริ่มต้น ส่วน ElevenLabs/HeyGen เป็นทางเลือก
+  - คุณภาพเสียงพากย์ภาษาไทยของ MiniMax **ยังไม่ได้ทดสอบยืนยัน** จะทดสอบก่อนเลือกเสียงในเฟส 6
+  - เอกสารอ้างอิง: [Anthropic API compatible](https://platform.minimax.io/docs/api-reference/text-anthropic-api), [Tool use](https://platform.minimax.io/docs/guides/text-m3-function-call)
+- **Claude (ทางเลือก)** — ตั้ง `AI_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` เพื่อสลับทุกฟีเจอร์ไปใช้ Claude ได้โดยไม่ต้องแก้โค้ด
+  - ฝั่ง Claude ใช้ structured output (JSON schema) ของจริง และรองรับ PDF
+  - เปิด server-side refusal fallback ไว้ ถ้าโมเดลปฏิเสธคำขอ ระบบจะลองโมเดลสำรองในการเรียกครั้งเดียวกัน
 - **ฐานความรู้สินค้า** — ใช้ MySQL FULLTEXT บนตาราง `products` + `product_knowledge` แล้วส่งผลค้นหาเข้า prompt ไม่ต้องมี vector database เพิ่ม ซึ่งรันบน shared hosting ได้ และอัปเกรดเป็น embeddings ภายหลังได้
 - **HeyGen + ElevenLabs + Shotstack** — แยกหน้าที่ (avatar / เสียง / ประกอบคลิป) ทำให้เปลี่ยนทีละส่วนได้ ทั้งหมดเรนเดอร์บนคลาวด์ จึงไม่ต้องใช้ ffmpeg/GPU บน Plesk ส่วน ElevenLabs ให้ timestamp ระดับตัวอักษร จึงทำซับไตเติลไทยได้ตรงจังหวะ
 - **Cloudflare R2** — ไม่มีค่า egress เหมาะกับวิดีโอที่ต้องให้ TikTok/Meta ดึงไฟล์ไป (`PULL_FROM_URL`) และอัปโหลดตรงจาก browser ได้โดยไม่ผ่านโฮสต์
@@ -53,7 +64,13 @@
 
 **ข้อมูลส่วนบุคคล (PDPA)**
 - ข้อมูลแชตและลูกค้าเป็นข้อมูลส่วนบุคคล ต้องมีนโยบายความเป็นส่วนตัว และเก็บความยินยอมก่อนส่งการตลาด (`customers.consent_marketing`)
-- การส่งบทสนทนาไปประมวลผลที่ผู้ให้บริการ AI ต่างประเทศ ควรระบุไว้ในนโยบายความเป็นส่วนตัว
+- การส่งบทสนทนาไปประมวลผลที่ผู้ให้บริการ AI ต่างประเทศ (MiniMax/Anthropic) ควรระบุไว้ในนโยบายความเป็นส่วนตัว
+
+**LINE OA**
+- ระบบตอบด้วย reply token ก่อน (ฟรี ใช้ได้ราว 1 นาที) ถ้าหมดอายุจะเปลี่ยนไปใช้ push message ซึ่งนับโควตาข้อความรายเดือนของแพ็กเกจ OA
+
+**Shopee / TikTok Shop Chat**
+- API แชตของสองแพลตฟอร์มนี้ต้องได้สิทธิ์เฉพาะจาก partner program ระบบเตรียมช่องทางและตารางไว้แล้ว แต่ยังไม่รับ-ส่งข้อความจริงจนกว่าจะได้สิทธิ์
 
 **ภาษี**
 - แบบ ภ.พ.30 / ภ.ง.ด.3/53 ที่ระบบสร้างเป็นร่างเพื่อช่วยงาน ควรให้ผู้ทำบัญชีตรวจทานก่อนยื่น
