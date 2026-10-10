@@ -46,6 +46,18 @@
 **Scraping**
 - ข้อตกลงการใช้งานของ Shopee และ TikTok **ห้าม** scrape ด้วยบอทโดยไม่ได้รับอนุญาต และทั้งสองแพลตฟอร์มมีระบบ anti-bot ที่อาจแบนบัญชี/IP ได้ ระบบนี้จึงใช้ **API ทางการเป็นหลัก** (Affiliate API, Shop API)
 - Apify/HTTP fetch มีไว้เป็นทางเลือกสำหรับเว็บที่อนุญาตเท่านั้น เคารพ `robots.txt`, rate limit และอย่าเก็บข้อมูลส่วนบุคคลของผู้ขาย/ผู้ซื้อ
+- แหล่งแบบ "หน้าเว็บ (JSON-LD)" ตรวจ `robots.txt` ทุกครั้ง และ**ปฏิเสธโดเมน Shopee, TikTok และ Lazada ในโค้ด**
+- TikTok Shop Partner API และ Shopee Open Platform ให้ข้อมูลเฉพาะร้านตัวเอง ไม่มีข้อมูลสินค้าขายดีของทั้งตลาด
+  - ข้อมูลเทรนด์ฝั่ง TikTok ให้ใช้ **นำเข้า CSV** จากไฟล์ export ของเครื่องมือวิเคราะห์ที่คุณมีสิทธิ์ใช้
+  - ตรวจข้อตกลงของเครื่องมือนั้นเรื่องการนำข้อมูลออกด้วย
+
+**Shopee Affiliate Open API (เฟส 5)**
+- สมัครที่ affiliate.shopee.co.th → เมนู Open API (ต้องเป็น affiliate ที่ได้รับอนุมัติแล้ว) จะได้ App ID และ Secret
+- ระบบเรียก GraphQL `productOfferV2` (สินค้าขายดี/ค่าคอมสูง) และ `generateShortLink` (ลิงก์ affiliate พร้อม sub id ต่อแคมเปญ)
+- ลงลายเซ็นด้วย `SHA256(AppId + Timestamp + Payload + Secret)`
+- โค้ดนี้เขียนตามเอกสารของ Shopee แต่**ยังไม่ได้ทดสอบกับ key จริง**
+  - ถ้า Shopee เปลี่ยนชื่อฟิลด์ ให้แก้ที่ `backend/src/integrations/shopee-affiliate.js` ไฟล์เดียว
+  - endpoint เปลี่ยนได้ด้วย `SHOPEE_AFFILIATE_ENDPOINT`
 
 **TikTok Content Posting API**
 - ก่อนผ่าน audit โพสต์ได้เฉพาะแบบ `SELF_ONLY` (ส่วนตัว)

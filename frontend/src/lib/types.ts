@@ -617,3 +617,92 @@ export interface AiOffer {
   code: string | null;
   createdAt: string;
 }
+
+/* ----------------------------------------------------------------- trends */
+
+export type TrendStatus = "new" | "watching" | "imported" | "ignored";
+
+export interface TrendItem {
+  id: number;
+  sourceId: number | null;
+  sourceName: string | null;
+  platform: string;
+  externalId: string;
+  title: string;
+  url: string | null;
+  shopName: string | null;
+  imageUrl: string | null;
+  price: number | null;
+  soldCount: number | null;
+  soldVelocity: number | null;
+  rating: number | null;
+  commissionRate: number | null;
+  category: string | null;
+  trendScore: number | null;
+  status: TrendStatus;
+  importedProductId: number | null;
+  affiliateLinkId: number | null;
+  affiliateUrl: string | null;
+  hasAnalysis: boolean;
+  aiAnalyzedAt: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface TrendAnalysis {
+  fitScore: number;
+  verdict: string;
+  targetAudience: string;
+  sellingPoints: string[];
+  videoHooks: string[];
+  contentAngle: string;
+  risks: string[];
+  suggestedPrice: number | null;
+  provider?: string;
+  model?: string;
+}
+
+export interface TrendDetail extends TrendItem {
+  aiAnalysis: TrendAnalysis | null;
+  snapshots: { capturedAt: string; price: number | null; soldCount: number | null; rating: number | null; commissionRate: number | null }[];
+}
+
+export interface TrendListMeta {
+  page: number;
+  pageSize: number;
+  total: number;
+  platforms: { platform: string; count: number }[];
+}
+
+export type SourcePlatform = "shopee_affiliate" | "apify" | "custom_url" | "tiktok_shop" | "shopee";
+
+export interface ScrapeSource {
+  id: number;
+  platform: SourcePlatform;
+  method: string;
+  name: string;
+  config: Record<string, unknown>;
+  intervalHours: number | null;
+  isActive: boolean;
+  lastRunAt: string | null;
+  lastError: string | null;
+  runnable: boolean;
+  notRunnableReason: string | null;
+  configured: boolean;
+  missingEnv: string[];
+  itemCount: number;
+}
+
+export interface ScrapeRun {
+  id: number;
+  sourceId: number;
+  sourceName: string;
+  platform: string;
+  status: "running" | "succeeded" | "failed";
+  itemsFound: number;
+  itemsNew: number;
+  error: string | null;
+  triggeredBy: string;
+  startedAt: string;
+  finishedAt: string | null;
+}

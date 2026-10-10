@@ -308,7 +308,8 @@ describe('trends API', () => {
     assert.equal(pre.body.data.mapping.soldCount, 3);
     const n0 = await db.one('SELECT COUNT(*) AS n FROM trending_products WHERE external_id LIKE :e', { e: `t5-${RUN}-c%` });
     assert.equal(Number(n0.n), 0);
-    const imp = await marketer.post('/api/scraping/trends/import-csv', { csv, platform: 'tiktok_shop' });
+    // The UI sends back the (partial) mapping it showed in the preview
+    const imp = await marketer.post('/api/scraping/trends/import-csv', { csv, platform: 'tiktok_shop', mapping: pre.body.data.mapping });
     assert.equal(imp.status, 200);
     assert.equal(imp.body.data.created, 2);
     const again = await marketer.post('/api/scraping/trends/import-csv', { csv, platform: 'tiktok_shop' });

@@ -306,7 +306,7 @@ router.post(
     body: z.object({
       csv: z.string().min(1).max(2 * 1024 * 1024, 'ไฟล์ใหญ่เกิน 2 MB'),
       platform: z.enum(['shopee', 'tiktok_shop', 'lazada', 'other']),
-      mapping: z.record(z.enum(FIELDS), z.number().int().min(0)).optional(),
+      mapping: z.partialRecord(z.enum(FIELDS), z.number().int().min(0)).optional(),
       preview: z.boolean().default(false),
     }),
   }),

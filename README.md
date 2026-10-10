@@ -72,4 +72,16 @@ cd frontend && npm run lint && npx tsc --noEmit && npm run build
 
 **AI ทุกส่วนใช้ MiniMax เป็นค่าเริ่มต้น:** ตั้ง `MINIMAX_API_KEY` ตัวเดียวก็ใช้ได้ ถ้าต้องการใช้ Claude แทน ให้ตั้ง `AI_PROVIDER=anthropic`
 
-**เฟสถัดไป:** 5 Data Scraping → 6 AI Video → 7 Auto-post + Affiliate
+**เฟส 5 (ส่งมอบแล้ว):**
+- สินค้าเทรนด์จากแหล่งที่ไม่ผิดข้อกำหนด:
+  - Shopee Affiliate API
+  - นำเข้า CSV
+  - Apify
+  - หน้าเว็บที่อนุญาต (อ่าน JSON-LD และเคารพ robots.txt)
+- ตั้งเวลาดึงข้อมูลอัตโนมัติ
+- คะแนนเทรนด์คำนวณจากความเร็วยอดขาย พร้อมกราฟ
+- AI วิเคราะห์ความเหมาะสม จุดขาย ไอเดียเปิดคลิป และความเสี่ยง
+- นำเข้าเป็นสินค้าแบบร่าง
+- สร้างลิงก์ Shopee affiliate
+
+**เฟสถัดไป:** 6 AI Video → 7 Auto-post + Affiliate
