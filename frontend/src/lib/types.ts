@@ -136,3 +136,161 @@ export interface IntegrationStatus {
   configured: boolean;
   env: { name: string; optional: boolean; set: boolean }[];
 }
+
+/* ------------------------------------------------------------- Phase 2 */
+
+export type VatType = "vat7" | "exempt" | "zero";
+export type ProductStatus = "active" | "draft" | "archived";
+
+export interface Product {
+  id: number;
+  sku: string;
+  barcode: string | null;
+  name: string;
+  categoryId: number | null;
+  categoryName: string | null;
+  description: string | null;
+  sellingPoints: string | null;
+  unit: string;
+  price: number;
+  cost: number;
+  vatType: VatType;
+  reorderPoint: number;
+  imageUrl: string | null;
+  status: ProductStatus;
+  onHand: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductDetail extends Product {
+  stock: { warehouseId: number; code: string; name: string; quantity: number }[];
+}
+
+export interface Category {
+  id: number;
+  name: string;
+  parentId: number | null;
+  sortOrder: number;
+  productCount: number;
+}
+
+export interface KnowledgeEntry {
+  id: number;
+  kind: "faq" | "policy" | "objection" | "usage" | "other";
+  question: string | null;
+  answer: string;
+  createdAt: string;
+}
+
+export interface Warehouse {
+  id: number;
+  code: string;
+  name: string;
+  branchId: number | null;
+  branchName: string | null;
+  totalUnits: number;
+  stockValue: number;
+}
+
+export interface StockLevel {
+  productId: number;
+  sku: string;
+  name: string;
+  unit: string;
+  cost: number;
+  price: number;
+  reorderPoint: number;
+  quantity: number;
+  value: number;
+}
+
+export type MovementType = "purchase" | "sale" | "return" | "adjustment" | "transfer_in" | "transfer_out" | "opening";
+
+export interface StockMovement {
+  id: number;
+  type: MovementType;
+  quantity: number;
+  unitCost: number | null;
+  refType: string | null;
+  refId: number | null;
+  note: string | null;
+  createdAt: string;
+  productId: number;
+  sku: string;
+  productName: string;
+  warehouseName: string;
+  userName: string | null;
+}
+
+export interface Paged<T> {
+  data: T[];
+  meta: { page: number; pageSize: number; total: number };
+}
+
+export interface CatalogItem {
+  id: number;
+  sku: string;
+  barcode: string | null;
+  name: string;
+  price: number;
+  unit: string;
+  imageUrl: string | null;
+  categoryId: number | null;
+  vatType: VatType;
+  stock: number;
+}
+
+export type PaymentMethod = "cash" | "promptpay" | "card" | "transfer";
+
+export interface Shift {
+  id: number;
+  branchId: number;
+  branchName: string;
+  openedAt: string;
+  closedAt: string | null;
+  openingCash: number;
+  closingCash: number | null;
+  expectedCash: number;
+  difference?: number;
+  stats: { orders: number; sales: number; voided: number; byMethod: Record<string, number> };
+}
+
+export interface PosOrder {
+  id: number;
+  orderNo: string;
+  channel: string;
+  status: string;
+  shiftId: number | null;
+  branchName: string | null;
+  branchNo: string | null;
+  cashierName: string | null;
+  customerName: string | null;
+  subtotal: number;
+  discount: number;
+  vatAmount: number;
+  total: number;
+  orderedAt: string;
+  change?: number;
+  items: { productId: number; name: string; quantity: number; unitPrice: number; discount: number; lineTotal: number }[];
+  payments: { method: string; amount: number; reference: string | null; paidAt: string }[];
+}
+
+export interface PosOrderRow {
+  id: number;
+  orderNo: string;
+  status: string;
+  total: number;
+  orderedAt: string;
+  cashierName: string | null;
+  method: string | null;
+  items: number;
+}
+
+export interface PosSettings {
+  promptpayId: string;
+  receiptFooter: string;
+  maxDiscountPct: number;
+  promptpayEnabled: boolean;
+  org: { name: string; legalName: string | null; taxId: string | null; address: string | null; phone: string | null; vatRegistered: boolean };
+}

@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
-import { ModulePlaceholder } from "@/components/layout/module-placeholder";
-import { modules } from "@/config/modules";
+import { RequirePermission } from "@/components/layout/page";
+import { ProductsView } from "@/components/products/products-view";
 
 export const metadata: Metadata = { title: "สินค้า" };
 
-export default function Page() {
-  return <ModulePlaceholder spec={modules.products} />;
+export default function ProductsPage() {
+  return (
+    <RequirePermission permission="products:read">
+      <ProductsView />
+    </RequirePermission>
+  );
 }

@@ -132,3 +132,25 @@
   scrollbar-width: thin;
   scrollbar-color: color-mix(in oklch, var(--sidebar-muted) 40%, transparent) transparent;
 }
+
+/* Receipt printing: only the receipt is visible, sized for 80mm thermal printers */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 3mm;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .print-receipt,
+  .print-receipt * {
+    visibility: visible;
+  }
+  .print-receipt {
+    position: fixed;
+    inset: 0 auto auto 0;
+    width: 74mm;
+    max-width: none;
+    padding: 0;
+  }
+}

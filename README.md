@@ -55,4 +55,6 @@ cd frontend && npm run lint && npx tsc --noEmit && npm run build
 
 **เฟส 1 (ส่งมอบแล้ว):** โครงสร้างทั้งสองฝั่ง · schema ครบทุกโมดูล · auth + RBAC 8 บทบาท · จัดการผู้ใช้ · layout responsive + dark mode · Smart Dashboard · คิวงานเบื้องหลัง · adapter สำหรับ API ภายนอกทุกเจ้า · คู่มือ deploy
 
-**เฟสถัดไป:** 2 สินค้า/สต๊อก/POS → 3 บัญชี/ภาษี → 4 Unified Inbox + AI → 5 Data Scraping → 6 AI Video → 7 Auto-post + Affiliate
+**เฟส 2 (ส่งมอบแล้ว):** จัดการสินค้า + ฐานความรู้ AI · สต๊อกหลายคลัง (รับเข้า/ปรับยอด/โอนย้าย/ประวัติ, ต้นทุนถัวเฉลี่ย) · POS หน้าร้าน (เปิด-ปิดกะ, สแกนบาร์โค้ด, เงินสด/PromptPay QR/บัตร/โอน, ใบเสร็จ 80mm, ยกเลิกบิลพร้อมคืนสต๊อก)
+
+**เฟสถัดไป:** 3 บัญชี/ภาษี → 4 Unified Inbox + AI → 5 Data Scraping → 6 AI Video → 7 Auto-post + Affiliate

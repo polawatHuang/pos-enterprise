@@ -73,12 +73,30 @@ frontend/src/config/nav.ts               # เพิ่มเมนู + permiss
 | `GET /api/dashboard/cashflow?months=` | รายรับ–รายจ่ายรายเดือน |
 | `GET /api/dashboard/low-stock` · `/inbox` · `/trending` · `/activity` | แผงสรุปจากแต่ละโมดูล |
 
+## สินค้า สต๊อก และ POS (เฟส 2)
+
+**ความถูกต้องของสต๊อก:** ทุกการเปลี่ยนแปลงสต๊อก (ขาย, รับเข้า, ปรับยอด, โอน, ยกเลิกบิล) ผ่านฟังก์ชันเดียว `applyMovement()` ใน `backend/src/modules/inventory/inventory.service.js` ซึ่งล็อกแถว `stock_levels` ด้วย `SELECT ... FOR UPDATE` ภายใน transaction และบันทึก `stock_movements` ทุกครั้ง POS หลายเครื่องจึงขายสินค้าชิ้นเดียวกันพร้อมกันได้โดยไม่ขายเกินสต๊อก ถ้ารายการใดในบิลสต๊อกไม่พอ ทั้งบิลจะ rollback
+
+**ราคาและภาษี:** ราคาขายรวม VAT (แบบร้านค้าปลีกไทย) และ server คำนวณราคาจากฐานข้อมูลทุกครั้ง (ไม่เชื่อราคาจาก client) VAT ถอดจากเฉพาะสินค้า `vat7` หลังกระจายส่วนลดท้ายบิลตามสัดส่วน ต้นทุนใช้แบบถัวเฉลี่ยเคลื่อนที่ (moving average) เมื่อรับสินค้าเข้า
+
+**การควบคุมแคชเชียร์:** ต้องเปิดกะก่อนขาย · การแก้ราคาและส่วนลดเกิน `pos.max_discount_pct` (ค่าเริ่มต้น 20%) ต้องมีสิทธิ์ `pos:manage` · การยกเลิกบิลต้องมีสิทธิ์ `pos:manage` และระบบจะคืนสต๊อกพร้อมบันทึกยอดเงินติดลบ · ตอนปิดกะระบบคำนวณเงินสดที่ควรมี (เงินทอนเริ่มต้น + เงินสดรับ − เงินสดคืน) แล้วเทียบกับยอดที่นับได้
+
+**PromptPay:** `backend/src/utils/promptpay.js` สร้าง payload ตามมาตรฐาน EMVCo/ธปท. (CRC16-CCITT) พร้อมยอดเงิน แล้ว frontend แสดงเป็น QR ตั้งหมายเลขได้ที่ปุ่ม "ตั้งค่า POS" (ผู้จัดการ)
+
+| Endpoint | สิทธิ์ |
+|---|---|
+| `GET/POST/PATCH /api/products`, `/api/products/:id`, `/api/products/categories`, `/api/products/:id/knowledge` | `products:read` / `products:write` |
+| `GET /api/inventory/{warehouses,levels,movements,suppliers}` | `inventory:read` |
+| `POST /api/inventory/{receive,adjust,transfer}` | `inventory:write` |
+| `GET /api/pos/{catalog,lookup,settings,promptpay,shift,orders,orders/:id}`, `POST /api/pos/{shift/open,shift/close,checkout}` | `pos:sell` |
+| `PUT /api/pos/settings`, `POST /api/pos/orders/:id/void` | `pos:manage` |
+
 ## Roadmap
 
 | เฟส | โมดูล | เหตุผลของลำดับ |
 |---|---|---|
 | 1 ✅ | รากฐาน: โครงสองโปรเจกต์, schema ครบทุกโมดูล, auth + RBAC, layout, Smart Dashboard, คู่มือ deploy | ทุกโมดูลใช้ร่วมกัน |
-| 2 | สินค้า + สต๊อก + POS | สินค้าเป็นข้อมูลกลางของทุกโมดูล (AI ใช้เป็นฐานความรู้, วิดีโอใช้เป็นวัตถุดิบ) |
+| 2 ✅ | สินค้า + สต๊อก + POS | สินค้าเป็นข้อมูลกลางของทุกโมดูล (AI ใช้เป็นฐานความรู้, วิดีโอใช้เป็นวัตถุดิบ) |
 | 3 | บัญชี + เอกสาร + ภาษี + AI อ่านใบเสร็จ + R2 | รับข้อมูลขายจากเฟส 2 ไปลงบัญชีอัตโนมัติ |
 | 4 | Unified Inbox + AI Agent + Return/Dispute | ต้องมีสินค้า สต๊อก ออร์เดอร์ และคูปองให้ AI ใช้ |
 | 5 | Data Scraping / สินค้าเทรนด์ | ป้อนสินค้าให้การทำคอนเทนต์ |

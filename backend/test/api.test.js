@@ -99,7 +99,7 @@ describe('RBAC', () => {
   test('cashier cannot see the dashboard but can reach POS', async () => {
     const c = cookieHeader(await login('cashier@example.com'));
     assert.equal((await request(app).get('/api/dashboard/summary').set('Cookie', c)).status, 403);
-    assert.equal((await request(app).get('/api/pos').set('Cookie', c)).status, 200);
+    assert.equal((await request(app).get('/api/pos/settings').set('Cookie', c)).status, 200);
     assert.equal((await request(app).get('/api/users').set('Cookie', c)).status, 403);
   });
 

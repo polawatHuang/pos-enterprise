@@ -57,12 +57,12 @@ function createApp() {
   app.use('/api/org', require('./modules/org/org.routes').router);
   app.use('/api/dashboard', require('./modules/dashboard/dashboard.routes').router);
   app.use('/api/integrations', require('./modules/integrations/integrations.routes').router);
+  app.use('/api/products', require('./modules/products/products.routes').router);
+  app.use('/api/inventory', require('./modules/inventory/inventory.routes').router);
+  app.use('/api/pos', require('./modules/pos/pos.routes').router);
 
   // Planned modules: URL + permission contract fixed now, implementation in later phases.
   const stubs = [
-    { path: 'products', name: 'products', phase: 2, permission: 'products:read' },
-    { path: 'inventory', name: 'inventory', phase: 2, permission: 'inventory:read' },
-    { path: 'pos', name: 'pos', phase: 2, permission: 'pos:sell' },
     { path: 'accounting', name: 'accounting', phase: 3, permission: 'accounting:read', integrations: ['anthropic', 'r2'] },
     { path: 'inbox', name: 'inbox', phase: 4, permission: 'inbox:read', integrations: ['anthropic', 'meta', 'line', 'shopee', 'tiktok_shop'] },
     { path: 'scraping', name: 'scraping', phase: 5, permission: 'scraping:read', integrations: ['tiktok_shop', 'shopee', 'shopee_affiliate', 'apify'] },
