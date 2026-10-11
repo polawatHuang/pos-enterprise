@@ -10,7 +10,7 @@ const DEFAULT_ENDPOINT = 'https://open-api.affiliate.shopee.co.th/graphql';
 const SORT = { relevance: 1, sales: 2, price_desc: 3, price_asc: 4, commission: 5 };
 
 const OFFER_FIELDS = `itemId productName priceMin priceMax sales ratingStar commissionRate
-  imageUrl productLink offerLink shopName productCatIds`;
+  imageUrl productLink offerLink shopName productCatIds priceDiscountRate shopType`;
 
 const adapter = defineAdapter(
   {
@@ -86,6 +86,8 @@ const adapter = defineAdapter(
           // API returns a fraction as a string, e.g. "0.12"
           commissionRate: n.commissionRate != null ? Math.round(Number(n.commissionRate) * 10000) / 100 : null,
           category: Array.isArray(n.productCatIds) && n.productCatIds.length ? String(n.productCatIds[0]) : null,
+          // The API has no flash-sale flag; a live discount is the closest signal (absence stays unknown)
+          hasFlashSale: Number(n.priceDiscountRate) > 0 ? true : null,
           raw: n,
         })),
       };

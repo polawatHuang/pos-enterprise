@@ -1,4 +1,4 @@
-import type { SourcePlatform, TrendStatus } from "@/lib/types";
+import type { ChecklistStatus, LifecyclePhase, SourcePlatform, TrendStatus } from "@/lib/types";
 
 type Tone = "neutral" | "primary" | "success" | "danger" | "warning";
 
@@ -30,6 +30,7 @@ export const SOURCE_PLATFORM: Record<SourcePlatform, { label: string; method: st
 };
 
 export const SORT_OPTIONS = [
+  { value: "pick", label: "เหมาะทำนายหน้า" },
   { value: "score", label: "คะแนนเทรนด์" },
   { value: "velocity", label: "ขายเร็ว (ชิ้น/วัน)" },
   { value: "sold", label: "ยอดขายรวม" },
@@ -49,7 +50,47 @@ export const CSV_FIELDS: { key: string; label: string }[] = [
   { key: "url", label: "ลิงก์" },
   { key: "imageUrl", label: "รูป" },
   { key: "category", label: "หมวดหมู่" },
+  { key: "categoryRank", label: "อันดับในหมวด" },
+  { key: "monthlySold", label: "ขายเดือนที่แล้ว" },
+  { key: "prevMonthlySold", label: "ขายเดือนก่อนหน้า" },
+  { key: "reviewCount", label: "จำนวนรีวิว" },
+  { key: "mediaReviewCount", label: "รีวิวรูป/วิดีโอ" },
+  { key: "positiveReviewPct", label: "รีวิวเชิงบวก (%)" },
+  { key: "shopRating", label: "คะแนนร้าน" },
+  { key: "shopResponseRate", label: "อัตราตอบกลับ (%)" },
+  { key: "shopShip48Rate", label: "จัดส่งใน 48 ชม. (%)" },
+  { key: "hasFlashSale", label: "แฟลชเซล (มี/ไม่มี)" },
 ];
+
+/** Lifecycle phases (book: 1–5 rising, A peak, B–E declining; 3 is the sweet spot, 2–4 acceptable). */
+export const PHASES: LifecyclePhase[] = ["1", "2", "3", "4", "5", "A", "B", "C", "D", "E"];
+export const PHASE_META: Record<LifecyclePhase, { label: string; hint: string; tone: Tone }> = {
+  "1": { label: "เริ่มมีคนซื้อ", hint: "ยังเร็วไป ความต้องการยังน้อย", tone: "neutral" },
+  "2": { label: "ขาขึ้น", hint: "เริ่มเป็นกระแส รับได้", tone: "primary" },
+  "3": { label: "จังหวะดีที่สุด", hint: "ความต้องการกำลังโต คนทำคลิปยังไม่เยอะ", tone: "success" },
+  "4": { label: "ใกล้พีก", hint: "ยังทำได้ แต่ต้องเร็ว", tone: "primary" },
+  "5": { label: "เกือบอิ่มตัว", hint: "คู่แข่งเยอะแล้ว", tone: "warning" },
+  A: { label: "จุดสูงสุด", hint: "ตลาดอิ่มตัว", tone: "warning" },
+  B: { label: "เริ่มขาลง", hint: "ความต้องการเริ่มลด", tone: "danger" },
+  C: { label: "ขาลง", hint: "ความต้องการลดชัดเจน", tone: "danger" },
+  D: { label: "ขาลงหนัก", hint: "ไม่แนะนำ", tone: "danger" },
+  E: { label: "หมดกระแส", hint: "ไม่แนะนำ", tone: "danger" },
+};
+export const phaseLabel = (p: LifecyclePhase) => `Phase ${p} · ${PHASE_META[p].label}`;
+
+export const CHECK_STATUS: Record<ChecklistStatus, { label: string; tone: Tone }> = {
+  pass: { label: "ผ่าน", tone: "success" },
+  partial: { label: "พอใช้", tone: "warning" },
+  fail: { label: "ไม่ผ่าน", tone: "danger" },
+  unknown: { label: "ยังไม่มีข้อมูล", tone: "neutral" },
+};
+
+export const PHASE_FILTERS = [
+  { value: "all", label: "ทุก Phase" },
+  { value: "2-4", label: "เฉพาะ Phase 2–4" },
+  { value: "rising", label: "ขาขึ้น (1–5)" },
+  { value: "declining", label: "ขาลง (B–E)" },
+] as const;
 
 /** Score → tone for the badge (status-like meaning, shown with the number, never color alone). */
 export const scoreTone = (s: number | null): Tone => (s == null ? "neutral" : s >= 80 ? "success" : s >= 60 ? "primary" : s >= 40 ? "warning" : "neutral");

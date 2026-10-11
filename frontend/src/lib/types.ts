@@ -638,7 +638,22 @@ export interface TrendItem {
   rating: number | null;
   commissionRate: number | null;
   category: string | null;
+  categoryRank: number | null;
+  monthlySold: number | null;
+  prevMonthlySold: number | null;
+  reviewCount: number | null;
+  mediaReviewCount: number | null;
+  positiveReviewPct: number | null;
+  shopRating: number | null;
+  shopResponseRate: number | null;
+  shopShip48Rate: number | null;
+  hasFlashSale: boolean | null;
   trendScore: number | null;
+  /** Lifecycle phase: "1"–"5" rising, "A" peak, "B"–"E" declining */
+  phase: LifecyclePhase | null;
+  phaseRatio: number | null;
+  checklistPassed: number | null;
+  pickScore: number | null;
   status: TrendStatus;
   importedProductId: number | null;
   affiliateLinkId: number | null;
@@ -658,11 +673,34 @@ export interface TrendAnalysis {
   contentAngle: string;
   risks: string[];
   suggestedPrice: number | null;
+  phaseComment?: string;
+  channelFit?: string | null;
+  channelProfile?: { id: number; name: string } | null;
   provider?: string;
   model?: string;
 }
 
+export type LifecyclePhase = "1" | "2" | "3" | "4" | "5" | "A" | "B" | "C" | "D" | "E";
+export type ChecklistKey = "phase" | "rating" | "positiveReviews" | "mediaReviews" | "shopRating" | "responseRate" | "ship48" | "commission" | "flashSale";
+export type ChecklistStatus = "pass" | "partial" | "fail" | "unknown";
+
+export interface ChecklistItem {
+  key: ChecklistKey;
+  label: string;
+  status: ChecklistStatus;
+  manual: boolean;
+}
+
+export interface TrendBenchmark {
+  peak: number;
+  source: "auto" | "manual";
+}
+
 export interface TrendDetail extends TrendItem {
+  phaseNotes: { confidence: "high" | "medium" | "low" | null; declining: boolean; reasons: string[]; peak: number | null; peakSource: "auto" | "manual" | null } | null;
+  checklist: ChecklistItem[];
+  manualChecks: Partial<Record<ChecklistKey, boolean>>;
+  benchmark: TrendBenchmark | null;
   aiAnalysis: TrendAnalysis | null;
   snapshots: { capturedAt: string; price: number | null; soldCount: number | null; rating: number | null; commissionRate: number | null }[];
 }
@@ -672,6 +710,55 @@ export interface TrendListMeta {
   pageSize: number;
   total: number;
   platforms: { platform: string; count: number }[];
+}
+
+export interface CsvTemplateColumn {
+  field: string;
+  header: string;
+  description: string;
+  required: boolean;
+  example: string | number | null;
+}
+
+export interface CsvTemplate {
+  filename: string;
+  csv: string;
+  columns: CsvTemplateColumn[];
+}
+
+export interface CategoryBenchmark {
+  platform: string;
+  category: string;
+  items: number;
+  topSold: number | null;
+  peakSold: number | null;
+  source: "auto" | "manual" | null;
+  updatedAt: string | null;
+}
+
+export interface ChannelPlan {
+  concept: string;
+  channelNames: string[];
+  contentFormats: string[];
+  identity: string;
+  promotionPlan: string[];
+  contentExamples: string[];
+  productCategories: { category: string; why: string; keywords: string[] }[];
+  provider?: string;
+  model?: string;
+}
+
+export interface ChannelProfile {
+  id: number;
+  name: string;
+  persona: string;
+  interests: string[];
+  audience: string | null;
+  onCamera: boolean;
+  isDefault: boolean;
+  aiPlan: ChannelPlan | null;
+  aiPlannedAt: string | null;
+  updatedAt: string;
 }
 
 export type SourcePlatform = "shopee_affiliate" | "apify" | "custom_url" | "tiktok_shop" | "shopee";

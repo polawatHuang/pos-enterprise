@@ -423,21 +423,53 @@ insert('scrape_sources', ['id', 'org_id', 'platform', 'method', 'name', 'config'
   [1, 1, 'shopee_affiliate', 'official_api', 'Shopee Affiliate — สินค้าค่าคอมสูง', JSON.stringify({ sortType: 'commission', limit: 50 }), 12, 1],
   [2, 1, 'custom_url', 'http_fetch', 'หน้าสินค้าเว็บพาร์ทเนอร์ (ตัวอย่าง)', JSON.stringify({ urls: ['https://example.com/product'] }), null, 0],
 ]);
-// [platform, title, price, sold now, commission %, rating, units/day, shop]
+// [platform, title, price, sold now, commission %, rating, units/day, shop, category, category rank,
+//  sold last month, month before, reviews, photo/video reviews, positive %, shop rating, response %, shipped<48h %, flash sale]
+// Rows 9–13 follow the worked examples in docs/PRODUCT_RESEARCH.md (T-shirt, storage boxes, shelf).
 const trends = [
-  ['shopee', 'ที่ดูดฝุ่นไร้สายมินิ', 459, 18200, 12, 4.7, 140, 'HomeTech Official'],
-  ['tiktok_shop', 'ลิปทินท์เนื้อแมตต์', 129, 54300, 15, 4.8, 1150, 'Glow Beauty TH'],
-  ['shopee', 'กระบอกน้ำเก็บอุณหภูมิ 1L', 299, 22100, 10, 4.6, 210, 'Daily Gear'],
-  ['tiktok_shop', 'ไฟเส้น LED ตกแต่งห้อง', 199, 31800, 14, 4.5, 520, 'Room Vibe'],
-  ['shopee', 'แผ่นแปะสิวไฮโดรคอลลอยด์', 89, 67400, 18, 4.9, 1600, 'Skin First'],
-  ['tiktok_shop', 'พัดลมพกพาคล้องคอ', 359, 15900, 11, 4.4, 380, 'Cool Mate'],
-  ['shopee', 'ผ้าห่มขนนุ่ม', 390, 9800, 9, 4.6, 35, 'Sleep Well'],
-  ['tiktok_shop', 'เคสมือถือกันกระแทก', 159, 41200, 20, 4.3, 760, 'Case Lab'],
+  ['shopee', 'ที่ดูดฝุ่นไร้สายมินิ', 459, 18200, 12, 4.7, 140, 'HomeTech Official', 'เครื่องใช้ไฟฟ้าขนาดเล็ก', 14, 4300, 3600, 2100, 410, 91, 4.8, 92, 78, 1],
+  ['tiktok_shop', 'ลิปทินท์เนื้อแมตต์', 129, 54300, 15, 4.8, 1150, 'Glow Beauty TH', 'ความงาม', 3, 33000, 31000, 12800, 3900, 94, 4.9, 97, 88, 1],
+  ['shopee', 'กระบอกน้ำเก็บอุณหภูมิ 1L', 299, 22100, 10, 4.6, 210, 'Daily Gear', 'ของใช้ในบ้าน', 18, 6200, 5100, 3300, 620, 88, 4.7, 81, 70, null],
+  ['tiktok_shop', 'ไฟเส้น LED ตกแต่งห้อง', 199, 31800, 14, 4.5, 520, 'Room Vibe', 'เครื่องใช้ไฟฟ้าขนาดเล็ก', 6, 15200, 14800, 5400, 880, 84, 4.6, 88, 72, 1],
+  ['shopee', 'แผ่นแปะสิวไฮโดรคอลลอยด์', 89, 67400, 18, 4.9, 1600, 'Skin First', 'ความงาม', 1, 41000, 43000, 21000, 5200, 96, 4.9, 99, 95, 1],
+  ['tiktok_shop', 'พัดลมพกพาคล้องคอ', 359, 15900, 11, 4.4, 380, 'Cool Mate', 'เครื่องใช้ไฟฟ้าขนาดเล็ก', 22, 9800, 9100, 1900, 150, 74, 4.3, 69, 58, 0],
+  ['shopee', 'ผ้าห่มขนนุ่ม', 390, 9800, 9, 4.6, 35, 'Sleep Well', 'ของใช้ในบ้าน', 41, 900, 2400, 1400, 260, 90, 4.7, 85, 80, 0],
+  ['tiktok_shop', 'เคสมือถือกันกระแทก', 159, 41200, 20, 4.3, 760, 'Case Lab', null, null, null, null, 6100, null, null, null, null, null, null],
+  ['shopee', 'เสื้อยืดโอเวอร์ไซซ์ผ้าคอตตอน', 199, 29000, 10, 4.7, 300, 'Basic Wear', 'เสื้อยืด', 16, 7400, 6100, 4800, 1250, 92, 4.8, 90, 82, 1],
+  ['shopee', 'กล่องเก็บเครื่องประดับ 3 ชั้น', 159, 11000, 12, 4.8, 120, 'Neat Box', 'กล่องเก็บของ', 27, 2600, 2100, 1700, 380, 95, 4.8, 94, 89, 1],
+  ['shopee', 'กล่องใส่รองเท้าแบบใส', 89, 3300, 9, 4.6, 45, 'Neat Box', 'กล่องเก็บของ', 64, 900, 700, 420, 60, 89, 4.8, 94, 89, null],
+  ['shopee', 'ชั้นวางของเหล็ก 4 ชั้น', 499, 23000, 8, 4.5, 105, 'Steel Home', 'ชั้นวางของ', 2, 3151, 9800, 5200, 900, 83, 4.6, 80, 66, 0],
+  ['tiktok_shop', 'เซรั่มวิตามินซีสูตรอ่อนโยน', 259, 21000, 16, 4.7, 420, 'Glow Beauty TH', 'ความงาม', 15, 8900, 6400, 2900, 610, 90, 4.9, 97, 88, 1],
+  ['tiktok_shop', 'มาสก์หน้าแผ่นสูตรชุ่มชื้น', 25, 47000, 13, 4.6, 900, 'Skin First', 'ความงาม', 5, 26000, 27500, 9100, 2200, 87, 4.9, 99, 95, 1],
 ];
+// Category peaks (avg sold of the category's #1–#2): book figures entered by hand; "ความงาม" left to auto
+const benchmarks = { เสื้อยืด: 100000, กล่องเก็บของ: 200000, ชั้นวางของ: 25000, เครื่องใช้ไฟฟ้าขนาดเล็ก: 60000, ของใช้ในบ้าน: 80000 };
 const { trendScore } = require('../../backend/src/modules/scraping/score');
-insert('trending_products', ['id', 'org_id', 'source_id', 'platform', 'external_id', 'title', 'shop_name', 'price', 'sold_count', 'sold_velocity', 'rating', 'commission_rate', 'trend_score', 'status', 'url', 'first_seen_at', 'last_seen_at'],
-  trends.map((t, i) => [i + 1, 1, t[0] === 'shopee' ? 1 : null, t[0], `ext_${i + 1}`, t[1], t[7], t[2], t[3], t[6], t[5], t[4],
-    trendScore({ velocity: t[6], soldCount: t[3], rating: t[5], commissionRate: t[4] }), i === 4 ? 'watching' : 'new', null, agoMin(60 * 24 * 7), agoMin(int(30, 300))]));
+const lifecycle = require('../../backend/src/modules/scraping/lifecycle');
+const peakOf = (t) => {
+  if (!t[8]) return null;
+  if (benchmarks[t[8]]) return { peak: benchmarks[t[8]], source: 'manual' };
+  const same = trends.filter((x) => x[0] === t[0] && x[8] === t[8]).map((x) => x[3]).sort((a, b) => b - a);
+  return same.length >= 3 ? { peak: Math.round((same[0] + same[1]) / 2), source: 'auto' } : null;
+};
+const benchRows = new Map();
+const trendRows = trends.map((t, i) => {
+  const bench = peakOf(t);
+  if (bench) benchRows.set(`${t[0]}|${t[8]}`, [1, t[0], t[8], bench.peak, bench.source]);
+  const est = lifecycle.estimatePhase({ sold: t[3], peak: bench?.peak ?? null, peakSource: bench?.source, monthlySold: t[10], prevMonthlySold: t[11], categoryRank: t[9] });
+  const checklist = lifecycle.evaluateChecklist({
+    phase: est.phase, rating: t[5], positiveReviewPct: t[14], mediaReviewCount: t[13], shopRating: t[15], shopResponseRate: t[16], shopShip48Rate: t[17], commissionRate: t[4], hasFlashSale: t[18] == null ? null : Boolean(t[18]),
+  });
+  return [i + 1, 1, t[0] === 'shopee' ? 1 : null, t[0], `ext_${i + 1}`, t[1], t[7], t[2], t[3], t[6], t[5], t[4],
+    trendScore({ velocity: t[6], soldCount: t[3], rating: t[5], commissionRate: t[4] }), i === 4 ? 'watching' : 'new', null, agoMin(60 * 24 * 7), agoMin(int(30, 300)),
+    t[8], t[9], t[10], t[11], t[12], t[13], t[14], t[15], t[16], t[17], t[18],
+    est.phase, est.ratio, JSON.stringify({ confidence: est.confidence, declining: est.declining, reasons: est.reasons, peak: bench?.peak ?? null, peakSource: bench?.source ?? null }),
+    JSON.stringify(checklist.items), checklist.passed, lifecycle.pickScore({ phase: est.phase, checklist, categoryRank: t[9] })];
+});
+insert('trending_products', ['id', 'org_id', 'source_id', 'platform', 'external_id', 'title', 'shop_name', 'price', 'sold_count', 'sold_velocity', 'rating', 'commission_rate', 'trend_score', 'status', 'url', 'first_seen_at', 'last_seen_at',
+  'category', 'category_rank', 'monthly_sold', 'prev_monthly_sold', 'review_count', 'media_review_count', 'positive_review_pct', 'shop_rating', 'shop_response_rate', 'shop_ship48_rate', 'has_flash_sale',
+  'lifecycle_phase', 'phase_ratio', 'phase_notes', 'checklist', 'checklist_passed', 'pick_score'], trendRows);
+insert('trend_category_benchmarks', ['org_id', 'platform', 'category', 'peak_sold', 'source'], [...benchRows.values()]);
 // One snapshot per day for a week, with day-to-day noise around the product's sales rate
 const snaps = [];
 trends.forEach((t, i) => {
@@ -448,8 +480,13 @@ trends.forEach((t, i) => {
   }
 });
 insert('trending_snapshots', ['trending_product_id', 'captured_at', 'price', 'sold_count', 'rating', 'commission_rate'], snaps);
+insert('channel_profiles', ['org_id', 'name', 'persona', 'interests', 'audience', 'on_camera', 'is_default'], [
+  [1, 'ห้องเล็กน่าอยู่ (ตัวอย่าง)',
+    'ผู้หญิงอายุ 27 ทำงานออฟฟิศ อยู่คอนโดห้องเล็กกับแมว 2 ตัว ชอบจัดห้องให้เป็นระเบียบ ทำอาหารง่าย ๆ หลังเลิกงาน ไม่สะดวกออกหน้ากล้อง ถนัดถ่ายมือกับของและพากย์เสียง',
+    JSON.stringify(['จัดห้อง', 'แมว', 'ของใช้ในคอนโด', 'ทำอาหารง่าย ๆ']), 'คนทำงานวัย 22–35 ที่อยู่หอ/คอนโด', 0, 1],
+]);
 
-out.push('\nINSERT INTO schema_migrations (version) VALUES (\'001_seed_demo\'), (\'002_seed_ledger\'), (\'004_seed_trends\');');
+out.push('\nINSERT INTO schema_migrations (version) VALUES (\'001_seed_demo\'), (\'002_seed_ledger\'), (\'004_seed_trends\'), (\'007_seed_lifecycle\');');
 out.push('SET FOREIGN_KEY_CHECKS = 1;\n');
 
 const file = path.join(__dirname, '..', 'seed.sql');

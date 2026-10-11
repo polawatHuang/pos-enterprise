@@ -22,6 +22,7 @@ import {
   Star,
   TrendingUp,
   Upload,
+  UserRound,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,7 +35,8 @@ import { Badge, Card, Input, NativeSelect, Pagination, Skeleton, TabBar } from "
 import { Dialog } from "@/components/ui/overlays";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { PageHeader } from "@/components/layout/page";
-import { platformMeta, scoreTone, SORT_OPTIONS, TREND_STATUS } from "./labels";
+import { PHASE_FILTERS, platformMeta, scoreTone, SORT_OPTIONS, TREND_STATUS } from "./labels";
+import { ChecklistSection, LifecycleSection, PhaseChip } from "./lifecycle";
 import { CsvImportDialog } from "./csv-import-dialog";
 
 type StatusTab = "active" | TrendStatus | "all";
@@ -43,14 +45,26 @@ export function TrendsView() {
   const { can } = useAuth();
   const [status, setStatus] = useState<StatusTab>("active");
   const [platform, setPlatform] = useState("");
-  const [sort, setSort] = useState("score");
+  const [sort, setSort] = useState("pick");
+  const [phase, setPhase] = useState("all");
+  const [hideTop10, setHideTop10] = useState(false);
   const [q, setQ] = useState("");
   const [minCommission, setMinCommission] = useState("");
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<number | null>(null);
   const [importing, setImporting] = useState(false);
 
-  const query = { status, platform: platform || undefined, sort, q: q || undefined, minCommission: minCommission || undefined, page, pageSize: 24 };
+  const query = {
+    status,
+    platform: platform || undefined,
+    sort,
+    q: q || undefined,
+    minCommission: minCommission || undefined,
+    phase: phase === "all" ? undefined : phase,
+    hideTop10: hideTop10 ? "1" : undefined,
+    page,
+    pageSize: 24,
+  };
   const list = useQuery({
     queryKey: ["trends", "list", query],
     queryFn: () => apiFetch<{ data: TrendItem[]; meta: TrendListMeta }>("/scraping/trends", { query }),
@@ -65,9 +79,14 @@ export function TrendsView() {
     <div>
       <PageHeader
         title="สินค้าเทรนด์"
-        description="สินค้าขายดีและค่าคอมสูงจากแหล่งข้อมูลที่ถูกข้อกำหนด จัดอันดับด้วยความเร็วยอดขาย แล้วให้ AI ช่วยคัดว่าควรทำคอนเทนต์หรือไม่"
+        description="สินค้ากระแสไม่เท่ากับสินค้าขายดี — ระบบประเมิน Phase วงจรชีวิตสินค้าและเช็กลิสต์ 9 ข้อ เพื่อหาสินค้าที่กำลังจะเป็นกระแส (Phase 2–4, อันดับ 11 ขึ้นไป)"
         actions={
           <>
+            <Button variant="outline" asChild>
+              <Link href="/trends/channel">
+                <UserRound /> โปรไฟล์ช่อง
+              </Link>
+            </Button>
             <Button variant="outline" asChild>
               <Link href="/trends/sources">
                 <Settings2 /> แหล่งข้อมูล
@@ -113,6 +132,17 @@ export function TrendsView() {
             </option>
           ))}
         </NativeSelect>
+        <NativeSelect value={phase} onChange={(e) => reset(setPhase)(e.target.value)} className="w-auto" aria-label="Phase">
+          {PHASE_FILTERS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </NativeSelect>
+        <label className="flex h-10 items-center gap-2 rounded-lg border border-input bg-card px-3 text-sm">
+          <input type="checkbox" checked={hideTop10} onChange={(e) => reset(setHideTop10)(e.target.checked)} className="size-4 accent-[var(--primary)]" />
+          ซ่อนอันดับ 1–10
+        </label>
         <NativeSelect value={sort} onChange={(e) => reset(setSort)(e.target.value)} className="w-auto" aria-label="เรียงตาม">
           {SORT_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -194,8 +224,9 @@ function TrendCard({ t, onOpen }: { t: TrendItem; onOpen: () => void }) {
         <div className="flex gap-3">
           <Thumb src={t.imageUrl} className="size-14" />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <PlatformTag platform={t.platform} />
+              <PhaseChip phase={t.phase} />
               {t.status !== "new" && <Badge tone={TREND_STATUS[t.status].tone}>{TREND_STATUS[t.status].label}</Badge>}
               {t.hasAnalysis && (
                 <span className="text-primary" title="AI วิเคราะห์แล้ว">
@@ -207,11 +238,32 @@ function TrendCard({ t, onOpen }: { t: TrendItem; onOpen: () => void }) {
             {t.shopName && <p className="truncate text-xs text-muted-foreground">{t.shopName}</p>}
           </div>
           <div className="shrink-0 text-right">
-            <Badge tone={scoreTone(t.trendScore)} className="tabular-nums">
-              {t.trendScore == null ? "—" : Math.round(t.trendScore)}
+            <Badge tone={scoreTone(t.pickScore)} className="tabular-nums">
+              {t.pickScore == null ? "—" : Math.round(t.pickScore)}
             </Badge>
-            <p className="mt-1 text-[10px] text-muted-foreground">คะแนน</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">เหมาะทำ</p>
           </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="tabular-nums">เช็กลิสต์ {t.checklistPassed ?? 0}/9</span>
+          {t.categoryRank != null && (
+            <>
+              <span aria-hidden>·</span>
+              {t.categoryRank <= 10 ? (
+                <Badge tone="warning" className="px-1.5 py-0 text-[10px]">
+                  อันดับ {t.categoryRank} ในหมวด (อิ่มตัว)
+                </Badge>
+              ) : (
+                <span>อันดับ {t.categoryRank} ในหมวด</span>
+              )}
+            </>
+          )}
+          {t.category && (
+            <>
+              <span aria-hidden>·</span>
+              <span className="truncate">{t.category}</span>
+            </>
+          )}
         </div>
         <div className="mt-3 grid grid-cols-4 gap-2 border-t border-border pt-3">
           <Metric label="ราคา" value={dash(t.price, formatMoney)} />
@@ -273,7 +325,8 @@ function TrendDrawer({ id, onClose }: { id: number; onClose: () => void }) {
                 <div className="flex flex-wrap items-center gap-1.5">
                   <PlatformTag platform={t.platform} />
                   <Badge tone={TREND_STATUS[t.status].tone}>{TREND_STATUS[t.status].label}</Badge>
-                  <Badge tone={scoreTone(t.trendScore)}>คะแนน {t.trendScore == null ? "—" : Math.round(t.trendScore)}/100</Badge>
+                  <Badge tone={scoreTone(t.pickScore)}>เหมาะทำนายหน้า {t.pickScore == null ? "—" : Math.round(t.pickScore)}/100</Badge>
+                  <Badge tone="neutral">แรงกระแส {t.trendScore == null ? "—" : Math.round(t.trendScore)}/100</Badge>
                 </div>
                 {t.shopName && <p className="text-muted-foreground">ร้าน {t.shopName}</p>}
                 <p className="text-xs text-muted-foreground">
@@ -294,6 +347,10 @@ function TrendDrawer({ id, onClose }: { id: number; onClose: () => void }) {
               <Metric label="ค่าคอม" value={dash(t.commissionRate, (v) => `${v}%`)} />
               <Metric label="รีวิว" value={dash(t.rating, (v) => `${v.toFixed(1)} ★`)} />
             </div>
+
+            <LifecycleSection t={t} canEdit={canRun} />
+
+            <ChecklistSection key={`${t.id}-${t.lastSeenAt}-${t.pickScore}`} t={t} canEdit={canRun} />
 
             <SalesChart snapshots={t.snapshots} />
 
@@ -318,7 +375,7 @@ function TrendDrawer({ id, onClose }: { id: number; onClose: () => void }) {
                 <Analysis a={t.aiAnalysis} />
               ) : (
                 <p className="rounded-xl bg-muted/50 p-3 text-sm text-muted-foreground">
-                  AI จะประเมินความเหมาะสมกับร้าน กลุ่มเป้าหมาย จุดขาย ไอเดียเปิดคลิป และความเสี่ยงด้านโฆษณา
+                  AI จะประเมินความเหมาะสมกับร้านและโปรไฟล์ช่อง จังหวะกระแส กลุ่มเป้าหมาย จุดขาย ไอเดียเปิดคลิป และความเสี่ยงด้านโฆษณา
                 </p>
               )}
             </section>
@@ -460,6 +517,18 @@ function Analysis({ a }: { a: TrendDetail["aiAnalysis"] & object }) {
         </div>
         <p className="min-w-0 flex-1">{a.verdict}</p>
       </div>
+      {a.phaseComment && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">จังหวะกระแส</p>
+          <p>{a.phaseComment}</p>
+        </div>
+      )}
+      {a.channelFit && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">เข้ากับช่อง{a.channelProfile ? ` "${a.channelProfile.name}"` : ""}</p>
+          <p>{a.channelFit}</p>
+        </div>
+      )}
       <dl className="grid gap-3 sm:grid-cols-2">
         <div>
           <dt className="text-xs font-medium text-muted-foreground">กลุ่มเป้าหมาย</dt>

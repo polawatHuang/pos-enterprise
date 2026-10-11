@@ -183,8 +183,19 @@ upsertItems(): trending_products (unique org+platform+external_id) + trending_sn
 คะแนน 0–100 = ความเร็ว 40 + ยอดขายรวม 25 + รีวิว 15 + ค่าคอม 20   (backend/src/modules/scraping/score.js)
         │
         ▼
-AI วิเคราะห์ (MiniMax, tool บังคับ) → นำเข้าเป็นสินค้า draft / ลิงก์ affiliate → ใช้ต่อในเฟส 6–7
+recomputeCategory(): ยอดสูงสุดของหมวด (trend_category_benchmarks: auto = เฉลี่ยอันดับ 1–2 หรือกรอกเอง)
+        → Phase วงจรชีวิต 1–5/A/B–E + เช็กลิสต์ 9 ข้อ + คะแนนเหมาะทำนายหน้า   (backend/src/modules/scraping/lifecycle.js)
+        │
+        ▼
+AI วิเคราะห์ (MiniMax, tool บังคับ; ใส่ Phase/เช็กลิสต์/โปรไฟล์ช่อง) → นำเข้าเป็นสินค้า draft / ลิงก์ affiliate → ใช้ต่อในเฟส 6–7
 ```
+
+**วิธีเลือกสินค้า:**
+- อ้างอิงหลักการจากหนังสือ "คู่มือทำนายหน้า TikTok ด้วย AI" — รายละเอียดอยู่ใน [PRODUCT_RESEARCH.md](PRODUCT_RESEARCH.md)
+- คะแนนเหมาะทำนายหน้า (`pick_score`) คิดจาก Phase ครึ่งหนึ่ง และจากเช็กลิสต์อีกครึ่งหนึ่ง
+- สินค้าอันดับ 1–10 ของหมวดถูกหักคะแนน
+- ข้อมูลที่ API ไม่มีให้ (สถิติร้าน, รีวิว, อันดับ) กรอกได้ในหน้ารายละเอียดหรือนำเข้าผ่าน CSV
+- หน้า `/trends/channel`: AI วางแนวช่องจากโปรไฟล์เจ้าของช่อง แล้วสร้างแหล่งข้อมูลจากคีย์เวิร์ดที่แนะนำ
 
 **การทำงานเบื้องหลัง**
 
