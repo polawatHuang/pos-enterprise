@@ -63,11 +63,17 @@ const sourceConfig = z
     input: z.record(z.string(), z.unknown()).optional(),
     fieldMap: z.record(z.string(), z.string().max(100)).optional(),
     platform: z.string().trim().max(30).optional(),
+    // ai_search
+    focus: z.string().trim().max(200).optional(),
+    platformFocus: z.enum(['any', 'shopee', 'tiktok_shop', 'lazada']).optional(),
+    count: z.coerce.number().int().min(3).max(15).optional(),
+    channelProfileId: z.coerce.number().int().positive().nullable().optional(),
+    enrich: z.boolean().optional(),
   })
   .strict();
 
 const sourceBody = z.object({
-  platform: z.enum(['shopee_affiliate', 'apify', 'custom_url', 'tiktok_shop', 'shopee']),
+  platform: z.enum(['shopee_affiliate', 'apify', 'custom_url', 'tiktok_shop', 'shopee', 'ai_search']),
   name: z.string().trim().min(1).max(191),
   config: sourceConfig.default({}),
   intervalHours: z.coerce
@@ -176,6 +182,8 @@ router.get(
         sourceName: r.source_name,
         platform: r.platform,
         status: r.status,
+        stage: r.stage ?? null,
+        summary: r.platform === 'ai_search' ? (parseJson(r.state)?.summary ?? null) : null,
         itemsFound: r.items_found,
         itemsNew: r.items_new,
         error: r.error,
@@ -188,6 +196,24 @@ router.get(
 );
 
 /* ------------------------------------------------------------------ trends */
+
+/** Why AI search suggested the item (reasons, verified sources); null for other sources. */
+function aiSearchOf(t) {
+  const a = parseJson(t.raw)?.aiSearch;
+  if (!a) return null;
+  return {
+    verified: Boolean(a.verified),
+    whyTrending: a.whyTrending ?? null,
+    trendStage: a.trendStage ?? null,
+    keywords: a.searchKeywords ?? [],
+    evidence: a.evidence ?? [],
+    soldHint: a.soldHint ?? null,
+    priceHint: a.priceHint ?? null,
+    risks: a.risks ?? [],
+    foundAt: a.foundAt ?? null,
+    runId: a.runId ?? null,
+  };
+}
 
 function mapTrend(t) {
   return {
@@ -227,6 +253,8 @@ function mapTrend(t) {
     affiliateUrl: t.affiliate_url ?? null,
     hasAnalysis: t.ai_analysis != null,
     aiAnalyzedAt: t.ai_analyzed_at,
+    sourcePlatform: t.source_platform ?? null,
+    aiSearch: aiSearchOf(t),
     firstSeenAt: t.first_seen_at,
     lastSeenAt: t.last_seen_at,
   };
@@ -264,6 +292,7 @@ router.get(
       q: z.string().trim().max(100).optional(),
       sort: z.enum(['pick', 'score', 'velocity', 'sold', 'commission', 'price', 'newest']).default('pick'),
       minCommission: z.coerce.number().min(0).max(100).optional(),
+      sourceId: z.coerce.number().int().positive().optional(),
       phase: z.enum(['all', '2-4', 'rising', 'declining']).default('all'),
       hideTop10: flag,
       page: z.coerce.number().int().min(1).default(1),
@@ -277,6 +306,7 @@ router.get(
       AND (:platform IS NULL OR t.platform = :platform)
       AND (:q IS NULL OR t.title LIKE :q OR t.shop_name LIKE :q)
       AND (:minCommission IS NULL OR t.commission_rate >= :minCommission)
+      AND (:sourceId IS NULL OR t.source_id = :sourceId)
       AND ${PHASE_FILTERS[f.phase]}
       ${f.hideTop10 ? `AND (t.category_rank IS NULL OR t.category_rank > ${SATURATED_RANK})` : ''}`;
     const params = {
@@ -285,12 +315,13 @@ router.get(
       platform: f.platform || null,
       q: f.q ? `%${f.q}%` : null,
       minCommission: f.minCommission ?? null,
+      sourceId: f.sourceId ?? null,
       limit: f.pageSize,
       offset: (f.page - 1) * f.pageSize,
     };
     const [rows, total, platforms] = await Promise.all([
       db.query(
-        `SELECT t.*, s.name AS source_name, a.short_url AS affiliate_url FROM trending_products t
+        `SELECT t.*, s.name AS source_name, s.platform AS source_platform, a.short_url AS affiliate_url FROM trending_products t
            LEFT JOIN scrape_sources s ON s.id = t.source_id LEFT JOIN affiliate_links a ON a.id = t.affiliate_link_id
           WHERE ${where} ORDER BY ${SORTS[f.sort][0]} IS NULL, ${SORTS[f.sort].join(' ')}, t.id DESC LIMIT :limit OFFSET :offset`,
         params,
@@ -315,7 +346,7 @@ router.get(
 
 async function getTrend(orgId, id) {
   const t = await db.one(
-    `SELECT t.*, s.name AS source_name, a.short_url AS affiliate_url FROM trending_products t
+    `SELECT t.*, s.name AS source_name, s.platform AS source_platform, a.short_url AS affiliate_url FROM trending_products t
        LEFT JOIN scrape_sources s ON s.id = t.source_id LEFT JOIN affiliate_links a ON a.id = t.affiliate_link_id
       WHERE t.id = :id AND t.org_id = :orgId`,
     { id, orgId },
@@ -501,6 +532,66 @@ router.put(
 );
 
 /* --------------------------------------------------------------- CSV import */
+
+/* --------------------------------------------------------------- AI search */
+
+const AI_SOURCE_NAME = 'AI ค้นหาสินค้าขายดี';
+
+/**
+ * One-click AI web search: reuse (or create) the org's ai_search source with the given settings
+ * and queue a run. Progress and results come from GET /runs?sourceId=.
+ */
+router.post(
+  '/ai-search',
+  requirePermission('scraping:run'),
+  validate({ body: sourceConfig.pick({ focus: true, platformFocus: true, count: true, channelProfileId: true, enrich: true }).default({}) }),
+  async (req, res) => {
+    ai.requireConfig(); // 503 naming the missing key before anything is stored
+    const orgId = req.user.orgId;
+    const b = req.valid.body;
+    if (b.channelProfileId) {
+      const p = await db.one('SELECT id FROM channel_profiles WHERE id = :id AND org_id = :orgId', { id: b.channelProfileId, orgId });
+      if (!p) throw notFound('ไม่พบโปรไฟล์ช่อง');
+    }
+    let source = await db.one("SELECT * FROM scrape_sources WHERE org_id = :orgId AND platform = 'ai_search' ORDER BY id LIMIT 1", { orgId });
+    const config = { platformFocus: 'any', count: 8, enrich: true, ...(parseJson(source?.config) ?? {}), ...b };
+    if (!config.focus) delete config.focus;
+    if (source) {
+      await db.query('UPDATE scrape_sources SET config = :config, is_active = 1 WHERE id = :id', { id: source.id, config: JSON.stringify(config) });
+    } else {
+      const r = await db.query(
+        `INSERT INTO scrape_sources (org_id, platform, method, name, config, interval_hours, is_active)
+         VALUES (:orgId, 'ai_search', 'ai_web_search', :name, :config, NULL, 1)`,
+        { orgId, name: AI_SOURCE_NAME, config: JSON.stringify(config) },
+      );
+      source = { id: r.insertId };
+    }
+    const open = await db.one("SELECT id FROM scrape_runs WHERE source_id = :id AND status = 'running' AND started_at > UTC_TIMESTAMP() - INTERVAL 2 HOUR", {
+      id: source.id,
+    });
+    if (open) throw conflict('AI กำลังค้นหาอยู่ รอให้รอบนี้เสร็จก่อน', { runId: open.id });
+    const runId = await startRun(source.id, req.user.id);
+    audit(req, 'scraping.ai_search', 'scrape_source', source.id, { runId, ...config });
+    res.status(202).json({ data: { runId, sourceId: source.id, config } });
+  },
+);
+
+/** Last-used settings of the AI search source (to pre-fill the settings form). */
+router.get('/ai-search', requirePermission('scraping:read'), async (req, res) => {
+  const source = await db.one("SELECT id, config, last_run_at FROM scrape_sources WHERE org_id = :orgId AND platform = 'ai_search' ORDER BY id LIMIT 1", {
+    orgId: req.user.orgId,
+  });
+  res.json({
+    data: {
+      sourceId: source?.id ?? null,
+      config: { platformFocus: 'any', count: 8, enrich: true, ...(parseJson(source?.config) ?? {}) },
+      lastRunAt: source?.last_run_at ?? null,
+      configured: ai.isConfigured(),
+      provider: ai.providerId(),
+      shopeeEnrich: shopeeAffiliate.isConfigured(),
+    },
+  });
+});
 
 /** Sample file + column guide for the import dialog (headers are aliases, so the file maps itself). */
 router.get('/csv-template', requirePermission('scraping:read'), (req, res) => {

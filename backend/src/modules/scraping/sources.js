@@ -7,6 +7,7 @@ const { enqueue } = require('../../jobs/queue');
 const shopeeAffiliate = require('../../integrations/shopee-affiliate');
 const apify = require('../../integrations/apify');
 const { upsertItems } = require('./trends.service');
+const aiSearch = require('./ai-search');
 
 const USER_AGENT = 'POSEnterpriseBot/1.0 (+product research; respects robots.txt)';
 const MAX_PAGE_BYTES = 2 * 1024 * 1024;
@@ -18,6 +19,7 @@ const PLATFORMS = {
   shopee_affiliate: { method: 'official_api', adapter: shopeeAffiliate, runnable: true },
   apify: { method: 'scraping_service', adapter: apify, runnable: true },
   custom_url: { method: 'http_fetch', adapter: null, runnable: true },
+  ai_search: { method: 'ai_web_search', adapter: aiSearch.aiAdapter, runnable: true },
   tiktok_shop: {
     method: 'official_api',
     adapter: null,
@@ -66,7 +68,8 @@ async function robotsAllows(url) {
   for (const r of mine.rules) {
     if (!r.path) continue;
     const prefix = r.path.replace(/\*.*$/, '').replace(/\$$/, '');
-    if (path.startsWith(prefix) && (!best || prefix.length > best.len || (prefix.length === best.len && r.allow))) best = { len: prefix.length, allow: r.allow };
+    if (path.startsWith(prefix) && (!best || prefix.length > best.len || (prefix.length === best.len && r.allow)))
+      best = { len: prefix.length, allow: r.allow };
   }
   return best ? best.allow : true;
 }
@@ -102,7 +105,7 @@ function jsonLdToItem(p, pageUrl) {
     externalId: p.sku ?? p.productID ?? p.mpn ?? p.url ?? pageUrl,
     title: p.name,
     url: p.url ?? pageUrl,
-    imageUrl: typeof image === 'string' ? image : image?.url ?? null,
+    imageUrl: typeof image === 'string' ? image : (image?.url ?? null),
     shopName: p.brand?.name ?? (typeof p.brand === 'string' ? p.brand : null),
     price,
     rating: p.aggregateRating?.ratingValue ?? null,
@@ -130,8 +133,23 @@ async function fetchProductPage(url) {
 
 /** Map Apify dataset items using config.fieldMap ({title:'name', price:'price.value', ...}). */
 function mapApifyItems(items, config) {
-  const fm = { title: 'title', externalId: 'id', url: 'url', imageUrl: 'image', shopName: 'shopName', price: 'price', soldCount: 'sold', rating: 'rating', commissionRate: 'commission', category: 'category', ...(config.fieldMap ?? {}) };
-  const get = (obj, path) => String(path).split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+  const fm = {
+    title: 'title',
+    externalId: 'id',
+    url: 'url',
+    imageUrl: 'image',
+    shopName: 'shopName',
+    price: 'price',
+    soldCount: 'sold',
+    rating: 'rating',
+    commissionRate: 'commission',
+    category: 'category',
+    ...(config.fieldMap ?? {}),
+  };
+  const get = (obj, path) =>
+    String(path)
+      .split('.')
+      .reduce((o, k) => (o == null ? undefined : o[k]), obj);
   return items.map((it) => ({
     platform: config.platform ?? 'apify',
     ...Object.fromEntries(Object.entries(fm).map(([field, path]) => [field, get(it, path) ?? null])),
@@ -147,10 +165,11 @@ async function startRun(sourceId, userId = null) {
 }
 
 async function finishRun(run, source, stats) {
-  await db.query(
-    "UPDATE scrape_runs SET status = 'succeeded', items_found = :found, items_new = :created, finished_at = UTC_TIMESTAMP() WHERE id = :id",
-    { id: run.id, found: stats.found, created: stats.created },
-  );
+  await db.query("UPDATE scrape_runs SET status = 'succeeded', items_found = :found, items_new = :created, finished_at = UTC_TIMESTAMP() WHERE id = :id", {
+    id: run.id,
+    found: stats.found,
+    created: stats.created,
+  });
   await db.query('UPDATE scrape_sources SET last_run_at = UTC_TIMESTAMP(), last_error = NULL WHERE id = :id', { id: source.id });
   return { status: 'succeeded', ...stats };
 }
@@ -184,7 +203,12 @@ async function executeRun(runId) {
       const pages = Math.min(5, Math.max(1, Number(config.pages) || 1));
       const items = [];
       for (let page = 1; page <= pages; page += 1) {
-        const r = await shopeeAffiliate.productOfferList({ keyword: config.keyword || null, sortType: config.sortType ?? 'sales', page, limit: config.limit ?? 50 });
+        const r = await shopeeAffiliate.productOfferList({
+          keyword: config.keyword || null,
+          sortType: config.sortType ?? 'sales',
+          page,
+          limit: config.limit ?? 50,
+        });
         items.push(...r.items);
         if (!r.hasNextPage) break;
       }
@@ -198,6 +222,7 @@ async function executeRun(runId) {
       if (!items.length) throw badRequest('ไม่พบข้อมูลสินค้า (schema.org Product) ในหน้าที่ระบุ');
       return finishRun(run, source, await upsertItems({ orgId: source.org_id, sourceId: source.id, items }));
     }
+    if (source.platform === 'ai_search') return await aiSearch.startAiRun(run, source);
     if (source.platform === 'apify') {
       if (!config.actorId) throw badRequest('ยังไม่ได้ระบุ actorId ของ Apify');
       const started = await apify.runActor(config.actorId, config.input ?? {});
@@ -247,6 +272,8 @@ async function scheduleDueSources() {
 module.exports = {
   PLATFORMS,
   startRun,
+  finishRun,
+  failRun,
   executeRun,
   pollRun,
   scheduleDueSources,

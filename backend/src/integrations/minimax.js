@@ -44,16 +44,19 @@ const adapter = defineAdapter(
      * Sends only the portable subset of the Messages API: Claude-only extras (effort, betas,
      * server-side fallbacks, cache_control, strict tools) are dropped rather than risking a 400.
      */
-    async createMessage({ system, messages, tools, toolChoice, maxTokens = 4000 }) {
+    async createMessage({ system, messages, tools, toolChoice, maxTokens = 4000, timeoutMs, maxRetries }) {
       const { MINIMAX_MODEL } = adapter.requireConfig();
-      return adapter.getClient().messages.create({
-        model: MINIMAX_MODEL,
-        max_tokens: maxTokens,
-        ...(system ? { system } : {}),
-        messages,
-        ...(tools?.length ? { tools: tools.map(({ strict: _strict, ...t }) => t) } : {}),
-        ...(toolChoice ? { tool_choice: toolChoice } : {}),
-      });
+      return adapter.getClient().messages.create(
+        {
+          model: MINIMAX_MODEL,
+          max_tokens: maxTokens,
+          ...(system ? { system } : {}),
+          messages,
+          ...(tools?.length ? { tools: tools.map(({ strict: _strict, ...t }) => t) } : {}),
+          ...(toolChoice ? { tool_choice: toolChoice } : {}),
+        },
+        { ...(timeoutMs ? { timeout: timeoutMs } : {}), ...(maxRetries != null ? { maxRetries } : {}) },
+      );
     },
   },
 );

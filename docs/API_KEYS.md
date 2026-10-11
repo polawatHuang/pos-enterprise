@@ -9,7 +9,7 @@
 
 | บริการ | ใช้ในโมดูล (เฟส) | ตัวแปร | ขอที่ | ต้องรอ review? |
 |---|---|---|---|---|
-| **MiniMax API** (ค่าเริ่มต้นของ AI ทุกส่วน) | AI แชตปิดการขาย (4), AI อ่านใบเสร็จ (3), สคริปต์/เสียง/วิดีโอ (6) | `MINIMAX_API_KEY`, `MINIMAX_MODEL`, `MINIMAX_BASE_URL` (`AI_PROVIDER=minimax`) | platform.minimax.io | ไม่ |
+| **MiniMax API** (ค่าเริ่มต้นของ AI ทุกส่วน) | AI แชตปิดการขาย (4), AI อ่านใบเสร็จ (3), สคริปต์/เสียง/วิดีโอ (6), AI ค้นหาสินค้าขายดี (ค้นเว็บ, 5) | `MINIMAX_API_KEY`, `MINIMAX_MODEL`, `MINIMAX_BASE_URL` (`AI_PROVIDER=minimax`) | platform.minimax.io | ไม่ |
 | Anthropic Claude API (ทางเลือก) | ใช้แทน MiniMax ได้ทุกจุดเมื่อตั้ง `AI_PROVIDER=anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | console.anthropic.com | ไม่ |
 | **TikTok for Developers** — Login Kit + Content Posting API | ตั้งเวลาโพสต์ (7) | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI` | developers.tiktok.com | **ใช่** — ต้องผ่าน audit จึงโพสต์แบบ public ได้ |
 | **TikTok Shop Partner** | สินค้า/ออร์เดอร์/แชต (2, 4, 5) | `TIKTOK_SHOP_APP_KEY`, `TIKTOK_SHOP_APP_SECRET` | partner.tiktokshop.com | ใช่ (ต้องเป็น seller/partner) |
@@ -27,6 +27,7 @@
 
 - **MiniMax (ค่าเริ่มต้น)** — AI ทุกส่วนของระบบเรียกผ่าน `backend/src/integrations/ai.js` จุดเดียว ซึ่งใช้ MiniMax เป็นค่าเริ่มต้น ระบบเรียก MiniMax ผ่าน **Anthropic-compatible endpoint** (`https://api.minimax.io/anthropic`, โมเดล `MiniMax-M3`) ด้วย SDK ตัวเดียวกับ Claude จึงใช้ข้อความ รูปภาพ และ tool use (ค้นสินค้า เช็กออร์เดอร์ ออกคูปองภายในเพดาน) ได้เหมือนกัน
   - บัญชีที่สมัครฝั่งจีนแผ่นดินใหญ่ให้ตั้ง `MINIMAX_BASE_URL=https://api.minimaxi.com/anthropic`
+  - **AI ค้นหาสินค้าขายดี** ใช้เครื่องมือค้นเว็บฝั่งเซิร์ฟเวอร์ของ MiniMax (`web_search`, ยังเป็น beta) ด้วย key เดิม ไม่ต้องตั้งค่าเพิ่ม มีค่าใช้จ่ายราว $0.01 ต่อการค้น + token ถ้า key/รุ่นที่ใช้ยังไม่เปิดการค้นเว็บ รอบนั้นจะล้มเหลวพร้อมข้อความอธิบาย
   - MiniMax ยังไม่มี structured output แบบ JSON schema ระบบจึงบังคับให้ตอบผ่าน tool ตัวเดียว (`tool_choice`) แทน และถ้าโมเดลตอบเป็นข้อความ ก็มีตัวแยก JSON สำรองไว้
   - MiniMax ยังรับไฟล์ PDF ไม่ได้ ถ้าจะให้ AI อ่านใบเสร็จ ต้องถ่ายรูปหรือแคปหน้าจอ (ระบบตอบ 400 พร้อมบอกวิธี)
   - ระบบตัดบล็อก `<think>…</think>` (ส่วนที่โมเดลใช้คิด) ออกก่อนส่งข้อความให้ลูกค้าเสมอ

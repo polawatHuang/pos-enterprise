@@ -213,7 +213,12 @@ describe('CSV template', () => {
     for (const c of TEMPLATE_COLUMNS) assert.equal(mapping[c.field], TEMPLATE_COLUMNS.indexOf(c), `${c.header} → ${c.field}`);
     assert.equal(items.length, TEMPLATE_ROWS.length);
     const full = normalizeItem(items[0]);
-    for (const c of TEMPLATE_COLUMNS.filter((x) => x.field !== 'hasFlashSale')) assert.equal(full[c.field], TEMPLATE_ROWS[0][c.field], c.field);
+    for (const c of TEMPLATE_COLUMNS.filter((x) => !['hasFlashSale', 'externalId'].includes(x.field))) {
+      assert.equal(full[c.field], TEMPLATE_ROWS[0][c.field] ?? null, c.field);
+    }
+    // Sample rows carry no ID/link, so copied rows never share a placeholder ID
+    assert.ok(TEMPLATE_ROWS.every((r) => r.externalId == null && r.url == null));
+    assert.match(full.externalId, /^h_/);
     assert.equal(full.hasFlashSale, true);
     assert.equal(normalizeItem(items[1]).hasFlashSale, false);
     const partial = normalizeItem(items[2]);
@@ -242,6 +247,32 @@ describe('CSV template', () => {
       ['กล่องใส่รองเท้าแบบใส ของจริง'],
     );
     assert.equal(r.errors.length, 2);
+  });
+
+  test('duplicate IDs in one file and Excel scientific-notation IDs are row errors', () => {
+    const csv = [
+      'ชื่อสินค้า,รหัสสินค้า,ขายแล้ว',
+      'สินค้า A,1001,10',
+      'สินค้า B,1001,20',
+      'สินค้า C,1.72938E+18,30',
+      'สินค้า D,1.72938e18,40',
+      'สินค้า E,,50',
+      'สินค้า F,,60',
+      'สินค้า G,1729384756123456789,70',
+    ].join('\n');
+    const r = csvToItems(csv, { platform: 'tiktok_shop' });
+    assert.deepEqual(
+      r.items.map((i) => i.title),
+      ['สินค้า A', 'สินค้า E', 'สินค้า F', 'สินค้า G'],
+    );
+    assert.deepEqual(
+      r.errors.map((e) => [e.row, /ซ้ำกับแถว 2/.test(e.message) ? 'dup' : /เลขยกกำลัง/.test(e.message) ? 'sci' : e.message]),
+      [
+        [3, 'dup'],
+        [4, 'sci'],
+        [5, 'sci'],
+      ],
+    );
   });
 
   test('GET /csv-template returns the file and a column guide (scraping:read)', async () => {

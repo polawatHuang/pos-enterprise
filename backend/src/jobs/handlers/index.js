@@ -14,9 +14,7 @@ const handlers = {
       `DELETE FROM refresh_tokens WHERE expires_at < UTC_TIMESTAMP() - INTERVAL 1 DAY
           OR (revoked_at IS NOT NULL AND revoked_at < UTC_TIMESTAMP() - INTERVAL 7 DAY)`,
     );
-    const jobs = await db.query(
-      `DELETE FROM jobs WHERE status IN ('succeeded','cancelled') AND updated_at < UTC_TIMESTAMP() - INTERVAL 14 DAY`,
-    );
+    const jobs = await db.query(`DELETE FROM jobs WHERE status IN ('succeeded','cancelled') AND updated_at < UTC_TIMESTAMP() - INTERVAL 14 DAY`);
     return { tokensDeleted: tokens.affectedRows, jobsDeleted: jobs.affectedRows };
   },
 };
@@ -42,6 +40,7 @@ handlers['inbox.ai_reply'] = async ({ conversationId }, { jobId }) => {
 /** Trend sources: run a fetch, or check on an async (Apify) run. Failures are recorded on the run. */
 handlers['scrape.run'] = async ({ runId }) => require('../../modules/scraping/sources').executeRun(runId);
 handlers['scrape.poll'] = async ({ runId, polls }) => require('../../modules/scraping/sources').pollRun(runId, polls);
+handlers['scrape.ai'] = async ({ runId, step }) => require('../../modules/scraping/ai-search').runStep(runId, step);
 
 /** AI video pipeline steps (each step queues the next; see modules/video/pipeline.js). */
 const video = () => require('../../modules/video/pipeline');

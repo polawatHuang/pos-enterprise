@@ -37,6 +37,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import { PageHeader } from "@/components/layout/page";
 import { PHASE_FILTERS, platformMeta, scoreTone, SORT_OPTIONS, TREND_STATUS } from "./labels";
 import { ChecklistSection, LifecycleSection, PhaseChip } from "./lifecycle";
+import { AiSearchDialog, AiSearchSection, useAiSearchLauncher } from "./ai-search";
 import { CsvImportDialog } from "./csv-import-dialog";
 
 type StatusTab = "active" | TrendStatus | "all";
@@ -53,6 +54,8 @@ export function TrendsView() {
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<number | null>(null);
   const [importing, setImporting] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<number | null>(null);
+  const aiSearch = useAiSearchLauncher();
 
   const query = {
     status,
@@ -62,6 +65,7 @@ export function TrendsView() {
     minCommission: minCommission || undefined,
     phase: phase === "all" ? undefined : phase,
     hideTop10: hideTop10 ? "1" : undefined,
+    sourceId: sourceFilter ?? undefined,
     page,
     pageSize: 24,
   };
@@ -93,9 +97,14 @@ export function TrendsView() {
               </Link>
             </Button>
             {can("scraping:run") && (
-              <Button onClick={() => setImporting(true)}>
-                <Upload /> นำเข้า CSV
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => setImporting(true)}>
+                  <Upload /> นำเข้า CSV
+                </Button>
+                <Button onClick={() => void aiSearch.start()} disabled={aiSearch.starting}>
+                  {aiSearch.starting ? <Loader2 className="animate-spin" /> : <Sparkles />} AI ค้นหาสินค้าขายดี
+                </Button>
+              </>
             )}
           </>
         }
@@ -152,6 +161,17 @@ export function TrendsView() {
         </NativeSelect>
       </div>
 
+      {sourceFilter !== null && (
+        <div className="mt-3 flex items-center gap-2 text-sm">
+          <Badge tone="primary">
+            <Sparkles className="size-3.5" /> แสดงเฉพาะผลจาก AI ค้นหา
+          </Badge>
+          <button className="text-xs text-muted-foreground hover:text-foreground hover:underline" onClick={() => setSourceFilter(null)}>
+            ล้างตัวกรอง
+          </button>
+        </div>
+      )}
+
       <div className="mt-4">
         {list.isPending ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -181,6 +201,22 @@ export function TrendsView() {
       <DialogPrimitive.Root open={openId !== null} onOpenChange={(o) => !o && setOpenId(null)}>
         {openId !== null && <TrendDrawer id={openId} onClose={() => setOpenId(null)} />}
       </DialogPrimitive.Root>
+      <Dialog open={aiSearch.state !== null} onOpenChange={(o) => !o && aiSearch.close()}>
+        {aiSearch.state && (
+          <AiSearchDialog
+            key={`${aiSearch.state.sourceId}-${aiSearch.state.runId}`}
+            sourceId={aiSearch.state.sourceId}
+            runId={aiSearch.state.runId}
+            onRestart={(body) => aiSearch.start(body)}
+            onShowResults={() => {
+              setSourceFilter(aiSearch.state!.sourceId);
+              setStatus("all");
+              setPage(1);
+              aiSearch.close();
+            }}
+          />
+        )}
+      </Dialog>
       <Dialog open={importing} onOpenChange={setImporting}>
         {importing && <CsvImportDialog onDone={() => setImporting(false)} />}
       </Dialog>
@@ -227,6 +263,11 @@ function TrendCard({ t, onOpen }: { t: TrendItem; onOpen: () => void }) {
             <div className="flex flex-wrap items-center gap-1.5">
               <PlatformTag platform={t.platform} />
               <PhaseChip phase={t.phase} />
+              {t.aiSearch && !t.aiSearch.verified && (
+                <Badge tone="warning" title="AI พบจากการค้นเว็บ ยังไม่มีตัวเลขยอดขายที่ยืนยันได้">
+                  <Sparkles className="size-3" /> AI พบ
+                </Badge>
+              )}
               {t.status !== "new" && <Badge tone={TREND_STATUS[t.status].tone}>{TREND_STATUS[t.status].label}</Badge>}
               {t.hasAnalysis && (
                 <span className="text-primary" title="AI วิเคราะห์แล้ว">
@@ -347,6 +388,8 @@ function TrendDrawer({ id, onClose }: { id: number; onClose: () => void }) {
               <Metric label="ค่าคอม" value={dash(t.commissionRate, (v) => `${v}%`)} />
               <Metric label="รีวิว" value={dash(t.rating, (v) => `${v.toFixed(1)} ★`)} />
             </div>
+
+            {t.aiSearch && <AiSearchSection a={t.aiSearch} />}
 
             <LifecycleSection t={t} canEdit={canRun} />
 

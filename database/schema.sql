@@ -920,8 +920,8 @@ CREATE TABLE post_results (
 CREATE TABLE scrape_sources (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   org_id      BIGINT UNSIGNED NOT NULL,
-  platform    ENUM('tiktok_shop','shopee','shopee_affiliate','apify','custom_url') NOT NULL,
-  method      ENUM('official_api','scraping_service','http_fetch') NOT NULL DEFAULT 'official_api',
+  platform    ENUM('tiktok_shop','shopee','shopee_affiliate','apify','custom_url','ai_search') NOT NULL,
+  method      ENUM('official_api','scraping_service','http_fetch','ai_web_search') NOT NULL DEFAULT 'official_api',
   name        VARCHAR(191) NOT NULL,
   config      JSON NULL COMMENT 'category ids, keywords, url, actor id',
   schedule_cron VARCHAR(50) NULL COMMENT 'informational; executed by job queue',
@@ -937,9 +937,11 @@ CREATE TABLE scrape_runs (
   id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   source_id    BIGINT UNSIGNED NOT NULL,
   status       ENUM('running','succeeded','failed') NOT NULL DEFAULT 'running',
+  stage        VARCHAR(30) NULL COMMENT 'current step of a multi-step run (AI search)',
   items_found  INT NOT NULL DEFAULT 0,
   items_new    INT NOT NULL DEFAULT 0,
   external_run_id VARCHAR(191) NULL COMMENT 'e.g. Apify run id',
+  state        JSON NULL COMMENT 'step state and result summary (AI search)',
   triggered_by BIGINT UNSIGNED NULL COMMENT 'user id; NULL = schedule',
   error        TEXT NULL,
   started_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1052,6 +1054,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search');
 
 SET FOREIGN_KEY_CHECKS = 1;
