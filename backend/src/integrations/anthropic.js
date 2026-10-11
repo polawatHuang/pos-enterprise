@@ -15,10 +15,7 @@ const adapter = defineAdapter(
     phase: 3,
     purpose: 'ผู้ให้บริการ AI สำรอง ใช้เมื่อตั้ง AI_PROVIDER=anthropic',
     applyUrl: 'https://console.anthropic.com/',
-    env: [
-      { name: 'ANTHROPIC_API_KEY' },
-      { name: 'ANTHROPIC_MODEL', optional: true, default: 'claude-opus-5-5' },
-    ],
+    env: [{ name: 'ANTHROPIC_API_KEY' }, { name: 'ANTHROPIC_MODEL', optional: true, default: 'claude-opus-5-5' }],
   },
   {
     capabilities: { images: true, pdf: true, structuredOutput: true },
@@ -37,20 +34,29 @@ const adapter = defineAdapter(
      * Server-side fallback ("default") re-runs a declined request on a suitable model inside the
      * same call. The stable system prompt is cached; chat-style work runs at low effort.
      */
-    async createMessage({ system, messages, tools, maxTokens = 4000, effort, outputFormat }) {
+    async createMessage({ system, messages, tools, toolChoice, maxTokens = 4000, effort, outputFormat, timeoutMs, maxRetries }) {
       const { ANTHROPIC_MODEL } = adapter.requireConfig();
-      return adapter.getClient().beta.messages.create({
-        model: ANTHROPIC_MODEL,
-        max_tokens: maxTokens,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-        ...(system ? { system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] } : {}),
-        messages,
-        ...(tools?.length ? { tools } : {}),
-        ...(effort || outputFormat ? { output_config: { ...(effort ? { effort } : {}), ...(outputFormat ? { format: outputFormat } : {}) } } : {}),
-      });
+      return adapter.getClient().beta.messages.create(
+        {
+          model: ANTHROPIC_MODEL,
+          max_tokens: maxTokens,
+          betas: ['server-side-fallback-2026-07-01'],
+          fallbacks: 'default',
+          ...(system ? { system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] } : {}),
+          messages,
+          ...(tools?.length ? { tools } : {}),
+          ...(toolChoice ? { tool_choice: toolChoice } : {}),
+          ...(effort || outputFormat ? { output_config: { ...(effort ? { effort } : {}), ...(outputFormat ? { format: outputFormat } : {}) } } : {}),
+        },
+        requestOptions({ timeoutMs, maxRetries }),
+      );
     },
   },
 );
+
+/** Per-call SDK options (long web-search calls get a longer timeout and no automatic retry). */
+function requestOptions({ timeoutMs, maxRetries }) {
+  return { ...(timeoutMs ? { timeout: timeoutMs } : {}), ...(maxRetries != null ? { maxRetries } : {}) };
+}
 
 module.exports = adapter;
