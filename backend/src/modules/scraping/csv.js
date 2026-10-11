@@ -145,6 +145,8 @@ function parseNumber(v) {
 
 /** Title prefix of the sample rows in the downloadable template. */
 const SAMPLE_MARK = '[ตัวอย่าง]';
+/** Long IDs that Excel displays as "1.72938E+18" and saves that way — distinct products collapse into one. */
+const SCI_NOTATION = /^\d+(\.\d+)?E\+?\d+$/i;
 
 /**
  * CSV text → trend items + per-row errors. Sample rows (SAMPLE_MARK) are skipped unless allowSample.
@@ -170,6 +172,7 @@ function csvToItems(text, { platform, mapping: override, allowSample = false } =
       message: 'ไม่พบคอลัมน์ชื่อสินค้า กรุณาเลือกคอลัมน์ "ชื่อสินค้า"',
     });
   else {
+    const seenIds = new Map(); // externalId → first row number
     data.forEach((r, i) => {
       const get = (f) => (mapping[f] === undefined ? null : (r[mapping[f]] ?? '').trim() || null);
       const title = get('title');
@@ -182,9 +185,20 @@ function csvToItems(text, { platform, mapping: override, allowSample = false } =
         errors.push({ row: i + 2, message: 'เป็นแถวจากไฟล์ตัวอย่าง (แก้เป็นข้อมูลจริงหรือลบแถว)' });
         return;
       }
+      const externalId = get('externalId');
+      if (externalId && SCI_NOTATION.test(externalId)) {
+        errors.push({ row: i + 2, message: 'รหัสสินค้าถูก Excel แปลงเป็นเลขยกกำลัง — ตั้งคอลัมน์รหัสเป็นข้อความ (Text) แล้วใส่ใหม่' });
+        return;
+      }
+      // Rows sharing an ID would overwrite each other in one trend item
+      if (externalId && seenIds.has(externalId)) {
+        errors.push({ row: i + 2, message: `รหัสสินค้าซ้ำกับแถว ${seenIds.get(externalId)}` });
+        return;
+      }
+      if (externalId) seenIds.set(externalId, i + 2);
       const item = {
         platform,
-        externalId: get('externalId'),
+        externalId,
         title,
         url: get('url'),
         imageUrl: get('imageUrl'),
@@ -214,8 +228,13 @@ function csvToItems(text, { platform, mapping: override, allowSample = false } =
  */
 const TEMPLATE_COLUMNS = [
   { field: 'title', header: 'ชื่อสินค้า', required: true, description: 'ชื่อสินค้าตามหน้าร้าน' },
-  { field: 'externalId', header: 'รหัสสินค้า', description: 'Item ID/SKU ใช้จับคู่ตอนนำเข้าซ้ำ ถ้าเว้นว่าง ระบบใช้ชื่อสินค้า + ร้านแทน' },
-  { field: 'url', header: 'ลิงก์สินค้า', description: 'ลิงก์หน้าสินค้า (ใช้สร้างลิงก์ affiliate)' },
+  {
+    field: 'externalId',
+    header: 'รหัสสินค้า',
+    description:
+      'Item ID/SKU เช่น 23456789012 ใช้จับคู่ตอนนำเข้าซ้ำ ห้ามซ้ำกันในไฟล์ ถ้าเว้นว่าง ระบบใช้ชื่อสินค้า + ร้านแทน — ใน Excel ตั้งคอลัมน์นี้เป็น "ข้อความ (Text)" ก่อนวาง ไม่งั้นรหัสยาวจะกลายเป็น 1.23E+18',
+  },
+  { field: 'url', header: 'ลิงก์สินค้า', description: 'ลิงก์หน้าสินค้า เช่น https://shopee.co.th/... (ใช้สร้างลิงก์ affiliate)' },
   { field: 'shopName', header: 'ชื่อร้าน', description: 'ชื่อร้านที่ขาย' },
   { field: 'category', header: 'หมวดหมู่', description: 'สะกดให้เหมือนกันทุกแถวในหมวดเดียวกัน ระบบใช้เทียบกับยอดขายสูงสุดของหมวด' },
   { field: 'categoryRank', header: 'อันดับในหมวด', description: 'อันดับในหน้า "สินค้ายอดนิยม" (30 วัน) ของหมวด — อันดับ 1–10 ถือว่าตลาดอิ่มตัว' },
@@ -237,8 +256,6 @@ const TEMPLATE_COLUMNS = [
 const TEMPLATE_ROWS = [
   {
     title: `${SAMPLE_MARK} เสื้อยืดโอเวอร์ไซซ์ผ้าคอตตอน`,
-    externalId: 'EX-1001',
-    url: 'https://example.com/products/oversize-tshirt',
     shopName: 'Basic Wear',
     category: 'เสื้อยืด',
     categoryRank: 16,
@@ -258,8 +275,6 @@ const TEMPLATE_ROWS = [
   },
   {
     title: `${SAMPLE_MARK} กล่องใส่รองเท้าแบบใส`,
-    externalId: 'EX-1002',
-    url: 'https://example.com/products/clear-shoe-box',
     shopName: 'Neat Box',
     category: 'กล่องเก็บของ',
     categoryRank: 64,
