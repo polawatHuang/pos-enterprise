@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Input, Label, NativeSelect, Skeleton, Textarea } from "@/components/ui/primitives";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
-import { SOURCE_PLATFORM } from "./labels";
+import { AI_PLATFORM_FOCUS, SOURCE_PLATFORM } from "./labels";
 
 export function SourcesView() {
   const { can } = useAuth();
@@ -171,7 +171,7 @@ export function SourcesView() {
   );
 }
 
-const NEW_PLATFORMS: SourcePlatform[] = ["shopee_affiliate", "apify", "custom_url"];
+const NEW_PLATFORMS: SourcePlatform[] = ["ai_search", "shopee_affiliate", "apify", "custom_url"];
 
 function SourceDialog({ source, onDone }: { source: ScrapeSource | null; onDone: () => void }) {
   const qc = useQueryClient();
@@ -187,9 +187,14 @@ function SourceDialog({ source, onDone }: { source: ScrapeSource | null; onDone:
   const [actorId, setActorId] = useState(String(c.actorId ?? ""));
   const [input, setInput] = useState(c.input ? JSON.stringify(c.input, null, 2) : "{}");
   const [fieldMap, setFieldMap] = useState(c.fieldMap ? JSON.stringify(c.fieldMap, null, 2) : '{\n  "title": "title",\n  "price": "price"\n}');
+  const [focus, setFocus] = useState(String(c.focus ?? ""));
+  const [platformFocus, setPlatformFocus] = useState(String(c.platformFocus ?? "any"));
+  const [count, setCount] = useState(String(c.count ?? 8));
+  const [enrich, setEnrich] = useState(c.enrich !== false);
   const [saving, setSaving] = useState(false);
 
   const buildConfig = () => {
+    if (platform === "ai_search") return { ...c, focus: focus.trim() || undefined, platformFocus, count: Number(count) || 8, enrich };
     if (platform === "shopee_affiliate") return { keyword: keyword || undefined, sortType, pages: Number(pages) || 1 };
     if (platform === "custom_url") return { urls: urls.split(/\s+/).map((u) => u.trim()).filter(Boolean) };
     if (platform === "apify") return { actorId, input: JSON.parse(input || "{}"), fieldMap: JSON.parse(fieldMap || "{}") };
@@ -265,6 +270,39 @@ function SourceDialog({ source, onDone }: { source: ScrapeSource | null; onDone:
                 ))}
               </NativeSelect>
             </div>
+          </div>
+        )}
+        {platform === "ai_search" && (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="flex flex-col gap-1.5 sm:col-span-3">
+              <Label htmlFor="src-focus">หมวด/คำค้นที่สนใจ (เว้นว่าง = ทุกหมวด)</Label>
+              <Input id="src-focus" value={focus} onChange={(e) => setFocus(e.target.value)} maxLength={200} placeholder="เช่น ของใช้ในห้องนอน, สัตว์เลี้ยง" />
+            </div>
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <Label htmlFor="src-pf">แพลตฟอร์ม</Label>
+              <NativeSelect id="src-pf" value={platformFocus} onChange={(e) => setPlatformFocus(e.target.value)}>
+                {AI_PLATFORM_FOCUS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="src-count">จำนวนสินค้า</Label>
+              <NativeSelect id="src-count" value={count} onChange={(e) => setCount(e.target.value)}>
+                {[5, 8, 10, 15].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            <label className="flex items-center gap-2 text-sm sm:col-span-3">
+              <input type="checkbox" checked={enrich} onChange={(e) => setEnrich(e.target.checked)} className="size-4 accent-primary" />
+              ดึงสินค้าจริงพร้อมตัวเลขจาก Shopee Affiliate (เมื่อตั้งค่าไว้)
+            </label>
+            <p className="text-xs text-muted-foreground sm:col-span-3">ค่าใช้จ่าย: ค่าค้นเว็บของ MiniMax (beta) ประมาณ $0.01 ต่อการค้น + ค่า token ต่อรอบ</p>
           </div>
         )}
         {platform === "custom_url" && (

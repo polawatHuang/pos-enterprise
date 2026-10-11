@@ -190,6 +190,12 @@ recomputeCategory(): ยอดสูงสุดของหมวด (trend_cat
 AI วิเคราะห์ (MiniMax, tool บังคับ; ใส่ Phase/เช็กลิสต์/โปรไฟล์ช่อง) → นำเข้าเป็นสินค้า draft / ลิงก์ affiliate → ใช้ต่อในเฟส 6–7
 ```
 
+**AI ค้นหาสินค้าขายดี** (`backend/src/modules/scraping/ai-search.js`, แหล่งข้อมูลชนิด `ai_search`):
+- `POST /api/scraping/ai-search` → job `scrape.ai` ทีละขั้น: `research` (MiniMax + `web_search` ฝั่งเซิร์ฟเวอร์ + tool `submit_products`; `pause_turn` ต่อรอบถัดไป) → `extract` (เมื่อโมเดลตอบเป็นข้อความ) → `import`
+- ตรวจแหล่งอ้างอิง: เก็บเฉพาะ URL ที่อยู่ในผลค้นเว็บจริง สินค้าที่ไม่มีแหล่งถูกตัดทิ้ง
+- ไม่มี Shopee Affiliate → นำเข้าเป็น "AI พบ" ไม่มีตัวเลข/ลิงก์สินค้า; มี → ค้น Shopee ด้วยคีย์เวิร์ดแล้วนำเข้าสินค้าจริง
+- ความคืบหน้าและสรุปผลอยู่ใน `scrape_runs.stage` / `state`
+
 **วิธีเลือกสินค้า:**
 - อ้างอิงหลักการจากหนังสือ "คู่มือทำนายหน้า TikTok ด้วย AI" — รายละเอียดอยู่ใน [PRODUCT_RESEARCH.md](PRODUCT_RESEARCH.md)
 - คะแนนเหมาะทำนายหน้า (`pick_score`) คิดจาก Phase ครึ่งหนึ่ง และจากเช็กลิสต์อีกครึ่งหนึ่ง

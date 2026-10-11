@@ -27,7 +27,26 @@ export const SOURCE_PLATFORM: Record<SourcePlatform, { label: string; method: st
   custom_url: { label: "หน้าเว็บ (JSON-LD)", method: "อ่านหน้าเว็บ", hint: "อ่านข้อมูล schema.org Product จากหน้าเว็บที่อนุญาต (เคารพ robots.txt)" },
   tiktok_shop: { label: "TikTok Shop", method: "API ทางการ", hint: "API ให้ข้อมูลเฉพาะร้านตัวเอง ใช้นำเข้า CSV แทน" },
   shopee: { label: "Shopee Open Platform", method: "API ทางการ", hint: "API ให้ข้อมูลเฉพาะร้านตัวเอง" },
+  ai_search: {
+    label: "AI ค้นหาสินค้าขายดี",
+    method: "AI ค้นเว็บ",
+    hint: "AI (MiniMax) ค้นเว็บหาสินค้ากำลังมาแรง เก็บเฉพาะที่มีแหล่งอ้างอิงจริง ถ้ามี Shopee Affiliate จะดึงตัวเลขจริงให้",
+  },
 };
+
+export const TREND_STAGE: Record<string, { label: string; tone: Tone }> = {
+  emerging: { label: "เพิ่งเริ่มมา", tone: "primary" },
+  rising: { label: "กำลังขึ้น", tone: "success" },
+  peak: { label: "พีก/อิ่มตัว", tone: "warning" },
+  declining: { label: "ขาลง", tone: "danger" },
+};
+
+export const AI_PLATFORM_FOCUS = [
+  { value: "any", label: "ทุกแพลตฟอร์ม" },
+  { value: "shopee", label: "Shopee" },
+  { value: "tiktok_shop", label: "TikTok Shop" },
+  { value: "lazada", label: "Lazada" },
+] as const;
 
 export const SORT_OPTIONS = [
   { value: "pick", label: "เหมาะทำนายหน้า" },

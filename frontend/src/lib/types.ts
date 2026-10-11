@@ -660,6 +660,8 @@ export interface TrendItem {
   affiliateUrl: string | null;
   hasAnalysis: boolean;
   aiAnalyzedAt: string | null;
+  sourcePlatform: string | null;
+  aiSearch: TrendAiSearch | null;
   firstSeenAt: string;
   lastSeenAt: string;
 }
@@ -761,7 +763,59 @@ export interface ChannelProfile {
   updatedAt: string;
 }
 
-export type SourcePlatform = "shopee_affiliate" | "apify" | "custom_url" | "tiktok_shop" | "shopee";
+export type SourcePlatform = "shopee_affiliate" | "apify" | "custom_url" | "tiktok_shop" | "shopee" | "ai_search";
+
+export type TrendStage = "emerging" | "rising" | "peak" | "declining";
+
+export interface AiEvidence {
+  url: string;
+  title: string | null;
+  quote: string | null;
+}
+
+/** Why AI search suggested a trend item (only for items it found). */
+export interface TrendAiSearch {
+  verified: boolean;
+  whyTrending: string | null;
+  trendStage: TrendStage | null;
+  keywords: string[];
+  evidence: AiEvidence[];
+  soldHint: string | null;
+  priceHint: string | null;
+  risks: string[];
+  foundAt: string | null;
+  runId: number | null;
+}
+
+export interface AiSearchSummary {
+  products: { title: string; category: string | null; whyTrending: string | null; trendStage: TrendStage | null; evidence: AiEvidence[] }[];
+  dropped: { title: string; reason: string }[];
+  searches: number;
+  sources: number;
+  enriched: number;
+  imported: number;
+  created: number;
+  profile: { id: number; name: string } | null;
+  provider: string;
+  model: string | null;
+}
+
+export interface AiSearchConfig {
+  focus?: string;
+  platformFocus: "any" | "shopee" | "tiktok_shop" | "lazada";
+  count: number;
+  channelProfileId?: number | null;
+  enrich: boolean;
+}
+
+export interface AiSearchSettings {
+  sourceId: number | null;
+  config: AiSearchConfig;
+  lastRunAt: string | null;
+  configured: boolean;
+  provider: string;
+  shopeeEnrich: boolean;
+}
 
 export interface ScrapeSource {
   id: number;
@@ -786,6 +840,9 @@ export interface ScrapeRun {
   sourceName: string;
   platform: string;
   status: "running" | "succeeded" | "failed";
+  /** AI search progress: searching → summarizing → importing → done */
+  stage: "searching" | "summarizing" | "importing" | "done" | null;
+  summary: AiSearchSummary | null;
   itemsFound: number;
   itemsNew: number;
   error: string | null;
