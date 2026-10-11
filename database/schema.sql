@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS document_sequences, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -956,14 +956,31 @@ CREATE TABLE trending_products (
   title           VARCHAR(500) NOT NULL,
   url             VARCHAR(1000) NULL,
   shop_name       VARCHAR(191) NULL,
+  shop_rating     DECIMAL(3,2) NULL,
+  shop_response_rate DECIMAL(5,2) NULL COMMENT '% chats answered within 24h',
+  shop_ship48_rate DECIMAL(5,2) NULL COMMENT '% orders shipped within 48h',
   image_url       VARCHAR(1000) NULL,
   price           DECIMAL(14,2) NULL,
   sold_count      BIGINT NULL,
   sold_velocity   DECIMAL(14,2) NULL COMMENT 'units sold per day between snapshots',
+  monthly_sold    BIGINT NULL COMMENT 'units sold last month',
+  prev_monthly_sold BIGINT NULL COMMENT 'units sold the month before',
   rating          DECIMAL(3,2) NULL,
+  review_count    INT NULL,
+  media_review_count INT NULL COMMENT 'reviews with photos/videos',
+  positive_review_pct DECIMAL(5,2) NULL COMMENT '4-5 star share of reviews',
   commission_rate DECIMAL(5,2) NULL,
+  has_flash_sale  TINYINT(1) NULL,
   category        VARCHAR(191) NULL,
+  category_rank   INT NULL COMMENT 'rank in the platform category best-seller list (30 days)',
   trend_score     DECIMAL(10,2) NULL,
+  lifecycle_phase VARCHAR(2) NULL COMMENT '1-5 rising, A peak, B-E declining',
+  phase_ratio     DECIMAL(7,2) NULL COMMENT 'sold as % of the category peak',
+  phase_notes     JSON NULL,
+  checklist       JSON NULL,
+  checklist_passed TINYINT NULL,
+  pick_score      DECIMAL(6,2) NULL COMMENT 'fit for affiliate selling, 0-100',
+  manual_checks   JSON NULL COMMENT 'criteria confirmed by a person',
   status          ENUM('new','watching','imported','ignored') NOT NULL DEFAULT 'new',
   imported_product_id BIGINT UNSIGNED NULL,
   affiliate_link_id BIGINT UNSIGNED NULL,
@@ -975,10 +992,41 @@ CREATE TABLE trending_products (
   UNIQUE KEY uq_trend_ext (org_id, platform, external_id),
   KEY idx_trend_score (org_id, trend_score),
   KEY idx_trend_status (org_id, status),
+  KEY idx_trend_pick (org_id, pick_score),
+  KEY idx_trend_category (org_id, platform, category),
   CONSTRAINT fk_tp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_tp_source FOREIGN KEY (source_id) REFERENCES scrape_sources(id) ON DELETE SET NULL,
   CONSTRAINT fk_tp_product FOREIGN KEY (imported_product_id) REFERENCES products(id) ON DELETE SET NULL,
   CONSTRAINT fk_tp_aff FOREIGN KEY (affiliate_link_id) REFERENCES affiliate_links(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE trend_category_benchmarks (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  platform    VARCHAR(30) NOT NULL,
+  category    VARCHAR(191) NOT NULL,
+  peak_sold   BIGINT NOT NULL COMMENT 'average units sold of the category #1-#2',
+  source      ENUM('auto','manual') NOT NULL DEFAULT 'auto',
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_benchmark (org_id, platform, category),
+  CONSTRAINT fk_tcb_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE channel_profiles (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  name        VARCHAR(191) NOT NULL,
+  persona     TEXT NOT NULL COMMENT 'who is behind the channel: age, job, hobbies, pets, style',
+  interests   JSON NULL,
+  audience    VARCHAR(500) NULL,
+  on_camera   TINYINT(1) NOT NULL DEFAULT 0,
+  ai_plan     JSON NULL,
+  ai_planned_at DATETIME NULL,
+  is_default  TINYINT(1) NOT NULL DEFAULT 0,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_cp_org (org_id),
+  CONSTRAINT fk_cp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE trending_snapshots (
@@ -1004,6 +1052,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle');
 
 SET FOREIGN_KEY_CHECKS = 1;
