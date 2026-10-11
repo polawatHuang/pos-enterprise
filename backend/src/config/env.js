@@ -45,7 +45,10 @@ const schema = z.object({
   // 32 bytes, base64 — used to encrypt third-party OAuth tokens at rest
   APP_ENCRYPTION_KEY: z.string().optional(),
   // Business timezone offset used for "today"/"this month" in reports (no tz tables needed)
-  APP_TZ_OFFSET: z.string().regex(/^[+-]\d{2}:\d{2}$/).default('+07:00'),
+  APP_TZ_OFFSET: z
+    .string()
+    .regex(/^[+-]\d{2}:\d{2}$/)
+    .default('+07:00'),
   // Public HTTPS origin of this API (e.g. https://api.example.com), shown as the webhook URL to paste
   // into LINE/Meta consoles. Needed because browsers reach the API through the Vercel rewrite.
   PUBLIC_API_URL: z.string().url().optional(),
@@ -60,7 +63,9 @@ if (!parsed.success) {
   const lines = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`);
   // eslint-disable-next-line no-console
   console.error(`Invalid environment configuration:\n${lines.join('\n')}`);
-  throw new Error('Invalid environment configuration');
+  throw Object.assign(new Error('Invalid environment configuration'), {
+    issues: parsed.error.issues.map((i) => ({ name: i.path.join('.'), problem: process.env[i.path.join('.')] === undefined ? 'ยังไม่ได้ตั้งค่า' : i.message })),
+  });
 }
 
 const env = parsed.data;
@@ -68,7 +73,11 @@ const env = parsed.data;
 // Refuse to boot in production with the placeholder secrets from .env.example
 if (env.NODE_ENV === 'production') {
   const weak = ['JWT_ACCESS_SECRET', 'CRON_SECRET'].filter((k) => /change-me|dev-only/i.test(env[k]));
-  if (weak.length) throw new Error(`Replace placeholder secrets before running in production: ${weak.join(', ')}`);
+  if (weak.length) {
+    throw Object.assign(new Error(`Replace placeholder secrets before running in production: ${weak.join(', ')}`), {
+      issues: weak.map((name) => ({ name, problem: 'ยังเป็นค่าตัวอย่างจาก .env.example ต้องสุ่มค่าใหม่' })),
+    });
+  }
 }
 env.isProd = env.NODE_ENV === 'production';
 env.isTest = env.NODE_ENV === 'test';

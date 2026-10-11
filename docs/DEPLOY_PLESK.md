@@ -169,6 +169,10 @@ https://api.example.com/internal/cron/tick?key=<CRON_SECRET>
 | อาการ | สาเหตุ/วิธีแก้ |
 |---|---|
 | หน้า 502 / "Web application could not be started" | ดู log ที่ Node.js → **Logs** หรือไฟล์ `logs/` ของโดเมน; ส่วนใหญ่คือ env ไม่ครบ (แอปจะพิมพ์ชื่อตัวแปรที่ขาด) |
+| หน้า **500 Internal Server Error** ของ Passenger | แอปล้มตอนเริ่ม: (1) ยังไม่กด **NPM install** (2) ยังไม่ได้ใส่ **Custom environment variables** (ไฟล์ `.env` ไม่ได้อัปโหลดไปด้วย) (3) Application Root ไม่ใช่โฟลเดอร์ที่มี `app.js` + `src/` ของ backend — แก้แล้วกด **Restart App** |
+| `/api/health` ได้ **503** `MISCONFIGURED` | env ไม่ครบ/ไม่ถูกต้อง — ดูรายชื่อใน `missing` และเหตุผลใน `issues` (แสดงแค่ชื่อตัวแปร ไม่แสดงค่า) แล้วเพิ่มใน Custom environment variables |
+| `/api/health` ได้ **503** `DEPENDENCIES_MISSING` | ยังไม่ได้ติดตั้งแพ็กเกจ — กด **NPM install** แล้ว Restart App |
+| Plesk เตือนเรื่อง Document Root | ตั้ง Document Root เป็น `<Application Root>/public` ห้ามชี้ที่ Application Root เพราะไฟล์อย่าง `.env` / `package.json` อาจถูกเปิดจากเว็บได้ |
 | `/api/health` ได้ `database: error` | ตรวจ `DB_NAME` (รวม prefix), `DB_USER`, `DB_HOST=localhost` |
 | login สำเร็จแต่เด้งกลับหน้า login | `COOKIE_SECURE=true` แต่ใช้ http, หรือเรียก API ตรงโดยไม่ได้ตั้ง `COOKIE_DOMAIN` — ใช้ rewrite ของ Vercel ตามค่าเริ่มต้น |
 | CORS error ใน console | เพิ่มโดเมน frontend ใน `CORS_ORIGINS` แล้ว Restart App |
