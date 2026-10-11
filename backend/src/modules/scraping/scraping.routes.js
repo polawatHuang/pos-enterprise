@@ -11,7 +11,7 @@ const ai = require('../../integrations/ai');
 const shopeeAffiliate = require('../../integrations/shopee-affiliate');
 const { upsertItems, rescore, recomputeCategory, getBenchmark } = require('./trends.service');
 const { CHECKS, SATURATED_RANK } = require('./lifecycle');
-const { csvToItems, FIELDS } = require('./csv');
+const { csvToItems, csvTemplate, FIELDS, TEMPLATE_COLUMNS, TEMPLATE_ROWS } = require('./csv');
 const { PLATFORMS, startRun } = require('./sources');
 
 const router = express.Router();
@@ -502,6 +502,17 @@ router.put(
 
 /* --------------------------------------------------------------- CSV import */
 
+/** Sample file + column guide for the import dialog (headers are aliases, so the file maps itself). */
+router.get('/csv-template', requirePermission('scraping:read'), (req, res) => {
+  res.json({
+    data: {
+      filename: 'trend-import-template.csv',
+      csv: csvTemplate(),
+      columns: TEMPLATE_COLUMNS.map((c) => ({ ...c, required: Boolean(c.required), example: TEMPLATE_ROWS[0][c.field] ?? null })),
+    },
+  });
+});
+
 router.post(
   '/trends/import-csv',
   requirePermission('scraping:run'),
@@ -514,14 +525,13 @@ router.post(
       platform: z.enum(['shopee', 'tiktok_shop', 'lazada', 'other']),
       mapping: z.partialRecord(z.enum(FIELDS), z.number().int().min(0)).optional(),
       preview: z.boolean().default(false),
+      // Dry run of the downloadable sample; only honoured for previews, never for an import
+      allowSample: z.boolean().default(false),
     }),
   }),
   async (req, res) => {
     const b = req.valid.body;
-    const parsed = csvToItems(b.csv, {
-      platform: b.platform,
-      mapping: b.mapping,
-    });
+    const parsed = csvToItems(b.csv, { platform: b.platform, mapping: b.mapping, allowSample: b.preview && b.allowSample });
     if (b.preview) {
       return res.json({
         data: {

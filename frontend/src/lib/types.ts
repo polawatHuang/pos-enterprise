@@ -712,6 +712,20 @@ export interface TrendListMeta {
   platforms: { platform: string; count: number }[];
 }
 
+export interface CsvTemplateColumn {
+  field: string;
+  header: string;
+  description: string;
+  required: boolean;
+  example: string | number | null;
+}
+
+export interface CsvTemplate {
+  filename: string;
+  csv: string;
+  columns: CsvTemplateColumn[];
+}
+
 export interface CategoryBenchmark {
   platform: string;
   category: string;

@@ -11,7 +11,7 @@ const { createApp } = require('../src/app');
 const db = require('../src/db/pool');
 const minimax = require('../src/integrations/minimax');
 const { estimatePhase, evaluateChecklist, pickScore, velocitySeries } = require('../src/modules/scraping/lifecycle');
-const { csvToItems } = require('../src/modules/scraping/csv');
+const { csvToItems, csvTemplate, parseCsv, SAMPLE_MARK, TEMPLATE_COLUMNS, TEMPLATE_ROWS } = require('../src/modules/scraping/csv');
 const { normalizeItem, recomputeCategory } = require('../src/modules/scraping/trends.service');
 
 const app = createApp();
@@ -24,6 +24,7 @@ const createdProfiles = [];
 let manager;
 let marketer;
 let viewer;
+let cashier;
 
 async function cookie(email) {
   const res = await request(app).post('/api/auth/login').send({ email, password: 'Admin@1234' });
@@ -45,6 +46,7 @@ before(async () => {
   manager = as(await cookie('manager@example.com'));
   marketer = as(await cookie('marketer@example.com'));
   viewer = as(await cookie('viewer@example.com'));
+  cashier = as(await cookie('cashier@example.com'));
 });
 
 after(async () => {
@@ -195,6 +197,78 @@ describe('lifecycle method (unit)', () => {
     assert.equal(bad.shopResponseRate, null);
     assert.equal(bad.categoryRank, null);
     assert.equal(bad.hasFlashSale, null);
+  });
+});
+
+describe('CSV template', () => {
+  test('sample file maps every column by itself and parses to the intended values', () => {
+    const text = csvTemplate();
+    assert.ok(text.endsWith('\r\n'));
+    assert.ok(!text.startsWith('\uFEFF'));
+    const rows = parseCsv(text);
+    assert.equal(rows.length, 1 + TEMPLATE_ROWS.length);
+    assert.ok(rows.every((r) => r.length === TEMPLATE_COLUMNS.length));
+    const { mapping, items, errors } = csvToItems(text, { platform: 'shopee', allowSample: true });
+    assert.deepEqual(errors, []);
+    for (const c of TEMPLATE_COLUMNS) assert.equal(mapping[c.field], TEMPLATE_COLUMNS.indexOf(c), `${c.header} → ${c.field}`);
+    assert.equal(items.length, TEMPLATE_ROWS.length);
+    const full = normalizeItem(items[0]);
+    for (const c of TEMPLATE_COLUMNS.filter((x) => x.field !== 'hasFlashSale')) assert.equal(full[c.field], TEMPLATE_ROWS[0][c.field], c.field);
+    assert.equal(full.hasFlashSale, true);
+    assert.equal(normalizeItem(items[1]).hasFlashSale, false);
+    const partial = normalizeItem(items[2]);
+    assert.equal(partial.shopRating, null);
+    assert.equal(partial.hasFlashSale, null);
+    assert.match(partial.externalId, /^h_/); // falls back to a hash of title + shop
+    // Every required column is first and holds a value in every sample row
+    assert.equal(TEMPLATE_COLUMNS[0].field, 'title');
+    assert.ok(TEMPLATE_ROWS.every((r) => r.title.startsWith(SAMPLE_MARK)));
+  });
+
+  test('sample rows are skipped unless explicitly allowed; edited rows import', () => {
+    const text = csvTemplate();
+    const strict = csvToItems(text, { platform: 'shopee' });
+    assert.equal(strict.items.length, 0);
+    assert.deepEqual(
+      strict.errors.map((e) => e.row),
+      [2, 3, 4],
+    );
+    assert.match(strict.errors[0].message, /ไฟล์ตัวอย่าง/);
+    // A user who replaced the sample title with a real one gets that row imported
+    const edited = text.replace(`${SAMPLE_MARK} กล่องใส่รองเท้าแบบใส`, 'กล่องใส่รองเท้าแบบใส ของจริง');
+    const r = csvToItems(edited, { platform: 'shopee' });
+    assert.deepEqual(
+      r.items.map((i) => i.title),
+      ['กล่องใส่รองเท้าแบบใส ของจริง'],
+    );
+    assert.equal(r.errors.length, 2);
+  });
+
+  test('GET /csv-template returns the file and a column guide (scraping:read)', async () => {
+    assert.equal((await cashier.get('/api/scraping/csv-template')).status, 403);
+    const res = await viewer.get('/api/scraping/csv-template');
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.data.filename, 'trend-import-template.csv');
+    assert.equal(res.body.data.csv, csvTemplate());
+    assert.equal(res.body.data.columns.length, TEMPLATE_COLUMNS.length);
+    const title = res.body.data.columns[0];
+    assert.equal(title.required, true);
+    assert.equal(title.header, 'ชื่อสินค้า');
+    assert.ok(res.body.data.columns.every((c) => c.description && typeof c.required === 'boolean'));
+    // Dry run of the downloaded file (as Excel saves it, with a BOM): all columns map, no row errors
+    const csv = `\uFEFF${res.body.data.csv}`;
+    const prev = await manager.post('/api/scraping/trends/import-csv', { csv, platform: 'shopee', preview: true, allowSample: true });
+    assert.equal(prev.status, 200, JSON.stringify(prev.body));
+    assert.equal(prev.body.data.total, TEMPLATE_ROWS.length);
+    assert.deepEqual(prev.body.data.errors, []);
+    assert.equal(Object.keys(prev.body.data.mapping).length, TEMPLATE_COLUMNS.length);
+    // Uploading the sample unchanged: preview shows nothing to import, and allowSample never applies to a real import
+    const asIs = await manager.post('/api/scraping/trends/import-csv', { csv, platform: 'shopee', preview: true });
+    assert.equal(asIs.body.data.total, 0);
+    assert.equal(asIs.body.data.errors.length, TEMPLATE_ROWS.length);
+    const imp = await manager.post('/api/scraping/trends/import-csv', { csv, platform: 'shopee', allowSample: true });
+    assert.equal(imp.status, 400);
+    assert.equal((await db.one('SELECT COUNT(*) AS n FROM trending_products WHERE title LIKE :t', { t: `${SAMPLE_MARK}%` })).n, 0);
   });
 });
 

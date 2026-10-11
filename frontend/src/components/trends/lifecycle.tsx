@@ -325,7 +325,10 @@ function ChecklistForm({ t, onDone }: { t: TrendDetail; onDone: () => void }) {
         void submit();
       }}
     >
-      <p className="text-xs text-muted-foreground">ข้อมูลเหล่านี้ API ส่วนใหญ่ไม่ให้มา ดูได้จากหน้าสินค้าและหน้าร้านในแอป เว้นว่างไว้ถ้ายังไม่รู้</p>
+      <p className="text-xs text-muted-foreground">
+        ข้อมูลเหล่านี้ API ส่วนใหญ่ไม่ให้มา ดูได้จากหน้าสินค้าและหน้าร้านในแอป เว้นว่างไว้ถ้ายังไม่รู้ — ถ้ามีหลายสินค้า กรอกรวมในไฟล์ CSV แล้วกด &quot;นำเข้า CSV&quot;
+        (มีไฟล์ตัวอย่างให้ดาวน์โหลด)
+      </p>
       <div className="grid gap-3 sm:grid-cols-2">
         {FACTS.map((f) => (
           <div key={f.key} className="flex flex-col gap-1.5">
