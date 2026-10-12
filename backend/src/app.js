@@ -10,11 +10,21 @@ const { notFoundHandler, errorHandler } = require('./core/http');
 
 /** "https://*.vercel.app" -> /^https:\/\/[^.]+\.vercel\.app$/ */
 function originMatcher(patterns) {
-  const regexes = patterns.map(
-    (p) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^.]+')}$`),
-  );
+  const regexes = patterns.map((p) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^.]+')}$`));
   return (origin) => regexes.some((r) => r.test(origin));
 }
+
+/** What to check for common MySQL connection errors (shown by /api/health). */
+const DB_HINTS = {
+  ER_ACCESS_DENIED_ERROR: 'DB_USER หรือ DB_PASSWORD ไม่ถูกต้อง หรือ user ยังไม่มีสิทธิ์ในฐานข้อมูลนี้ — ตรวจใน Plesk → Databases → User Management',
+  ER_DBACCESS_DENIED_ERROR: 'user นี้ไม่มีสิทธิ์เข้าฐานข้อมูล DB_NAME — ผูก user กับฐานข้อมูลใน Plesk → Databases',
+  ER_BAD_DB_ERROR: 'ไม่พบฐานข้อมูลตาม DB_NAME — ใส่ชื่อเต็มรวม prefix ตามที่แสดงใน Plesk → Databases',
+  ECONNREFUSED: 'ต่อ MySQL ไม่ได้ — ใช้ DB_HOST=localhost (หรือ 127.0.0.1) และ DB_PORT=3306',
+  ENOTFOUND: 'ไม่พบ host ตาม DB_HOST — ใช้ DB_HOST=localhost',
+  ETIMEDOUT: 'เชื่อมต่อ MySQL หมดเวลา — ตรวจ DB_HOST/DB_PORT',
+  ER_CON_COUNT_ERROR: 'การเชื่อมต่อ MySQL เต็ม — ลด DB_CONNECTION_LIMIT (เช่น 5) แล้ว Restart App',
+  UNKNOWN: 'ตรวจค่า DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME แล้ว Restart App',
+};
 
 function createApp() {
   const app = express();
@@ -47,13 +57,22 @@ function createApp() {
 
   app.get('/api/health', async (req, res) => {
     let database = 'ok';
+    let dbError = null;
     try {
       await db.query('SELECT 1');
-    } catch {
+    } catch (err) {
       database = 'error';
+      // Error code only (no host, user or message), so a misconfigured deploy can be fixed from this page
+      dbError = typeof err?.code === 'string' ? err.code : 'UNKNOWN';
     }
     res.status(database === 'ok' ? 200 : 503).json({
-      data: { status: database === 'ok' ? 'ok' : 'degraded', database, time: new Date().toISOString(), version: '0.1.0' },
+      data: {
+        status: database === 'ok' ? 'ok' : 'degraded',
+        database,
+        ...(dbError ? { databaseError: dbError, hint: DB_HINTS[dbError] ?? DB_HINTS.UNKNOWN } : {}),
+        time: new Date().toISOString(),
+        version: '0.1.0',
+      },
     });
   });
 

@@ -173,7 +173,7 @@ https://api.example.com/internal/cron/tick?key=<CRON_SECRET>
 | `/api/health` ได้ **503** `MISCONFIGURED` | env ไม่ครบ/ไม่ถูกต้อง — ดูรายชื่อใน `missing` และเหตุผลใน `issues` (แสดงแค่ชื่อตัวแปร ไม่แสดงค่า) แล้วเพิ่มใน Custom environment variables |
 | `/api/health` ได้ **503** `DEPENDENCIES_MISSING` | ยังไม่ได้ติดตั้งแพ็กเกจ — กด **NPM install** แล้ว Restart App |
 | Plesk เตือนเรื่อง Document Root | ตั้ง Document Root เป็น `<Application Root>/public` ห้ามชี้ที่ Application Root เพราะไฟล์อย่าง `.env` / `package.json` อาจถูกเปิดจากเว็บได้ |
-| `/api/health` ได้ `database: error` | ตรวจ `DB_NAME` (รวม prefix), `DB_USER`, `DB_HOST=localhost` |
+| `/api/health` ได้ `database: error` | ดู `databaseError` + `hint` ในผลลัพธ์: `ER_ACCESS_DENIED_ERROR` = user/รหัสผ่านผิดหรือ user ไม่มีสิทธิ์ในฐาน, `ER_BAD_DB_ERROR` = `DB_NAME` ผิด (ต้องรวม prefix), `ECONNREFUSED`/`ENOTFOUND` = ใช้ `DB_HOST=localhost` `DB_PORT=3306` — แก้แล้ว Restart App |
 | login สำเร็จแต่เด้งกลับหน้า login | `COOKIE_SECURE=true` แต่ใช้ http, หรือเรียก API ตรงโดยไม่ได้ตั้ง `COOKIE_DOMAIN` — ใช้ rewrite ของ Vercel ตามค่าเริ่มต้น |
 | CORS error ใน console | เพิ่มโดเมน frontend ใน `CORS_ORIGINS` แล้ว Restart App |
 | แก้โค้ดแล้วไม่เปลี่ยน | กด **Restart App** หลัง deploy ทุกครั้ง (หรือ `touch tmp/restart.txt` ในโฟลเดอร์ backend) |
