@@ -75,6 +75,17 @@ export async function apiFetch<T>(
   return parse<T>(res);
 }
 
+/**
+ * Fetch an API-served file (e.g. "/api/covers/1/assets/background") as a Blob with the auth cookie.
+ * Works in rewrite and direct (NEXT_PUBLIC_API_URL) modes; the image stays same-origin for <canvas>.
+ */
+export async function apiBlob(apiPath: string): Promise<Blob> {
+  const path = apiPath.replace(/^\/api(?=\/)/, "");
+  const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+  if (!res.ok) throw new ApiError(res.status, "HTTP_ERROR", `โหลดไฟล์ไม่สำเร็จ (${res.status})`);
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string, query?: Query) => apiFetch<{ data: T }>(path, { query }).then((r) => r.data),
   post: <T>(path: string, json?: unknown) => apiFetch<{ data: T }>(path, { method: "POST", json }).then((r) => r.data),

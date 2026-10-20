@@ -1016,3 +1016,51 @@ export interface AffiliateLink {
   postCount: number;
   createdAt: string;
 }
+
+/* ------------------------------------------------------------------ covers */
+
+export type CoverOrientation = "portrait" | "landscape";
+export type CoverLayout = "top-title" | "bottom-band" | "split-left" | "center-burst";
+export type CoverFont = "kanit" | "prompt" | "mitr" | "chakra";
+
+export interface CoverUserDesign {
+  font?: CoverFont;
+  layout?: CoverLayout;
+  textColor?: string;
+  accentColor?: string;
+  titleScale?: number;
+  emphasisWord?: string | null;
+  imageX?: number;
+  imageY?: number;
+  imageScale?: number;
+}
+
+export interface CoverDesign {
+  layout: CoverLayout;
+  font: CoverFont;
+  palette: { primary: string; accent: string; text: string; stroke: string };
+  emphasisWord: string | null;
+  mood: string | null;
+  imagePrompt: string;
+  user?: CoverUserDesign;
+}
+
+export interface CoverProject {
+  id: number;
+  orientation: CoverOrientation;
+  style: string;
+  headline: string;
+  subtext: string | null;
+  badge: string | null;
+  uploadKind: "product" | "person" | null;
+  design: CoverDesign | null;
+  status: "generating" | "ready" | "failed";
+  error: string | null;
+  provider: string | null;
+  model: string | null;
+  uploadUrl: string | null;
+  backgroundUrl: string | null;
+  finalUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
