@@ -89,6 +89,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: "/settings/users", label: "ผู้ใช้และสิทธิ์", icon: Users, permission: "users:read", phase: 1 },
       { href: "/settings/integrations", label: "การเชื่อมต่อ API", icon: PlugZap, permission: "integrations:manage", phase: 1 },
+      { href: "/settings/data", label: "จัดการข้อมูล", icon: DatabaseZap, permission: "settings:manage", phase: 1 },
     ],
   },
 ];
