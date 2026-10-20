@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
@@ -49,7 +49,9 @@ export function TrendsView() {
   const [sort, setSort] = useState("pick");
   const [phase, setPhase] = useState("all");
   const [hideTop10, setHideTop10] = useState(false);
-  const [q, setQ] = useState("");
+  // The global search "ดูทั้งหมด" opens this page with ?q=
+  const searchParams = useSearchParams();
+  const [q, setQ] = useState(searchParams.get("q") ?? "");
   const [minCommission, setMinCommission] = useState("");
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<number | null>(null);
