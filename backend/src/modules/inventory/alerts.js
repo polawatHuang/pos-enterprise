@@ -106,7 +106,7 @@ async function checkOrg(orgId, { now = new Date() } = {}) {
         severity: 'danger',
         title: `สินค้าหมด: ${r.name}`,
         body: `${wh.name}${r.avg > 0 ? ` · ปกติขายวันละ ${r.avg.toFixed(1)} ${r.unit}` : ''}`,
-        link: `/inventory?warehouseId=${wh.id}&status=out`,
+        link: `/purchasing?warehouseId=${wh.id}`,
         permission: 'inventory:read',
         refKey: `out:${wh.id}:${r.id}:${today}`,
       });

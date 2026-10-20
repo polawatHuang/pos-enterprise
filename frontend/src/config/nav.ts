@@ -21,6 +21,7 @@ import {
   Share2,
   ShoppingCart,
   TrendingUp,
+  Truck,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -52,6 +53,7 @@ export const navGroups: NavGroup[] = [
       { href: "/products", label: "สินค้า", icon: Package, permission: "products:read", phase: 1 },
       { href: "/inventory", label: "สต๊อกสินค้า", icon: Boxes, permission: "inventory:read", phase: 1 },
       { href: "/inventory/counts", label: "ตรวจนับสต๊อก", icon: ClipboardList, permission: "inventory:count", phase: 1 },
+      { href: "/purchasing", label: "สั่งซื้อ & รับของ", icon: Truck, permission: "inventory:read", phase: 1 },
     ],
   },
   {

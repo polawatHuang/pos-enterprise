@@ -156,6 +156,9 @@ export interface Product {
   cost: number;
   vatType: VatType;
   reorderPoint: number;
+  supplierId: number | null;
+  supplierName: string | null;
+  packSize: number;
   imageUrl: string | null;
   status: ProductStatus;
   onHand: number;
@@ -284,6 +287,87 @@ export interface StockCountDetail extends StockCount {
   gainValue: number | null;
   lossValue: number | null;
   items: StockCountItem[];
+}
+
+export interface Supplier {
+  id: number;
+  name: string;
+  taxId: string | null;
+  contact: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  leadTimeDays: number;
+  note: string | null;
+  isActive: boolean;
+  productCount: number;
+  openOrders: number;
+}
+
+export interface OrderSuggestion {
+  productId: number;
+  sku: string;
+  name: string;
+  unit: string;
+  categoryName: string | null;
+  supplierId: number | null;
+  supplierName: string | null;
+  cost: number;
+  price: number;
+  packSize: number;
+  leadTime: number;
+  onHand: number;
+  onOrder: number;
+  reorderPoint: number;
+  avgDaily: number;
+  sold7: number;
+  spark: number[];
+  daysCover: number | null;
+  suggested: number;
+  reason: string;
+}
+
+export type PoStatus = "draft" | "ordered" | "partial" | "received" | "cancelled";
+
+export interface PurchaseOrder {
+  id: number;
+  poNo: string;
+  status: PoStatus;
+  source: "manual" | "suggestion";
+  supplierId: number | null;
+  supplierName: string | null;
+  supplierPhone: string | null;
+  warehouseId: number;
+  warehouseName: string;
+  orderDate: string;
+  expectedDate: string | null;
+  total: number;
+  note: string | null;
+  sentAt: string | null;
+  receivedAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  itemCount?: number;
+  receivedPct?: number;
+  items?: { productId: number; sku: string; barcode: string | null; name: string; unit: string; quantity: number; receivedQty: number; unitCost: number; lineTotal: number }[];
+}
+
+export interface StockTransfer {
+  id: number;
+  transferNo: string;
+  status: "in_transit" | "received" | "cancelled";
+  fromWarehouseId: number;
+  fromName: string;
+  toWarehouseId: number;
+  toName: string;
+  note: string | null;
+  createdBy: string;
+  receivedBy: string | null;
+  shippedAt: string;
+  receivedAt: string | null;
+  itemCount?: number;
+  shortage?: number;
+  items?: { productId: number; sku: string; barcode: string | null; name: string; unit: string; qtySent: number; qtyReceived: number | null }[];
 }
 
 export interface AppNotification {

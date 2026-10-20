@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import type { Category, Product } from "@/lib/types";
+import type { Category, Product, Supplier } from "@/lib/types";
 import { formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, NativeSelect, Textarea } from "@/components/ui/primitives";
@@ -25,6 +25,8 @@ const schema = z.object({
   cost: num("กรุณากรอกต้นทุน"),
   vatType: z.enum(["vat7", "exempt", "zero"]),
   reorderPoint: num("กรุณากรอกจุดสั่งซื้อ"),
+  supplierId: z.string(),
+  packSize: z.string().trim().refine((v) => v === "" || Number(v) > 0, "ต้องมากกว่า 0"),
   status: z.enum(["active", "draft", "archived"]),
   description: z.string().max(5000),
   sellingPoints: z.string().max(5000),
@@ -39,6 +41,7 @@ export const useCategories = () =>
 export function ProductFormDialog({ product, onSaved }: { product?: Product | null; onSaved: (p: Product) => void }) {
   const qc = useQueryClient();
   const categories = useCategories();
+  const suppliers = useQuery({ queryKey: ["purchasing", "suppliers"], queryFn: () => api.get<Supplier[]>("/purchasing/suppliers"), staleTime: 5 * 60_000 });
   const isNew = !product;
   const {
     register,
@@ -58,6 +61,8 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
       cost: product ? String(product.cost) : "0",
       vatType: product?.vatType ?? "vat7",
       reorderPoint: product ? String(product.reorderPoint) : "5",
+      supplierId: product?.supplierId ? String(product.supplierId) : "",
+      packSize: product ? String(product.packSize ?? 1) : "1",
       status: product?.status ?? "active",
       description: product?.description ?? "",
       sellingPoints: product?.sellingPoints ?? "",
@@ -81,6 +86,8 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
       cost: Number(v.cost),
       vatType: v.vatType,
       reorderPoint: Number(v.reorderPoint),
+      supplierId: v.supplierId ? Number(v.supplierId) : null,
+      packSize: Number(v.packSize) || 1,
       status: v.status,
       description: v.description || null,
       sellingPoints: v.sellingPoints || null,
@@ -138,6 +145,19 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
           </Field>
           <Field label="จุดสั่งซื้อ (แจ้งเตือนเมื่อเหลือ ≤)" error={errors.reorderPoint?.message}>
             <Input inputMode="numeric" {...register("reorderPoint")} />
+          </Field>
+          <Field label="ผู้ขายหลัก (ใช้จัดใบสั่งซื้อ)">
+            <NativeSelect className="h-10 w-full" {...register("supplierId")}>
+              <option value="">ไม่ระบุ</option>
+              {suppliers.data?.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field label="สั่งทีละ (จำนวนต่อแพ็กที่ผู้ขายส่ง)" error={errors.packSize?.message}>
+            <Input inputMode="decimal" {...register("packSize")} />
           </Field>
           <Field label="สถานะ">
             <NativeSelect className="h-10 w-full" {...register("status")}>
