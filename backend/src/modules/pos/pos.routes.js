@@ -153,6 +153,7 @@ router.get('/settings', async (req, res) => {
   res.json({
     data: {
       ...settings,
+      bankAccount: { ...settings.bankAccount, display: service.formatAccountNo(settings.bankAccount?.number) },
       promptpayEnabled: isValidPromptPayId(settings.promptpayId),
       org: {
         name: org.name,
@@ -182,6 +183,18 @@ router.put(
       pointsEarnBaht: z.coerce.number().min(0).max(100_000).optional(),
       pointValue: z.coerce.number().min(0).max(1000).optional(),
       cashLimit: money.optional(),
+      bankAccount: z
+        .object({
+          bank: z.string().trim().min(1).max(60),
+          type: z.string().trim().max(30).default('ออมทรัพย์'),
+          number: z
+            .string()
+            .trim()
+            .transform((v) => v.replace(/[\s-]/g, ''))
+            .refine((v) => /^\d{10,15}$/.test(v), 'เลขที่บัญชีต้องเป็นตัวเลข 10-15 หลัก'),
+          name: z.string().trim().min(1).max(100),
+        })
+        .optional(),
     }),
   }),
   async (req, res) => {
@@ -418,15 +431,19 @@ router.post(
     });
     const transRef = slip.transRef ? String(slip.transRef).replace(/\s+/g, '').slice(0, 64) : null;
     const used = transRef ? await db.one('SELECT order_id FROM payment_slips WHERE org_id = :orgId AND trans_ref = :ref', { orgId: req.user.orgId, ref: transRef }) : null;
-    const { promptpayId } = await service.getSettings(req.user.orgId);
-    const tail = String(promptpayId || '').replace(/\D/g, '').slice(-4);
+    const { promptpayId, bankAccount } = await service.getSettings(req.user.orgId);
+    // Slips mask most digits (e.g. xxx-x-x5427-x): the visible digits must appear in one of the shop's numbers
+    const ours = [String(promptpayId || '').replace(/\D/g, ''), String(bankAccount?.number ?? '').replace(/\D/g, '')].filter(Boolean);
     const receiverDigits = String(slip.receiverAccount ?? '').replace(/\D/g, '');
+    const firstName = String(bankAccount?.name ?? '').trim().split(/\s+/)[0];
+    const nameOk = firstName && slip.receiverName ? String(slip.receiverName).includes(firstName) : null;
+    const digitsOk = ours.length && receiverDigits.length >= 3 ? ours.some((n) => n.includes(receiverDigits)) : null;
     const checks = {
       isSlip: slip.isSlip,
       amount: slip.amount != null && Math.abs(Number(slip.amount) - amount) < 0.01,
       reference: Boolean(transRef),
       unused: !used,
-      receiver: tail && receiverDigits ? receiverDigits.endsWith(tail) || receiverDigits.includes(tail) : null,
+      receiver: digitsOk === true || nameOk === true ? true : digitsOk === false || nameOk === false ? false : null,
     };
     const ok = checks.isSlip && checks.amount && checks.reference && checks.unused && checks.receiver !== false;
     audit(req, 'pos.slip.verify', 'payment_slip', null, { ok, amount });

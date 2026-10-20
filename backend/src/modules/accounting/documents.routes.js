@@ -159,6 +159,12 @@ router.get(
   },
 );
 
+async function bankAccountFor(orgId) {
+  const { getSettings, formatAccountNo } = require('../pos/pos.service');
+  const { bankAccount } = await getSettings(orgId);
+  return bankAccount?.number ? { ...bankAccount, display: formatAccountNo(bankAccount.number) } : null;
+}
+
 /** Everything a printable A4 document needs: org header, branch, party, lines, amount in words. */
 router.get('/:id', requirePermission('accounting:read'), validate({ params: idParam }), async (req, res) => {
   const { d, items } = await loadDocument(req.user.orgId, req.valid.params.id);
@@ -188,6 +194,7 @@ router.get('/:id', requirePermission('accounting:read'), validate({ params: idPa
         email: org.email,
         vatRegistered: Boolean(org.vat_registered),
         branchNo: org.branch_no ?? '00000',
+        bankAccount: await bankAccountFor(req.user.orgId),
       },
       whtSource: source && {
         rate: source.wht_rate == null ? null : Number(source.wht_rate),

@@ -13,7 +13,7 @@ export interface DisplayLine {
 
 export type DisplayMessage =
   | { type: "cart"; lines: DisplayLine[]; total: number; discount: number; member: { name: string; points: number } | null }
-  | { type: "pay"; total: number; qr: string | null; method: string }
+  | { type: "pay"; total: number; qr: string | null; method: string; bank?: { bank: string; number: string; name: string } | null }
   | { type: "age"; asking: boolean }
   | { type: "done"; total: number; change: number; pointsEarned: number }
   | { type: "idle" }

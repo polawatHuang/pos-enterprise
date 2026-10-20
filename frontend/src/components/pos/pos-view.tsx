@@ -626,7 +626,16 @@ export function PosView() {
             initialMethod={payMethod}
             needsAge={needsAge}
             ageConfirmedByCustomer={ageByCustomer}
-            onQr={(qr, method, amount) => post({ type: "pay", total: amount, qr, method: METHOD_NAME[method] ?? method })}
+            onQr={(qr, method, amount) => {
+              const acc = settings.data?.bankAccount;
+              post({
+                type: "pay",
+                total: amount,
+                qr,
+                method: METHOD_NAME[method] ?? method,
+                bank: method === "transfer" && acc ? { bank: acc.bank, number: acc.display ?? acc.number, name: acc.name } : null,
+              });
+            }}
             onConfirm={pay}
           />
         )}
