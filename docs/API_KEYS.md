@@ -9,7 +9,7 @@
 
 | บริการ | ใช้ในโมดูล (เฟส) | ตัวแปร | ขอที่ | ต้องรอ review? |
 |---|---|---|---|---|
-| **MiniMax API** (ค่าเริ่มต้นของ AI ทุกส่วน) | AI แชตปิดการขาย (4), AI อ่านใบเสร็จ (3), สคริปต์/เสียง/วิดีโอ (6), AI ค้นหาสินค้าขายดี (ค้นเว็บ, 5) | `MINIMAX_API_KEY`, `MINIMAX_MODEL`, `MINIMAX_BASE_URL` (`AI_PROVIDER=minimax`) | platform.minimax.io | ไม่ |
+| **MiniMax API** (ค่าเริ่มต้นของ AI ทุกส่วน) | AI แชตปิดการขาย (4), AI อ่านใบเสร็จ (3), สคริปต์/เสียง/วิดีโอ (6), AI ค้นหาสินค้าขายดี (ค้นเว็บ, 5), AI ปกคลิป (สร้างภาพ `image-01`) | `MINIMAX_API_KEY`, `MINIMAX_MODEL`, `MINIMAX_BASE_URL` (`AI_PROVIDER=minimax`) | platform.minimax.io | ไม่ |
 | Anthropic Claude API (ทางเลือก) | ใช้แทน MiniMax ได้ทุกจุดเมื่อตั้ง `AI_PROVIDER=anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | console.anthropic.com | ไม่ |
 | **TikTok for Developers** — Login Kit + Content Posting API | ตั้งเวลาโพสต์ (7) | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI` | developers.tiktok.com | **ใช่** — ต้องผ่าน audit จึงโพสต์แบบ public ได้ |
 | **TikTok Shop Partner** | สินค้า/ออร์เดอร์/แชต (2, 4, 5) | `TIKTOK_SHOP_APP_KEY`, `TIKTOK_SHOP_APP_SECRET` | partner.tiktokshop.com | ใช่ (ต้องเป็น seller/partner) |

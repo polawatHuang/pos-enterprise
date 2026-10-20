@@ -196,6 +196,11 @@ AI วิเคราะห์ (MiniMax, tool บังคับ; ใส่ Phas
 - ไม่มี Shopee Affiliate → นำเข้าเป็น "AI พบ" ไม่มีตัวเลข/ลิงก์สินค้า; มี → ค้น Shopee ด้วยคีย์เวิร์ดแล้วนำเข้าสินค้าจริง
 - ความคืบหน้าและสรุปผลอยู่ใน `scrape_runs.stage` / `state`
 
+**AI ปกคลิป** (`backend/src/modules/covers`, หน้า `/covers`):
+- `POST /api/covers` → job `cover.generate`: MiniMax ออกแบบ (forced tool: imagePrompt, layout, palette, font, คำเด่น) → MiniMax `image-01` สร้างภาพพื้นหลังแบบไม่มีตัวหนังสือ (9:16 / 16:9) → เก็บไฟล์ใน `cover_assets` (MEDIUMBLOB เพราะ URL ของผู้ให้บริการหมดอายุ)
+- รูปที่แนบ: รูปสินค้าวางทับตอนประกอบปก, รูปคนส่งเป็น `subject_reference` ให้ AI คงหน้าตา
+- ตัวหนังสือไทยวาดด้วย `<canvas>` ฝั่งเบราว์เซอร์ (`frontend/src/components/covers/compose.ts`, ตัดคำด้วย `Intl.Segmenter`) จึงสะกดถูกเสมอและแก้ได้โดยไม่ต้องสร้างภาพใหม่
+
 **วิธีเลือกสินค้า:**
 - อ้างอิงหลักการจากหนังสือ "คู่มือทำนายหน้า TikTok ด้วย AI" — รายละเอียดอยู่ใน [PRODUCT_RESEARCH.md](PRODUCT_RESEARCH.md)
 - คะแนนเหมาะทำนายหน้า (`pick_score`) คิดจาก Phase ครึ่งหนึ่ง และจากเช็กลิสต์อีกครึ่งหนึ่ง
