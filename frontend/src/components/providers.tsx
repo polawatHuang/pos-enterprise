@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { toast, Toaster } from "sonner";
-import { isTransient, retryDelay, retryTransient } from "@/lib/api";
+import { ApiError, isTransient, retryTransient } from "@/lib/api";
 
 let browserQueryClient: QueryClient | undefined;
 
@@ -13,10 +13,11 @@ function makeQueryClient() {
     // Runs only after every retry failed: one toast for the whole page, not one per query.
     queryCache: new QueryCache({
       onError: (err) => {
-        if (typeof window === "undefined" || !isTransient(err)) return;
+        const upstream = err instanceof ApiError && err.code === "UPSTREAM";
+        if (typeof window === "undefined" || !(isTransient(err) || upstream)) return;
         toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ", {
           id: "server-unreachable",
-          description: "โหลดข้อมูลบางส่วนไม่ได้ เซิร์ฟเวอร์อาจกำลังเริ่มทำงาน",
+          description: err instanceof Error ? err.message : "โหลดข้อมูลบางส่วนไม่ได้",
           duration: 10_000,
           action: { label: "ลองใหม่", onClick: () => client.refetchQueries({ type: "active" }) },
         });
@@ -28,7 +29,6 @@ function makeQueryClient() {
         refetchOnWindowFocus: true,
         refetchOnReconnect: true,
         retry: retryTransient,
-        retryDelay,
       },
     },
   });
