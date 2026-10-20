@@ -55,8 +55,14 @@ handlers['cover.generate'] = (p) => require('../../modules/covers/covers.service
 handlers['social.publish'] = (p) => require('../../modules/social/publish').publish(p);
 handlers['social.status'] = (p) => require('../../modules/social/publish').checkStatus(p);
 
+/** Low / out-of-stock alerts (in-app + LINE OA) for every org. */
+handlers['inventory.alerts'] = () => require('../../modules/inventory/alerts').runAlerts();
+
 /** Recurring jobs scheduled by the cron tick (idempotent: one queued instance at a time). */
-const recurring = [{ type: 'system.cleanup', everyMinutes: 60 * 24 }];
+const recurring = [
+  { type: 'system.cleanup', everyMinutes: 60 * 24 },
+  { type: 'inventory.alerts', everyMinutes: 60 },
+];
 
 async function scheduleRecurring() {
   for (const r of recurring) {

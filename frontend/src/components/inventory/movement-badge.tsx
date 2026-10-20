@@ -9,6 +9,8 @@ export const MOVEMENT_META: Record<MovementType, { label: string; tone: "success
   transfer_in: { label: "โอนเข้า", tone: "success" },
   transfer_out: { label: "โอนออก", tone: "danger" },
   opening: { label: "ยอดยกมา", tone: "neutral" },
+  count: { label: "ตรวจนับ", tone: "warning" },
+  waste: { label: "ของเสีย", tone: "danger" },
 };
 
 export function MovementTypeBadge({ type }: { type: MovementType }) {

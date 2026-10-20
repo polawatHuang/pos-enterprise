@@ -127,6 +127,34 @@ frontend/src/config/nav.ts               # เพิ่มเมนู + permiss
 - คุยกับหน้าขายผ่าน `BroadcastChannel` บนเครื่องเดียวกัน ไม่ผ่านเซิร์ฟเวอร์
 - เปิดได้จากปุ่ม "จอลูกค้า" แล้วลากไปจอที่ 2
 
+### ตรวจนับและแจ้งเตือนสต๊อก (เฟส 9, migration 012)
+
+**ตรวจนับ** (`modules/inventory/counts.routes.js`, mount ที่ `/api/inventory/counts`)
+- ตอนสร้างรอบ ระบบเก็บยอดในระบบไว้ (`snapshot_qty`) และเก็บ `start_movement_id` = id ล่าสุดของ `stock_movements`
+- ส่วนต่าง = นับได้ − (snapshot + movement ที่ id มากกว่า start) จึงขายหรือรับของระหว่างนับได้โดยไม่ทำให้ยอดเพี้ยน
+- `blind=1`: ผู้ที่ไม่มี `inventory:approve` ไม่เห็นยอดในระบบระหว่างนับ
+- สแกนบาร์โค้ดแพ็ก/ลังได้ ระบบคูณ factor ให้
+- อนุมัติ (`inventory:approve`): ลง movement ชนิด `count` ทีละรายการ และลงบัญชีเป็นสินค้าขาด (5900/1300) หรือสินค้าเกิน (1300/4900)
+- ส่วนต่างเกิน 10% ต้องใส่เหตุผลก่อนอนุมัติ
+
+**ความเร็วการขาย** (`modules/inventory/analytics.js`)
+- คำนวณจาก movement ชนิด sale/return จึงนับยอดแพ็กเป็นหน่วยฐานแล้ว
+- ขายเฉลี่ยต่อวัน = 0.6 × (ยอด 7 วัน / 7) + 0.4 × (ยอด 28 วัน / 28)
+- พอขายอีก (วัน) = คงเหลือ / ขายเฉลี่ยต่อวัน
+- `stock_levels.reorder_point` / `max_qty` ใช้ override ค่าของสินค้าเป็นรายคลัง
+
+**แจ้งเตือน**
+- job `inventory.alerts` รันทุกชั่วโมง (`modules/inventory/alerts.js`) แล้วเขียนลง `notifications` โดยกันซ้ำด้วย `ref_key` ต่อวัน
+  - ของหมด: แจ้งรายสินค้า
+  - ใกล้หมด (ต่ำกว่าจุดสั่งซื้อ หรือพอขายไม่ถึง 3 วัน): รวมเป็นแจ้งเตือนเดียวต่อคลัง
+- ผู้ใช้เห็นเฉพาะแจ้งเตือนที่ต้องใช้สิทธิ์ที่ตัวเองมี (`permission`)
+- LINE OA (`settings.notify.line`) ใช้ token ของช่อง LINE ใน Inbox
+  - ของหมดใหม่ส่ง push ทันที
+  - สรุปส่งวันละครั้งหลังเวลาที่ตั้ง (`notify.line_digest_on`)
+  - ผู้รับเลือกได้จากคนที่เคยทักแชต OA
+- API: `GET /api/notifications`, `/unread-count`, `POST /:id/read`, `/read-all`, `GET|PUT /settings`, `POST /test-line`, `POST /check-stock`
+- สิทธิ์ใหม่: `inventory:count` (แคชเชียร์มีด้วย), `inventory:approve`, `purchasing:write`
+
 ## บัญชี เอกสาร และภาษี (เฟส 3)
 
 **บัญชีคู่อัตโนมัติ:** ทุกธุรกรรมลงบัญชีผ่าน `postJournal()` ใน `backend/src/modules/accounting/ledger.service.js` ภายใน transaction เดียวกับธุรกรรมต้นทาง ระบบตรวจว่าเดบิตเท่ากับเครดิตทุกครั้ง การยกเลิกจะไม่ลบรายการเดิม แต่สร้างรายการกลับ (reversal) ที่ลงวันที่เดียวกับรายการเดิม ยอดที่ยกเลิกจึงหายไปจากงบของงวดนั้นอย่างถูกต้อง และยังตรวจย้อนหลัง (audit) ได้

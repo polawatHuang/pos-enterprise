@@ -8,6 +8,7 @@ const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
 const { badRequest } = require('../../core/errors');
 const { applyMovement, getWarehouse, getProductForUpdate, updateAverageCost } = require('./inventory.service');
+const { salesStats, stockStatus, daysCover, EMPTY } = require('./analytics');
 
 const router = express.Router();
 router.use(authenticate);
@@ -31,7 +32,10 @@ router.get('/warehouses', requirePermission('inventory:read'), async (req, res) 
   res.json({ data: rows.map((r) => ({ ...r, totalUnits: Number(r.totalUnits), stockValue: Number(r.stockValue) })) });
 });
 
-/** Stock per product × warehouse (or summed across all warehouses). */
+/**
+ * Stock per product × warehouse (or summed across all warehouses) with selling velocity,
+ * days of cover and a 14-day sales sparkline — the "single item management" view.
+ */
 router.get(
   '/levels',
   requirePermission('inventory:read'),
@@ -40,6 +44,7 @@ router.get(
       warehouseId: z.coerce.number().int().positive().optional(),
       q: z.string().trim().max(100).optional(),
       lowStock: z.enum(['true', 'false']).optional(),
+      status: z.enum(['out', 'low', 'attention']).optional(),
       page: z.coerce.number().int().min(1).default(1),
       pageSize: z.coerce.number().int().min(1).max(200).default(50),
     }),
@@ -53,31 +58,88 @@ router.get(
       limit: f.pageSize,
       offset: (f.page - 1) * f.pageSize,
     };
+    // A warehouse view uses that warehouse's own reorder point when set
+    const reorder = f.warehouseId ? 'COALESCE(MAX(sl.reorder_point), p.reorder_point)' : 'p.reorder_point';
     const base = `
-      SELECT p.id, p.sku, p.name, p.unit, p.cost, p.price, p.reorder_point,
-             COALESCE(SUM(sl.quantity), 0) AS quantity
+      SELECT p.id, p.sku, p.name, p.unit, p.cost, p.price, ${reorder} AS reorder_point, p.reorder_point AS product_reorder,
+             MAX(sl.max_qty) AS max_qty, COALESCE(SUM(sl.quantity), 0) AS quantity
         FROM products p
         LEFT JOIN stock_levels sl ON sl.product_id = p.id AND (:warehouseId IS NULL OR sl.warehouse_id = :warehouseId)
        WHERE p.org_id = :orgId AND p.status <> 'archived'
          AND (:q IS NULL OR p.name LIKE :q OR p.sku LIKE :q OR p.barcode LIKE :q)
        GROUP BY p.id, p.sku, p.name, p.unit, p.cost, p.price, p.reorder_point`;
-    const low = f.lowStock === 'true' ? 'WHERE x.quantity <= x.reorder_point' : '';
-    const rows = await db.query(`SELECT * FROM (${base}) x ${low} ORDER BY x.quantity <= x.reorder_point DESC, x.name LIMIT :limit OFFSET :offset`, params);
-    const total = await db.one(`SELECT COUNT(*) AS n FROM (${base}) x ${low}`, params);
+    const filter =
+      f.status === 'out'
+        ? 'WHERE x.quantity <= 0'
+        : f.lowStock === 'true' || f.status === 'low' || f.status === 'attention'
+          ? 'WHERE x.quantity <= x.reorder_point'
+          : '';
+    const rows = await db.query(`SELECT * FROM (${base}) x ${filter} ORDER BY x.quantity <= x.reorder_point DESC, x.name LIMIT :limit OFFSET :offset`, params);
+    const total = await db.one(`SELECT COUNT(*) AS n FROM (${base}) x ${filter}`, params);
+    const stats = await salesStats({ orgId: req.user.orgId, warehouseId: f.warehouseId ?? null, productIds: rows.map((r) => r.id) });
     res.json({
-      data: rows.map((r) => ({
-        productId: r.id,
-        sku: r.sku,
-        name: r.name,
-        unit: r.unit,
-        cost: Number(r.cost),
-        price: Number(r.price),
-        reorderPoint: Number(r.reorder_point),
-        quantity: Number(r.quantity),
-        value: Number(r.quantity) * Number(r.cost),
-      })),
+      data: rows.map((r) => {
+        const st = stats.get(r.id) ?? EMPTY;
+        const quantity = Number(r.quantity);
+        const reorderPoint = Number(r.reorder_point);
+        return {
+          productId: r.id,
+          sku: r.sku,
+          name: r.name,
+          unit: r.unit,
+          cost: Number(r.cost),
+          price: Number(r.price),
+          reorderPoint,
+          reorderOverride: f.warehouseId ? reorderPoint !== Number(r.product_reorder) : false,
+          maxQty: r.max_qty == null ? null : Number(r.max_qty),
+          quantity,
+          value: quantity * Number(r.cost),
+          avgDaily: st.avgDaily,
+          sold7: st.sold7,
+          daysCover: daysCover(quantity, st.avgDaily),
+          lastSoldAt: st.lastSoldAt,
+          spark: st.daily.length ? st.daily : Array(14).fill(0),
+          status: stockStatus({ quantity, reorderPoint, avgDaily: st.avgDaily, lastSoldAt: st.lastSoldAt }),
+        };
+      }),
       meta: { page: f.page, pageSize: f.pageSize, total: Number(total.n) },
     });
+  },
+);
+
+/** Per-warehouse reorder point / order-up-to level (null = use the product default). */
+router.patch(
+  '/levels',
+  requirePermission('inventory:write'),
+  validate({
+    body: z.object({
+      warehouseId: z.number().int().positive(),
+      productId: z.number().int().positive(),
+      reorderPoint: z.coerce.number().min(0).max(1_000_000).nullable().optional(),
+      maxQty: z.coerce.number().min(0).max(1_000_000).nullable().optional(),
+    }),
+  }),
+  async (req, res) => {
+    const b = req.valid.body;
+    await getWarehouse(db.pool, req.user.orgId, b.warehouseId);
+    const p = await db.one('SELECT id FROM products WHERE id = :id AND org_id = :orgId', { id: b.productId, orgId: req.user.orgId });
+    if (!p) throw badRequest('ไม่พบสินค้า');
+    await db.query(
+      `INSERT INTO stock_levels (warehouse_id, product_id, variant_id, quantity, reorder_point, max_qty)
+       VALUES (:warehouseId, :productId, 0, 0, :reorderPoint, :maxQty)
+       ON DUPLICATE KEY UPDATE reorder_point = IF(:setReorder = 1, VALUES(reorder_point), reorder_point),
+                               max_qty = IF(:setMax = 1, VALUES(max_qty), max_qty)`,
+      {
+        warehouseId: b.warehouseId,
+        productId: b.productId,
+        reorderPoint: b.reorderPoint ?? null,
+        maxQty: b.maxQty ?? null,
+        setReorder: b.reorderPoint === undefined ? 0 : 1,
+        setMax: b.maxQty === undefined ? 0 : 1,
+      },
+    );
+    audit(req, 'inventory.levels', 'product', b.productId, { warehouseId: b.warehouseId, reorderPoint: b.reorderPoint, maxQty: b.maxQty });
+    res.json({ data: { ok: true } });
   },
 );
 
@@ -88,7 +150,7 @@ router.get(
     query: z.object({
       productId: z.coerce.number().int().positive().optional(),
       warehouseId: z.coerce.number().int().positive().optional(),
-      type: z.enum(['purchase', 'sale', 'return', 'adjustment', 'transfer_in', 'transfer_out', 'opening']).optional(),
+      type: z.enum(['purchase', 'sale', 'return', 'adjustment', 'transfer_in', 'transfer_out', 'opening', 'count', 'waste']).optional(),
       limit: z.coerce.number().int().min(1).max(200).default(50),
     }),
   }),

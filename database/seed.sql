@@ -41,7 +41,10 @@ INSERT INTO permissions (id, code, module, description) VALUES
   (20, 'social:publish', 'social', 'ตั้งเวลาโพสต์/เชื่อมบัญชีโซเชียล'),
   (21, 'video:create', 'video', 'สร้างวิดีโอ AI'),
   (22, 'scraping:read', 'scraping', 'ดูสินค้าเทรนด์'),
-  (23, 'scraping:run', 'scraping', 'ตั้งค่าและสั่งดึงข้อมูล');
+  (23, 'scraping:run', 'scraping', 'ตั้งค่าและสั่งดึงข้อมูล'),
+  (24, 'inventory:count', 'inventory', 'ตรวจนับสต๊อก (สแกนนับ)'),
+  (25, 'inventory:approve', 'inventory', 'อนุมัติผลตรวจนับและส่วนต่าง'),
+  (26, 'purchasing:write', 'inventory', 'สั่งซื้อ รับของ และโอนย้ายระหว่างสาขา');
 INSERT INTO roles (id, code, name, description) VALUES
   (1, 'owner', 'เจ้าของกิจการ', 'สิทธิ์ทั้งหมด'),
   (2, 'admin', 'ผู้ดูแลระบบ', 'สิทธิ์ทั้งหมด ยกเว้นจัดการบัญชี owner'),
@@ -52,6 +55,7 @@ INSERT INTO roles (id, code, name, description) VALUES
   (7, 'support', 'แอดมินแชต', 'ดูแลแชตลูกค้าและการคืนสินค้า'),
   (8, 'viewer', 'ผู้ดูรายงาน', 'ดูได้อย่างเดียว');
 INSERT INTO role_permissions (role_id, permission_id) VALUES
+  (1, 24), (1, 25), (1, 26), (2, 24), (2, 25), (2, 26), (3, 24), (3, 25), (3, 26), (5, 24),
   (1, 1),
   (1, 2),
   (1, 3),
