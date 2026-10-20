@@ -159,7 +159,7 @@ describe('timeline builders (unit)', () => {
     assert.ok(all.some((c) => c.asset.html === '<p>ลด &lt;50%&gt;</p>'));
     assert.equal(all.filter((c) => c.asset.type === 'html' && c.asset.html !== '<p>สร้างด้วย AI</p>').length, 1); // empty caption skipped
     assert.equal(all.find((c) => c.asset.type === 'video').asset.volume, 0);
-    assert.equal(all.find((c) => c.asset.type === 'image').effect, 'zoomInSlow');
+    assert.equal(all.find((c) => c.asset.type === 'image').effect, 'zoomInFast'); // hook opens with a quick zoom
     assert.equal(all.filter((c) => c.asset.type === 'audio').length, 2);
   });
 
@@ -293,7 +293,10 @@ describe('generation pipeline', () => {
       assert.equal(render.init.headers['x-api-key'], 'ss-key');
       const edit = JSON.parse(render.init.body);
       const clips = edit.timeline.tracks.flatMap((t) => t.clips);
-      assert.equal(clips.filter((c) => c.asset.type === 'image').length, 3);
+      // Fast cuts: each scene is split into ≤1.8s shots of the product photo
+      const images = clips.filter((c) => c.asset.type === 'image');
+      assert.ok(images.length >= 3, String(images.length));
+      assert.ok(images.every((c) => c.length <= 1.8));
       assert.ok(clips.filter((c) => c.asset.type === 'audio').every((c) => c.asset.src.startsWith('https://media.example.com/videos/')));
       assert.ok(v.subtitle_srt.includes('-->'));
 

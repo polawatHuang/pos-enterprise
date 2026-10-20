@@ -13,7 +13,9 @@ const minimaxMedia = require('../../integrations/minimax-media');
 const elevenlabs = require('../../integrations/elevenlabs');
 const shotstack = require('../../integrations/shotstack');
 const r2 = require('../../integrations/r2');
-const { generateScript, productFacts, normalizeScene, TONES } = require('./script');
+const { generateScript, productFacts, normalizeScene, TONES, ANGLES } = require('./script');
+const media = require('./media');
+const env = require('../../config/env');
 const { VOICE_PROVIDERS } = require('./pipeline');
 
 const router = express.Router();
@@ -31,11 +33,17 @@ function capabilities() {
     script: { configured: ai.isConfigured(), provider: ai.providerId() },
     voice: {
       minimax: { configured: minimaxMedia.isConfigured(), missing: missing(minimaxMedia), defaultVoiceId: process.env.MINIMAX_VOICE_ID || null },
-      elevenlabs: { configured: elevenlabs.isConfigured() && r2.isConfigured(), missing: [...missing(elevenlabs), ...missing(r2)], defaultVoiceId: process.env.ELEVENLABS_VOICE_ID || null },
+      elevenlabs: {
+        configured: elevenlabs.isConfigured() && r2.isConfigured(),
+        missing: [...missing(elevenlabs), ...missing(r2)],
+        defaultVoiceId: process.env.ELEVENLABS_VOICE_ID || null,
+      },
     },
     clips: { configured: minimaxMedia.isConfigured(), missing: missing(minimaxMedia), model: process.env.MINIMAX_VIDEO_MODEL || 'MiniMax-Hailuo-2.3' },
     compose: { configured: shotstack.isConfigured(), missing: missing(shotstack), env: process.env.SHOTSTACK_ENV || 'stage' },
     storage: { configured: r2.isConfigured(), missing: missing(r2) },
+    // Own footage and cover intro are fetched by the renderer from this server
+    publicMedia: { configured: Boolean(env.PUBLIC_API_URL), missing: env.PUBLIC_API_URL ? [] : ['PUBLIC_API_URL'] },
   };
 }
 
@@ -55,6 +63,9 @@ function mapProject(v) {
     voiceProvider: v.voice_provider ?? 'minimax',
     voiceId: v.voice_id,
     visualMode: v.visual_mode,
+    captionStyle: v.caption_style ?? 'pop',
+    coverId: v.cover_id ?? null,
+    hooks: script?.hooks ?? [],
     status: v.status,
     stageDetail: v.stage_detail,
     error: v.error,
@@ -76,25 +87,38 @@ async function getProject(orgId, id) {
 }
 
 router.get('/meta', (req, res) => {
-  res.json({ data: { capabilities: capabilities(), tones: TONES, voiceProviders: Object.keys(VOICE_PROVIDERS) } });
+  res.json({ data: { capabilities: capabilities(), tones: TONES, angles: ANGLES, voiceProviders: Object.keys(VOICE_PROVIDERS) } });
 });
 
-router.get(
-  '/',
-  validate({ query: z.object({ status: z.enum(['all', 'in_progress', 'ready', 'draft']).default('all') }) }),
-  async (req, res) => {
-    const f = { all: '1=1', in_progress: `v.status IN (${IN_PROGRESS.map((s) => `'${s}'`).join(',')})`, ready: "v.status IN ('ready','parts_ready')", draft: "v.status IN ('draft','script_ready','failed')" }[req.valid.query.status];
-    const rows = await db.query(
-      `SELECT v.id, v.title, v.product_id, v.trending_product_id, v.brief, v.script_json, v.post_caption, v.hashtags, v.voice_provider, v.voice_id,
-              v.visual_mode, v.status, v.stage_detail, v.error, v.output_url, v.duration_sec, v.subtitle_srt IS NOT NULL AS has_srt,
+const mapMedia = (m) => ({
+  id: m.id,
+  kind: m.kind,
+  mime: m.mime,
+  sizeBytes: Number(m.size_bytes),
+  durationMs: m.duration_ms,
+  label: m.label,
+  sortOrder: m.sort_order,
+  url: `/api/videos/${m.video_project_id}/media/${m.id}/file`,
+});
+const listMedia = (projectId) => db.query('SELECT * FROM video_media WHERE video_project_id = :id ORDER BY sort_order, id', { id: projectId });
+
+router.get('/', validate({ query: z.object({ status: z.enum(['all', 'in_progress', 'ready', 'draft']).default('all') }) }), async (req, res) => {
+  const f = {
+    all: '1=1',
+    in_progress: `v.status IN (${IN_PROGRESS.map((s) => `'${s}'`).join(',')})`,
+    ready: "v.status IN ('ready','parts_ready')",
+    draft: "v.status IN ('draft','script_ready','failed')",
+  }[req.valid.query.status];
+  const rows = await db.query(
+    `SELECT v.id, v.title, v.product_id, v.trending_product_id, v.brief, v.script_json, v.post_caption, v.hashtags, v.voice_provider, v.voice_id,
+              v.visual_mode, v.caption_style, v.cover_id, v.status, v.stage_detail, v.error, v.output_url, v.duration_sec, v.subtitle_srt IS NOT NULL AS has_srt,
               v.created_at, v.updated_at, pr.name AS product_name, COALESCE(pr.image_url, t.image_url) AS product_image
          FROM video_projects v LEFT JOIN products pr ON pr.id = v.product_id LEFT JOIN trending_products t ON t.id = v.trending_product_id
         WHERE v.org_id = :orgId AND ${f} ORDER BY v.updated_at DESC, v.id DESC LIMIT 100`,
-      { orgId: req.user.orgId },
-    );
-    res.json({ data: rows.map(mapProject) });
-  },
-);
+    { orgId: req.user.orgId },
+  );
+  res.json({ data: rows.map(mapProject) });
+});
 
 router.get('/:id', validate({ params: idParam }), async (req, res) => {
   const v = await getProject(req.user.orgId, req.valid.params.id);
@@ -102,9 +126,11 @@ router.get('/:id', validate({ params: idParam }), async (req, res) => {
     'SELECT id, kind, scene_index, provider, status, duration_ms, external_url, error, created_at FROM video_assets WHERE video_project_id = :id ORDER BY kind, scene_index, id',
     { id: v.id },
   );
+  const mediaRows = await listMedia(v.id);
   res.json({
     data: {
       ...mapProject(v),
+      media: mediaRows.map(mapMedia),
       assets: assets.map((a) => ({
         id: a.id,
         kind: a.kind,
@@ -123,7 +149,12 @@ router.get('/:id', validate({ params: idParam }), async (req, res) => {
 
 const briefSchema = z.object({
   tone: z.enum(Object.keys(TONES)).default('friendly'),
-  lengthSec: z.coerce.number().int().refine((n) => [15, 30, 45, 60].includes(n), 'ความยาว 15/30/45/60 วินาที').default(30),
+  angle: z.enum(Object.keys(ANGLES)).default('auto'),
+  lengthSec: z.coerce
+    .number()
+    .int()
+    .refine((n) => [15, 30, 45, 60].includes(n), 'ความยาว 15/30/45/60 วินาที')
+    .default(30),
   audience: z.string().trim().max(200).optional(),
   notes: z.string().trim().max(1000).optional(),
 });
@@ -133,14 +164,15 @@ async function writeScript(project, brief, orgId) {
   if (!facts) throw badRequest('ไม่พบสินค้าของโปรเจกต์นี้');
   await db.query("UPDATE video_projects SET status = 'scripting', stage_detail = 'AI กำลังเขียนสคริปต์', error = NULL WHERE id = :id", { id: project.id });
   try {
-    const s = await generateScript({ facts: facts.facts, brief });
-    await db.query("DELETE FROM video_assets WHERE video_project_id = :id", { id: project.id });
+    const footage = await listMedia(project.id);
+    const s = await generateScript({ facts: facts.facts, brief, footage });
+    await db.query('DELETE FROM video_assets WHERE video_project_id = :id', { id: project.id });
     await db.query(
       `UPDATE video_projects SET status = 'script_ready', stage_detail = NULL, script_json = :json, script = :plain, post_caption = :caption,
               hashtags = :tags, title = IF(:keepTitle, title, :title), output_url = NULL, subtitle_srt = NULL WHERE id = :id`,
       {
         id: project.id,
-        json: JSON.stringify({ scenes: s.scenes, model: s.model, provider: s.provider }),
+        json: JSON.stringify({ scenes: s.scenes, hooks: s.hooks, model: s.model, provider: s.provider }),
         plain: s.scenes.map((sc) => sc.voiceover).join('\n'),
         caption: s.postCaption,
         tags: s.hashtags.join(' ').slice(0, 500),
@@ -149,7 +181,10 @@ async function writeScript(project, brief, orgId) {
       },
     );
   } catch (err) {
-    await db.query("UPDATE video_projects SET status = 'draft', stage_detail = NULL, error = :e WHERE id = :id", { id: project.id, e: String(err.message).slice(0, 2000) });
+    await db.query("UPDATE video_projects SET status = 'draft', stage_detail = NULL, error = :e WHERE id = :id", {
+      id: project.id,
+      e: String(err.message).slice(0, 2000),
+    });
     throw err;
   }
 }
@@ -157,24 +192,27 @@ async function writeScript(project, brief, orgId) {
 router.post(
   '/',
   validate({
-    body: briefSchema.extend({
-      productId: z.number().int().positive().optional(),
-      trendId: z.number().int().positive().optional(),
-      title: z.string().trim().max(200).optional(),
-      visualMode: z.enum(['ai_clips', 'product_images']).default('product_images'),
-      voiceProvider: z.enum(['minimax', 'elevenlabs']).default('minimax'),
-      voiceId: z.string().trim().max(100).optional(),
-    }).refine((b) => Boolean(b.productId) !== Boolean(b.trendId), 'เลือกสินค้าหรือสินค้าเทรนด์อย่างใดอย่างหนึ่ง'),
+    body: briefSchema
+      .extend({
+        productId: z.number().int().positive().optional(),
+        trendId: z.number().int().positive().optional(),
+        title: z.string().trim().max(200).optional(),
+        visualMode: z.enum(['ai_clips', 'product_images', 'my_footage']).default('product_images'),
+        captionStyle: z.enum(['pop', 'clean', 'none']).default('pop'),
+        voiceProvider: z.enum(['minimax', 'elevenlabs']).default('minimax'),
+        voiceId: z.string().trim().max(100).optional(),
+      })
+      .refine((b) => Boolean(b.productId) !== Boolean(b.trendId), 'เลือกสินค้าหรือสินค้าเทรนด์อย่างใดอย่างหนึ่ง'),
   }),
   async (req, res) => {
     const b = req.valid.body;
     ai.requireConfig(); // fail before creating a project when the script can't be written
     const facts = await productFacts(req.user.orgId, { productId: b.productId, trendId: b.trendId });
     if (!facts) throw notFound('ไม่พบสินค้า');
-    const brief = { tone: b.tone, lengthSec: b.lengthSec, audience: b.audience, notes: b.notes };
+    const brief = { tone: b.tone, angle: b.angle, lengthSec: b.lengthSec, audience: b.audience, notes: b.notes };
     const r = await db.query(
-      `INSERT INTO video_projects (org_id, product_id, trending_product_id, title, brief, voice_provider, voice_id, visual_mode, status, created_by)
-       VALUES (:orgId, :productId, :trendId, :title, :brief, :voiceProvider, :voiceId, :visualMode, 'draft', :userId)`,
+      `INSERT INTO video_projects (org_id, product_id, trending_product_id, title, brief, voice_provider, voice_id, visual_mode, caption_style, status, created_by)
+       VALUES (:orgId, :productId, :trendId, :title, :brief, :voiceProvider, :voiceId, :visualMode, :captionStyle, 'draft', :userId)`,
       {
         orgId: req.user.orgId,
         productId: b.productId ?? null,
@@ -184,6 +222,7 @@ router.post(
         voiceProvider: b.voiceProvider,
         voiceId: b.voiceId || null,
         visualMode: b.visualMode,
+        captionStyle: b.captionStyle,
         userId: req.user.id,
       },
     );
@@ -216,6 +255,7 @@ const sceneSchema = z.object({
   visual: z.string().trim().max(600).default(''),
   showProduct: z.boolean().default(false),
   durationSec: z.coerce.number().int().min(2).max(10).default(4),
+  media: z.number().int().min(1).max(media.MAX_FILES).nullable().optional(),
 });
 
 /** Manual edits. Any change invalidates generated media (voice must match the words). */
@@ -228,7 +268,9 @@ router.put(
       scenes: z.array(sceneSchema).min(1).max(8),
       postCaption: z.string().trim().max(2000).nullable(),
       hashtags: z.string().trim().max(500).nullable(),
-      visualMode: z.enum(['ai_clips', 'product_images']),
+      visualMode: z.enum(['ai_clips', 'product_images', 'my_footage']),
+      captionStyle: z.enum(['pop', 'clean', 'none']).optional(),
+      coverId: z.number().int().positive().nullable().optional(),
       voiceProvider: z.enum(['minimax', 'elevenlabs']),
       voiceId: z.string().trim().max(100).nullable(),
     }),
@@ -237,16 +279,27 @@ router.put(
     const v = await getProject(req.user.orgId, req.valid.params.id);
     if (IN_PROGRESS.includes(v.status)) throw conflict('โปรเจกต์นี้กำลังประมวลผลอยู่');
     const b = req.valid.body;
-    const scenes = b.scenes.map(normalizeScene);
+    const mediaCount = (await listMedia(v.id)).length;
+    const scenes = b.scenes.map((sc) => normalizeScene(sc, mediaCount));
     const old = parseJson(v.script_json);
+    if (b.coverId) {
+      const cover = await db.one("SELECT id FROM cover_projects WHERE id = :id AND org_id = :orgId AND status = 'ready'", {
+        id: b.coverId,
+        orgId: req.user.orgId,
+      });
+      if (!cover) throw badRequest('ไม่พบปกคลิปที่เลือก');
+    }
+    const captionStyle = b.captionStyle ?? v.caption_style ?? 'pop';
+    const coverId = b.coverId === undefined ? v.cover_id : b.coverId;
+    const looksChanged = captionStyle !== (v.caption_style ?? 'pop') || (coverId ?? null) !== (v.cover_id ?? null);
     const scriptChanged = JSON.stringify(old?.scenes ?? []) !== JSON.stringify(scenes);
     const voiceChanged = (v.voice_provider ?? 'minimax') !== b.voiceProvider || (v.voice_id ?? null) !== (b.voiceId || null);
     if (scriptChanged) await db.query('DELETE FROM video_assets WHERE video_project_id = :id', { id: v.id });
     else if (voiceChanged) await db.query("DELETE FROM video_assets WHERE video_project_id = :id AND kind IN ('voice','final')", { id: v.id });
-    const reset = scriptChanged || voiceChanged || v.visual_mode !== b.visualMode;
+    const reset = scriptChanged || voiceChanged || looksChanged || v.visual_mode !== b.visualMode;
     await db.query(
       `UPDATE video_projects SET title = :title, script_json = :json, script = :plain, post_caption = :caption, hashtags = :tags,
-              visual_mode = :visualMode, voice_provider = :voiceProvider, voice_id = :voiceId,
+              visual_mode = :visualMode, caption_style = :captionStyle, cover_id = :coverId, voice_provider = :voiceProvider, voice_id = :voiceId,
               status = IF(:reset, 'script_ready', status), output_url = IF(:reset, NULL, output_url), error = IF(:reset, NULL, error)
         WHERE id = :id`,
       {
@@ -257,6 +310,8 @@ router.put(
         caption: b.postCaption,
         tags: b.hashtags,
         visualMode: b.visualMode,
+        captionStyle,
+        coverId: coverId ?? null,
         voiceProvider: b.voiceProvider,
         voiceId: b.voiceId || null,
         reset,
@@ -291,6 +346,10 @@ router.post('/:id/generate', validate({ params: idParam }), async (req, res) => 
     r2.requireConfig(); // ElevenLabs returns raw audio that must be hosted for the renderer
   } else minimaxMedia.requireConfig();
   if (v.visual_mode === 'ai_clips') minimaxMedia.requireConfig();
+  if (v.visual_mode === 'my_footage') {
+    if (!(await listMedia(v.id)).length) throw badRequest('ยังไม่ได้อัปโหลดฟุตเทจ — เพิ่มคลิปหรือรูปที่ถ่ายเองก่อน');
+    if (!env.PUBLIC_API_URL) throw badRequest('ต้องตั้ง PUBLIC_API_URL (โดเมน HTTPS ของ backend) ก่อน เพื่อให้ระบบตัดต่อดึงฟุตเทจได้');
+  }
   await db.query("UPDATE video_projects SET status = 'voicing', stage_detail = 'เข้าคิวแล้ว', error = NULL, output_url = NULL WHERE id = :id", { id: v.id });
   await enqueue('video.voice', { projectId: v.id }, { orgId: req.user.orgId, maxAttempts: 1 });
   audit(req, 'video.generate', 'video_project', v.id, estimate(v, scenes));
@@ -310,9 +369,182 @@ router.delete('/:id', validate({ params: idParam }), async (req, res) => {
   if (IN_PROGRESS.includes(v.status)) throw conflict('โปรเจกต์นี้กำลังประมวลผลอยู่');
   const used = await db.one("SELECT COUNT(*) AS n FROM scheduled_posts WHERE video_project_id = :id AND status IN ('scheduled','publishing')", { id: v.id });
   if (Number(used.n)) throw conflict('วิดีโอนี้มีโพสต์ที่ตั้งเวลาไว้ ยกเลิกโพสต์ก่อน');
+  const keys = (await listMedia(v.id)).map((m) => m.storage_key);
   await db.query('DELETE FROM video_projects WHERE id = :id', { id: v.id });
+  await removeUnusedFiles(keys);
   audit(req, 'video.delete', 'video_project', v.id);
   res.json({ data: { ok: true } });
+});
+
+/* ------------------------------------------------------------ own footage */
+
+/** Delete files no other project still points at (variants share footage). */
+async function removeUnusedFiles(keys) {
+  for (const key of new Set(keys)) {
+    const used = await db.one('SELECT id FROM video_media WHERE storage_key = :key LIMIT 1', { key });
+    if (!used) media.removeFile(key);
+  }
+}
+
+const mediaParam = idParam.extend({ mediaId: z.coerce.number().int().positive() });
+const rawUpload = express.raw({ type: Object.keys(media.TYPES), limit: media.MAX_VIDEO_BYTES });
+
+/** Upload one clip/photo (raw body, Content-Type = file type). ?label=…&durationMs=… */
+router.post(
+  '/:id/media',
+  rawUpload,
+  validate({
+    params: idParam,
+    query: z.object({
+      label: z.string().trim().max(100).optional(),
+      durationMs: z.coerce
+        .number()
+        .int()
+        .min(0)
+        .max(30 * 60 * 1000)
+        .optional(),
+    }),
+  }),
+  async (req, res) => {
+    const v = await getProject(req.user.orgId, req.valid.params.id);
+    if (IN_PROGRESS.includes(v.status)) throw conflict('โปรเจกต์นี้กำลังประมวลผลอยู่');
+    const mime = String(req.headers['content-type'] ?? '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    const type = media.TYPES[mime];
+    if (!type || !Buffer.isBuffer(req.body) || !req.body.length) throw badRequest('รองรับคลิป MP4/MOV/WebM และรูป JPEG/PNG/WebP');
+    if (type.kind === 'image' && req.body.length > media.MAX_IMAGE_BYTES) throw badRequest('รูปใหญ่เกิน 10 MB');
+    const count = await db.one('SELECT COUNT(*) AS n, COALESCE(MAX(sort_order), 0) AS maxSort FROM video_media WHERE video_project_id = :id', { id: v.id });
+    if (Number(count.n) >= media.MAX_FILES) throw badRequest(`อัปโหลดได้สูงสุด ${media.MAX_FILES} ไฟล์ต่อโปรเจกต์`);
+    const key = media.saveFile(req.body, mime);
+    const r = await db.query(
+      `INSERT INTO video_media (video_project_id, kind, mime, storage_key, size_bytes, duration_ms, label, sort_order)
+       VALUES (:id, :kind, :mime, :key, :size, :duration, :label, :sort)`,
+      {
+        id: v.id,
+        kind: type.kind,
+        mime,
+        key,
+        size: req.body.length,
+        duration: type.kind === 'video' ? (req.valid.query.durationMs ?? null) : null,
+        label: req.valid.query.label || null,
+        sort: Number(count.maxSort) + 1,
+      },
+    );
+    // New footage changes what the renderer will use
+    await db.query(
+      "UPDATE video_projects SET output_url = NULL, status = IF(status IN ('ready','parts_ready','failed'), 'script_ready', status) WHERE id = :id AND script_json IS NOT NULL",
+      { id: v.id },
+    );
+    audit(req, 'video.media.upload', 'video_project', v.id, { kind: type.kind, size: req.body.length });
+    const row = await db.one('SELECT * FROM video_media WHERE id = :id', { id: r.insertId });
+    res.status(201).json({ data: mapMedia(row) });
+  },
+);
+
+router.get('/:id/media/:mediaId/file', validate({ params: mediaParam }), async (req, res) => {
+  const v = await getProject(req.user.orgId, req.valid.params.id);
+  const m = await db.one('SELECT * FROM video_media WHERE id = :mid AND video_project_id = :id', { mid: req.valid.params.mediaId, id: v.id });
+  const p = m && media.filePath(m.storage_key);
+  if (!p) throw notFound('ไม่พบไฟล์');
+  res.set('Cache-Control', 'private, max-age=3600');
+  res.type(m.mime).sendFile(p, (err) => {
+    if (err && !res.headersSent) res.status(404).end();
+  });
+});
+
+router.patch(
+  '/:id/media/:mediaId',
+  validate({
+    params: mediaParam,
+    body: z.object({ label: z.string().trim().max(100).nullable().optional(), sortOrder: z.number().int().min(0).max(1000).optional() }).strict(),
+  }),
+  async (req, res) => {
+    const v = await getProject(req.user.orgId, req.valid.params.id);
+    const m = await db.one('SELECT * FROM video_media WHERE id = :mid AND video_project_id = :id', { mid: req.valid.params.mediaId, id: v.id });
+    if (!m) throw notFound('ไม่พบไฟล์');
+    const b = req.valid.body;
+    await db.query('UPDATE video_media SET label = IF(:labelSet, :label, label), sort_order = COALESCE(:sort, sort_order) WHERE id = :mid', {
+      mid: m.id,
+      labelSet: b.label !== undefined,
+      label: b.label || null,
+      sort: b.sortOrder ?? null,
+    });
+    res.json({ data: mapMedia(await db.one('SELECT * FROM video_media WHERE id = :mid', { mid: m.id })) });
+  },
+);
+
+router.delete('/:id/media/:mediaId', validate({ params: mediaParam }), async (req, res) => {
+  const v = await getProject(req.user.orgId, req.valid.params.id);
+  if (IN_PROGRESS.includes(v.status)) throw conflict('โปรเจกต์นี้กำลังประมวลผลอยู่');
+  const m = await db.one('SELECT * FROM video_media WHERE id = :mid AND video_project_id = :id', { mid: req.valid.params.mediaId, id: v.id });
+  if (!m) throw notFound('ไม่พบไฟล์');
+  await db.query('DELETE FROM video_media WHERE id = :mid', { mid: m.id });
+  await removeUnusedFiles([m.storage_key]);
+  // Scene footage numbers shift after a delete; drop references beyond the new count
+  const left = (await listMedia(v.id)).length;
+  const script = parseJson(v.script_json);
+  if (script?.scenes) {
+    const scenes = script.scenes.map((sc) => ({ ...sc, media: sc.media && sc.media <= left ? sc.media : null }));
+    await db.query('UPDATE video_projects SET script_json = :json WHERE id = :id', { id: v.id, json: JSON.stringify({ ...script, scenes }) });
+  }
+  res.json({ data: { ok: true } });
+});
+
+/* ---------------------------------------------------------- hook variants */
+
+function withHook(script, index) {
+  const hook = script?.hooks?.[index];
+  if (!hook || !script.scenes?.length) throw badRequest('ไม่พบ hook ที่เลือก');
+  const [first, ...rest] = script.scenes;
+  return { ...script, scenes: [{ ...first, voiceover: hook.voiceover, caption: hook.caption }, ...rest] };
+}
+
+/** Use another hook as the opening scene (voice/video must be regenerated). */
+router.post('/:id/hook', validate({ params: idParam, body: z.object({ index: z.number().int().min(0).max(2) }) }), async (req, res) => {
+  const v = await getProject(req.user.orgId, req.valid.params.id);
+  if (IN_PROGRESS.includes(v.status)) throw conflict('โปรเจกต์นี้กำลังประมวลผลอยู่');
+  const script = withHook(parseJson(v.script_json), req.valid.body.index);
+  await db.query('DELETE FROM video_assets WHERE video_project_id = :id', { id: v.id });
+  await db.query("UPDATE video_projects SET script_json = :json, script = :plain, status = 'script_ready', output_url = NULL, error = NULL WHERE id = :id", {
+    id: v.id,
+    json: JSON.stringify(script),
+    plain: script.scenes.map((sc) => sc.voiceover).join('\n'),
+  });
+  audit(req, 'video.hook', 'video_project', v.id, { index: req.valid.body.index });
+  res.json({ data: mapProject(await getProject(req.user.orgId, v.id)) });
+});
+
+/** Copy the project with another hook (same footage files) to A/B test openings. */
+router.post('/:id/variant', validate({ params: idParam, body: z.object({ hookIndex: z.number().int().min(0).max(2) }) }), async (req, res) => {
+  const v = await getProject(req.user.orgId, req.valid.params.id);
+  const script = withHook(parseJson(v.script_json), req.valid.body.hookIndex);
+  const hook = script.hooks[req.valid.body.hookIndex];
+  const id = await db.tx(async (conn) => {
+    const [r] = await conn.query(
+      `INSERT INTO video_projects (org_id, product_id, trending_product_id, title, brief, script, script_json, post_caption, hashtags,
+              voice_provider, voice_id, visual_mode, caption_style, cover_id, status, created_by)
+       SELECT org_id, product_id, trending_product_id, LEFT(CONCAT(title, ' · ', :angle), 255), brief, :plain, :json, post_caption, hashtags,
+              voice_provider, voice_id, visual_mode, caption_style, cover_id, 'script_ready', :userId
+         FROM video_projects WHERE id = :id`,
+      {
+        id: v.id,
+        angle: hook.angle || `hook ${req.valid.body.hookIndex + 1}`,
+        plain: script.scenes.map((sc) => sc.voiceover).join('\n'),
+        json: JSON.stringify(script),
+        userId: req.user.id,
+      },
+    );
+    await conn.query(
+      `INSERT INTO video_media (video_project_id, kind, mime, storage_key, size_bytes, duration_ms, label, sort_order)
+       SELECT :newId, kind, mime, storage_key, size_bytes, duration_ms, label, sort_order FROM video_media WHERE video_project_id = :id`,
+      { newId: r.insertId, id: v.id },
+    );
+    return r.insertId;
+  });
+  audit(req, 'video.variant', 'video_project', id, { from: v.id, hookIndex: req.valid.body.hookIndex });
+  res.status(201).json({ data: mapProject(await getProject(req.user.orgId, id)) });
 });
 
 module.exports = { router, capabilities };
