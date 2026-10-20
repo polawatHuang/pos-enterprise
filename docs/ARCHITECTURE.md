@@ -91,6 +91,42 @@ frontend/src/config/nav.ts               # เพิ่มเมนู + permiss
 | `GET /api/pos/{catalog,lookup,settings,promptpay,shift,orders,orders/:id}`, `POST /api/pos/{shift/open,shift/close,checkout}` | `pos:sell` |
 | `PUT /api/pos/settings`, `POST /api/pos/orders/:id/void` | `pos:manage` |
 
+### POS รุ่นใหม่ (เฟส 9, migration 011)
+
+**หน่วยขาย** (`product_units`)
+- สินค้าหนึ่งตัวมีหน่วยแพ็ก/ลังได้ แต่ละหน่วยมี factor บาร์โค้ด และราคาของตัวเอง
+- `/api/pos/lookup` หาบาร์โค้ดหน่วยด้วยและส่ง `matchedUnitId` กลับมา
+- บิลเก็บ `unit_name` / `unit_factor` แล้วตัดสต๊อกเป็นหน่วยฐาน (`qty × factor`) ส่วน void คืนสต๊อกด้วยค่าเดียวกัน
+
+**ชำระเงิน**
+- `payments[]` รับได้หลายวิธี: เงินอิเล็กทรอนิกส์รวมกันต้องไม่เกินยอดบิล เงินสดจ่ายส่วนที่เหลือและเป็นวิธีเดียวที่ทอนเงินได้ (`settlePayments`)
+- บัญชี: ส่วนเงินสดลง 1100 ส่วนอื่นลง 1110 (`saleLines({ payments })`)
+
+**ตรวจสลิป** (`POST /api/pos/slip/verify`)
+- MiniMax อ่านเลขอ้างอิง ยอด และผู้รับ (`modules/pos/slip.js`)
+- ตอน checkout ระบบ claim เลขอ้างอิงลง `payment_slips` (UNIQUE ต่อ org) สลิปเดียวจึงจ่ายได้บิลเดียว และ void จะปล่อยเลขนั้นคืน
+
+**สมาชิกและแต้ม** (`customers.member_no` / `points`)
+- ตั้งค่าได้ที่ `pos.points_earn_baht` และ `pos.point_value`
+- การใช้แต้มเป็นส่วนลดท้ายบิล (ลด VAT ตามจริง) และไม่นับรวมในเพดานส่วนลดของแคชเชียร์
+- void คืนแต้มที่ใช้และหักแต้มที่ได้
+
+**กฎตามหมวด** (`product_categories.sale_block` / `age_restricted`)
+- checkout ตรวจช่วงเวลาตาม `APP_TZ_OFFSET` (ช่วงคร่อมเที่ยงคืนได้)
+- สินค้าจำกัดอายุต้องส่ง `ageConfirmed` มาด้วย
+
+**กะ**
+- `cash_movements` เก็บเงินเข้า/ออก/นำเข้าตู้เซฟ
+- เงินที่ควรมี = เงินทอนตั้งต้น + เงินสดขาย + นำเข้า − จ่ายออก − นำเข้าตู้เซฟ
+- ปิดกะรับยอดนับแยกแบงก์/เหรียญ แล้วตอบรายงาน Z (`GET /api/pos/shift/report` ให้รายงาน X)
+
+**พักบิล** (`held_bills`)
+- เก็บตะกร้าต่อสาขา แคชเชียร์คนไหนในสาขาก็เรียกคืนได้ (เรียกแล้วรายการถูกลบ)
+
+**จอลูกค้า** (`/customer-display`)
+- คุยกับหน้าขายผ่าน `BroadcastChannel` บนเครื่องเดียวกัน ไม่ผ่านเซิร์ฟเวอร์
+- เปิดได้จากปุ่ม "จอลูกค้า" แล้วลากไปจอที่ 2
+
 ## บัญชี เอกสาร และภาษี (เฟส 3)
 
 **บัญชีคู่อัตโนมัติ:** ทุกธุรกรรมลงบัญชีผ่าน `postJournal()` ใน `backend/src/modules/accounting/ledger.service.js` ภายใน transaction เดียวกับธุรกรรมต้นทาง ระบบตรวจว่าเดบิตเท่ากับเครดิตทุกครั้ง การยกเลิกจะไม่ลบรายการเดิม แต่สร้างรายการกลับ (reversal) ที่ลงวันที่เดียวกับรายการเดิม ยอดที่ยกเลิกจึงหายไปจากงบของงวดนั้นอย่างถูกต้อง และยังตรวจย้อนหลัง (audit) ได้

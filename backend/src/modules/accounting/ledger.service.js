@@ -127,9 +127,16 @@ async function reverseJournalsFor(conn, { orgId, refType, refId, reason, userId 
 /* ---------------------------------------------------- standard postings */
 
 /** POS / marketplace sale: cash or bank against revenue + output VAT, and cost of goods sold. */
-function saleLines({ total, vat, cost, method, platformFee = 0 }) {
+function saleLines({ total, vat, cost, method, platformFee = 0, payments = null }) {
+  // Split tender: cash goes to the drawer, every electronic method to the bank account
+  const received = payments
+    ? [
+        { account: ACC.CASH, debit: r2(payments.filter((p) => p.method === 'cash').reduce((s, p) => s + p.amount, 0)) },
+        { account: ACC.BANK, debit: r2(payments.filter((p) => p.method !== 'cash').reduce((s, p) => s + p.amount, 0)) },
+      ]
+    : [{ account: paymentAccount(method), debit: r2(total - platformFee) }];
   return [
-    { account: paymentAccount(method), debit: r2(total - platformFee) },
+    ...received,
     { account: ACC.PLATFORM_FEES, debit: platformFee },
     { account: ACC.SALES, credit: r2(total - vat) },
     { account: ACC.OUTPUT_VAT, credit: vat },

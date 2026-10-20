@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, NativeSelect, Pagination, Skeleton } from "@/components/ui/primitives";
 import { Dialog } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
+import { CategoryRulesDialog } from "./category-rules";
 import { ProductFormDialog, useCategories } from "./product-form";
 
 export const STATUS_LABEL: Record<string, { label: string; tone: "success" | "neutral" | "danger" }> = {
@@ -31,6 +32,7 @@ export function ProductsView() {
   const [lowStock, setLowStock] = useState(false);
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [rules, setRules] = useState(false);
 
   const query = { q, categoryId, status, lowStock: lowStock ? "true" : undefined, page, pageSize: 25 };
   const products = useQuery({
@@ -50,9 +52,14 @@ export function ProductsView() {
         description="แคตตาล็อกกลางของทุกช่องทาง และฐานความรู้ให้ AI"
         actions={
           can("products:write") && (
-            <Button onClick={() => setCreating(true)}>
-              <Plus /> เพิ่มสินค้า
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => setRules(true)} disabled={!categories.data?.length}>
+                กฎการขายตามหมวด
+              </Button>
+              <Button onClick={() => setCreating(true)}>
+                <Plus /> เพิ่มสินค้า
+              </Button>
+            </>
           )
         }
       />
@@ -151,6 +158,9 @@ export function ProductsView() {
         {products.data && <Pagination {...products.data.meta} onChange={setPage} />}
       </Card>
 
+      <Dialog open={rules} onOpenChange={setRules}>
+        {rules && categories.data && <CategoryRulesDialog categories={categories.data} onDone={() => setRules(false)} />}
+      </Dialog>
       <Dialog open={creating} onOpenChange={setCreating}>
         {creating && (
           <ProductFormDialog

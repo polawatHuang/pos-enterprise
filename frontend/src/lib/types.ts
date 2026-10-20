@@ -173,6 +173,23 @@ export interface Category {
   parentId: number | null;
   sortOrder: number;
   productCount: number;
+  ageRestricted: boolean;
+  saleBlock: SaleBlock | null;
+}
+
+/** Local-time window when a category may not be sold (e.g. alcohol 00:00–11:00). */
+export interface SaleBlock {
+  from: string;
+  to: string;
+  label?: string;
+}
+
+export interface ProductUnit {
+  id: number;
+  name: string;
+  factor: number;
+  barcode: string | null;
+  price: number | null;
 }
 
 export interface KnowledgeEntry {
@@ -239,9 +256,15 @@ export interface CatalogItem {
   categoryId: number | null;
   vatType: VatType;
   stock: number;
+  ageRestricted: boolean;
+  saleBlock: SaleBlock | null;
+  /** Pack/carton units; price already resolved (factor x base price when unset). */
+  units: (ProductUnit & { price: number })[];
+  /** Set by /pos/lookup when a pack/carton barcode was scanned. */
+  matchedUnitId?: number | null;
 }
 
-export type PaymentMethod = "cash" | "promptpay" | "card" | "transfer";
+export type PaymentMethod = "cash" | "promptpay" | "card" | "transfer" | "ewallet";
 
 export interface Shift {
   id: number;
@@ -252,8 +275,66 @@ export interface Shift {
   openingCash: number;
   closingCash: number | null;
   expectedCash: number;
-  difference?: number;
-  stats: { orders: number; sales: number; voided: number; byMethod: Record<string, number> };
+  difference?: number | null;
+  denominations: Record<string, number> | null;
+  stats: {
+    orders: number;
+    sales: number;
+    voided: number;
+    byMethod: Record<string, number>;
+    cash: { pay_in: number; pay_out: number; pickup: number };
+  };
+}
+
+export type CashMoveType = "pay_in" | "pay_out" | "pickup";
+
+/** X report (open shift) / Z report (closed shift). */
+export interface ShiftReport extends Shift {
+  kind: "X" | "Z";
+  cashierName: string;
+  discount: number;
+  vat: number;
+  pointsUsed: number;
+  cashMovements: { type: CashMoveType; amount: number; reason: string; createdAt: string }[];
+  topItems: { name: string; quantity: number; amount: number }[];
+}
+
+export interface PosMember {
+  id: number;
+  name: string;
+  memberNo: string | null;
+  phone: string | null;
+  points: number;
+  totalSpent: number;
+}
+
+export interface HeldCartItem {
+  productId: number;
+  unitId?: number | null;
+  quantity: number;
+  discount?: number;
+}
+
+export interface HeldBill {
+  id: number;
+  label: string | null;
+  cart: { items: HeldCartItem[]; discount?: number };
+  customerId: number | null;
+  customerName: string | null;
+  total: number;
+  userName: string;
+  createdAt: string;
+}
+
+export interface SlipCheck {
+  ok: boolean;
+  checks: { isSlip: boolean; amount: boolean; reference: boolean; unused: boolean; receiver: boolean | null };
+  transRef: string | null;
+  amount: number | null;
+  paidAt: string | null;
+  bank: string | null;
+  receiverName: string | null;
+  confidence: "high" | "medium" | "low";
 }
 
 export interface PosOrder {
@@ -266,13 +347,17 @@ export interface PosOrder {
   branchNo: string | null;
   cashierName: string | null;
   customerName: string | null;
+  customerId: number | null;
+  pointsEarned: number;
+  pointsUsed: number;
+  customerPoints: number | null;
   subtotal: number;
   discount: number;
   vatAmount: number;
   total: number;
   orderedAt: string;
   change?: number;
-  items: { productId: number; name: string; quantity: number; unitPrice: number; discount: number; lineTotal: number }[];
+  items: { productId: number; name: string; unitName: string | null; quantity: number; unitPrice: number; discount: number; lineTotal: number }[];
   payments: { method: string; amount: number; reference: string | null; paidAt: string }[];
 }
 
@@ -291,6 +376,9 @@ export interface PosSettings {
   promptpayId: string;
   receiptFooter: string;
   maxDiscountPct: number;
+  pointsEarnBaht: number;
+  pointValue: number;
+  cashLimit: number;
   promptpayEnabled: boolean;
   org: { name: string; legalName: string | null; taxId: string | null; address: string | null; phone: string | null; vatRegistered: boolean };
 }

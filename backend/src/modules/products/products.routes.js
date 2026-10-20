@@ -6,7 +6,7 @@ const db = require('../../db/pool');
 const { validate } = require('../../core/http');
 const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
-const { notFound, conflict } = require('../../core/errors');
+const { badRequest, notFound, conflict } = require('../../core/errors');
 
 const router = express.Router();
 router.use(authenticate);
@@ -72,19 +72,74 @@ async function assertUnique(orgId, { sku, barcode }, exceptId = 0) {
     { orgId, exceptId, sku, barcode: barcode || null },
   );
   if (dup) throw conflict(dup.sku === sku ? `SKU "${sku}" ถูกใช้แล้ว` : `บาร์โค้ด "${barcode}" ถูกใช้แล้ว`);
+  if (barcode) {
+    const unit = await db.one('SELECT id FROM product_units WHERE org_id = :orgId AND barcode = :barcode', { orgId, barcode });
+    if (unit) throw conflict(`บาร์โค้ด "${barcode}" ถูกใช้เป็นบาร์โค้ดแพ็ก/ลังแล้ว`);
+  }
 }
+
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'เวลาต้องเป็น HH:MM');
+const parseJson = (v) => {
+  if (typeof v !== 'string') return v ?? null;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return null;
+  }
+};
 
 /* ------------------------------------------------------------------ categories */
 
 router.get('/categories', requirePermission('products:read'), async (req, res) => {
   const rows = await db.query(
-    `SELECT c.id, c.name, c.parent_id AS parentId, c.sort_order AS sortOrder,
+    `SELECT c.id, c.name, c.parent_id AS parentId, c.sort_order AS sortOrder, c.age_restricted, c.sale_block,
             (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id AND p.status <> 'archived') AS productCount
        FROM product_categories c WHERE c.org_id = :orgId ORDER BY c.sort_order, c.name`,
     { orgId: req.user.orgId },
   );
-  res.json({ data: rows.map((r) => ({ ...r, productCount: Number(r.productCount) })) });
+  res.json({
+    data: rows.map(({ age_restricted: age, sale_block: block, ...r }) => ({
+      ...r,
+      productCount: Number(r.productCount),
+      ageRestricted: Boolean(age),
+      saleBlock: parseJson(block),
+    })),
+  });
 });
+
+/** Category rules applied at the till: no-sale hours (e.g. alcohol) and the age-20+ check. */
+router.patch(
+  '/categories/:id',
+  requirePermission('products:write'),
+  validate({
+    params: idParam,
+    body: z.object({
+      name: z.string().trim().min(1).max(191).optional(),
+      ageRestricted: z.boolean().optional(),
+      saleBlock: z.object({ from: hhmm, to: hhmm, label: z.string().trim().max(80).optional() }).nullable().optional(),
+    }),
+  }),
+  async (req, res) => {
+    const b = req.valid.body;
+    const r = await db.query(
+      `UPDATE product_categories SET name = COALESCE(:name, name),
+              age_restricted = COALESCE(:age, age_restricted),
+              sale_block = CASE WHEN :setBlock = 1 THEN :block ELSE sale_block END
+        WHERE id = :id AND org_id = :orgId`,
+      {
+        id: req.valid.params.id,
+        orgId: req.user.orgId,
+        name: b.name ?? null,
+        age: b.ageRestricted === undefined ? null : Number(b.ageRestricted),
+        setBlock: b.saleBlock === undefined ? 0 : 1,
+        block: b.saleBlock ? JSON.stringify(b.saleBlock) : null,
+      },
+    );
+    if (!r.affectedRows) throw notFound('ไม่พบหมวดสินค้า');
+    audit(req, 'category.update', 'category', req.valid.params.id, { fields: Object.keys(b) });
+    res.json({ data: { ok: true } });
+  },
+);
 
 router.post(
   '/categories',
@@ -263,6 +318,65 @@ router.delete(
     });
     if (!r.affectedRows) throw notFound();
     res.json({ data: { ok: true } });
+  },
+);
+
+/* ---------------------------------------------------------- pack / carton units */
+
+const mapUnit = (u) => ({ id: u.id, name: u.name, factor: Number(u.factor), barcode: u.barcode, price: u.price == null ? null : Number(u.price) });
+
+router.get('/:id/units', requirePermission('products:read'), validate({ params: idParam }), async (req, res) => {
+  if (!(await getProduct(req.user.orgId, req.valid.params.id))) throw notFound('ไม่พบสินค้า');
+  const rows = await db.query('SELECT * FROM product_units WHERE product_id = :id ORDER BY factor', { id: req.valid.params.id });
+  res.json({ data: rows.map(mapUnit) });
+});
+
+/** Replace the product's selling units (e.g. แพ็ก 6 = 6 ชิ้น, ลัง 24) in one save. */
+router.put(
+  '/:id/units',
+  requirePermission('products:write'),
+  validate({
+    params: idParam,
+    body: z.object({
+      units: z
+        .array(
+          z.object({
+            name: z.string().trim().min(1).max(30),
+            factor: z.coerce.number().gt(1, 'ต้องมากกว่า 1 หน่วยฐาน').max(100_000),
+            barcode: z.string().trim().max(64).nullable().optional(),
+            price: z.coerce.number().min(0).max(99_999_999).nullable().optional(),
+          }),
+        )
+        .max(10),
+    }),
+  }),
+  async (req, res) => {
+    const productId = req.valid.params.id;
+    const orgId = req.user.orgId;
+    if (!(await getProduct(orgId, productId))) throw notFound('ไม่พบสินค้า');
+    const { units } = req.valid.body;
+    const codes = units.map((u) => u.barcode).filter(Boolean);
+    if (new Set(codes).size !== codes.length) throw badRequest('บาร์โค้ดของหน่วยซ้ำกัน');
+    if (codes.length) {
+      const clash = await db.one(
+        `SELECT barcode FROM products WHERE org_id = :orgId AND barcode IN (:codes)
+         UNION SELECT barcode FROM product_units WHERE org_id = :orgId AND product_id <> :productId AND barcode IN (:codes) LIMIT 1`,
+        { orgId, productId, codes },
+      );
+      if (clash) throw conflict(`บาร์โค้ด "${clash.barcode}" ถูกใช้แล้ว`);
+    }
+    await db.tx(async (conn) => {
+      await conn.query('DELETE FROM product_units WHERE product_id = :productId', { productId });
+      for (const u of units) {
+        await conn.query(
+          'INSERT INTO product_units (org_id, product_id, name, factor, barcode, price) VALUES (:orgId, :productId, :name, :factor, :barcode, :price)',
+          { orgId, productId, name: u.name, factor: u.factor, barcode: u.barcode || null, price: u.price ?? null },
+        );
+      }
+    });
+    audit(req, 'product.units', 'product', productId, { count: units.length });
+    const rows = await db.query('SELECT * FROM product_units WHERE product_id = :productId ORDER BY factor', { productId });
+    res.json({ data: rows.map(mapUnit) });
   },
 );
 
