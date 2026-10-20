@@ -29,6 +29,7 @@ const SETTING_KEYS = {
   pointsEarnBaht: 'pos.points_earn_baht',
   pointValue: 'pos.point_value',
   cashLimit: 'pos.cash_limit',
+  bankAccount: 'org.bank_account',
 };
 const DEFAULTS = {
   promptpayId: '',
@@ -37,12 +38,20 @@ const DEFAULTS = {
   pointsEarnBaht: 25, // spend 25 baht = 1 point; 0 turns points off
   pointValue: 0.25, // 1 point = 0.25 baht when redeemed
   cashLimit: 0, // drawer amount that triggers a "move cash to the safe" prompt; 0 = off
+  // Shop account for bank transfers (POS transfer screen, customer display, invoices, slip check)
+  bankAccount: { bank: 'ธนาคารกสิกรไทย', type: 'ออมทรัพย์', number: '0621554271', name: 'พลวัต ฮวง' },
 };
 
+/** Thai bank account display format: 10 digits as XXX-X-XXXXX-X (KBank, SCB, BBL, KTB...). */
+function formatAccountNo(number) {
+  const d = String(number ?? '').replace(/\D/g, '');
+  return d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 4)}-${d.slice(4, 9)}-${d.slice(9)}` : d;
+}
+
 async function getSettings(orgId) {
-  const rows = await db.query('SELECT setting_key, value FROM settings WHERE org_id = :orgId AND setting_key LIKE :p', {
+  const rows = await db.query('SELECT setting_key, value FROM settings WHERE org_id = :orgId AND setting_key IN (:keys)', {
     orgId,
-    p: 'pos.%',
+    keys: Object.values(SETTING_KEYS),
   });
   const out = { ...DEFAULTS };
   for (const [field, key] of Object.entries(SETTING_KEYS)) {
@@ -537,6 +546,7 @@ async function voidOrder(user, orderId, reason) {
 module.exports = {
   getSettings,
   saveSettings,
+  formatAccountNo,
   currentShift,
   shiftStats,
   mapShift,

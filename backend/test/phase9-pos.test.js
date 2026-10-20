@@ -239,6 +239,17 @@ describe('held bills and sale rules', () => {
   });
 });
 
+describe('bank account', () => {
+  test('the shop transfer account defaults to the owner account and appears on documents', async () => {
+    const s = await cashier.get('/api/pos/settings');
+    assert.equal(s.body.data.bankAccount.number, '0621554271');
+    assert.equal(s.body.data.bankAccount.display, '062-1-55427-1');
+    assert.equal(s.body.data.bankAccount.bank, 'ธนาคารกสิกรไทย');
+    const bad = await manager.put('/api/pos/settings', { bankAccount: { bank: 'x', number: '12', name: 'y' } });
+    assert.equal(bad.status, 400);
+  });
+});
+
 describe('slip check', () => {
   test('a slip reference pays only one bill', async () => {
     await manager.put('/api/pos/settings', { promptpayId: '0812345678' });

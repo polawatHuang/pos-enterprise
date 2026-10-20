@@ -275,6 +275,7 @@ export function PaymentDialog({
             </div>
           </div>
           {method === "promptpay" && <PromptPayQr amount={amountNum} enabled={!!settings?.promptpayEnabled} onPayload={(p) => onQr(p, "promptpay", amountNum)} />}
+          {method === "transfer" && settings?.bankAccount && <BankCard account={settings.bankAccount} />}
           {(method === "promptpay" || method === "transfer") && (
             <div className="rounded-xl border border-border p-3">
               <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-muted px-3 py-2.5 text-sm font-medium hover:bg-accent">
@@ -292,6 +293,34 @@ export function PaymentDialog({
         </form>
       )}
     </DialogContent>
+  );
+}
+
+function BankCard({ account }: { account: NonNullable<PosSettings["bankAccount"]> }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-success/40 bg-success-soft/40 p-3" data-testid="bank-card">
+      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-success text-white">
+        <Landmark className="size-5" />
+      </span>
+      <div className="min-w-0 flex-1 text-sm">
+        <p className="font-medium">
+          {account.bank} · {account.type}
+        </p>
+        <p className="text-xl font-semibold tracking-wide tabular-nums">{account.display ?? account.number}</p>
+        <p className="text-muted-foreground">ชื่อบัญชี {account.name}</p>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          void navigator.clipboard?.writeText(account.number);
+          toast.success("คัดลอกเลขบัญชีแล้ว");
+        }}
+      >
+        คัดลอก
+      </Button>
+    </div>
   );
 }
 

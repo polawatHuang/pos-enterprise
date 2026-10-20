@@ -91,6 +91,15 @@ export function DocumentPaper({ doc }: { doc: AccDocument }) {
         <div className="max-w-sm">
           <p className="rounded-md bg-neutral-100 px-3 py-2 font-semibold">({doc.amountText})</p>
           {doc.note && <p className="mt-3 whitespace-pre-line text-xs text-neutral-600">หมายเหตุ: {doc.note}</p>}
+          {org?.bankAccount && (doc.docType === "quotation" || doc.docType === "invoice" || doc.docType === "tax_invoice") && (
+            <div className="mt-3 rounded-md border border-neutral-300 px-3 py-2 text-xs">
+              <p className="font-semibold">ชำระเงินโดยโอนเข้าบัญชี</p>
+              <p>
+                {org.bankAccount.bank} · {org.bankAccount.type} · เลขที่ {org.bankAccount.display ?? org.bankAccount.number}
+              </p>
+              <p>ชื่อบัญชี {org.bankAccount.name}</p>
+            </div>
+          )}
         </div>
         <dl className="grid min-w-64 grid-cols-[1fr_auto] gap-x-6 gap-y-1">
           <dt>รวมเป็นเงิน</dt>

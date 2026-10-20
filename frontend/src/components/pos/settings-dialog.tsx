@@ -20,6 +20,7 @@ export function PosSettingsDialog({ settings, onDone }: { settings: PosSettings;
   const [pointsEarnBaht, setPointsEarnBaht] = useState(String(settings.pointsEarnBaht));
   const [pointValue, setPointValue] = useState(String(settings.pointValue));
   const [cashLimit, setCashLimit] = useState(String(settings.cashLimit));
+  const [bank, setBank] = useState(settings.bankAccount);
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
@@ -32,6 +33,7 @@ export function PosSettingsDialog({ settings, onDone }: { settings: PosSettings;
         pointsEarnBaht: Number(pointsEarnBaht) || 0,
         pointValue: Number(pointValue) || 0,
         cashLimit: Number(cashLimit) || 0,
+        bankAccount: { bank: bank.bank, type: bank.type, number: bank.number, name: bank.name },
       });
       toast.success("บันทึกการตั้งค่า POS แล้ว");
       await qc.invalidateQueries({ queryKey: POS_SETTINGS_KEY });
@@ -51,6 +53,26 @@ export function PosSettingsDialog({ settings, onDone }: { settings: PosSettings;
           <Input id="pp" inputMode="numeric" value={promptpayId} onChange={(e) => setPromptpayId(e.target.value)} placeholder="เบอร์มือถือ 10 หลัก หรือเลขผู้เสียภาษี 13 หลัก" />
           <p className="text-xs text-muted-foreground">ใช้สร้าง QR พร้อมยอดเงินตอนลูกค้าเลือกจ่ายด้วย PromptPay</p>
         </div>
+        <fieldset className="grid grid-cols-2 gap-3 rounded-xl border border-border p-3">
+          <legend className="px-1 text-sm font-medium">บัญชีรับโอนของร้าน</legend>
+          <div className="space-y-1.5">
+            <Label htmlFor="bank-name">ธนาคาร</Label>
+            <Input id="bank-name" value={bank.bank} onChange={(e) => setBank({ ...bank, bank: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bank-type">ประเภทบัญชี</Label>
+            <Input id="bank-type" value={bank.type} onChange={(e) => setBank({ ...bank, type: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bank-no">เลขที่บัญชี</Label>
+            <Input id="bank-no" inputMode="numeric" value={bank.number} onChange={(e) => setBank({ ...bank, number: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bank-holder">ชื่อบัญชี</Label>
+            <Input id="bank-holder" value={bank.name} onChange={(e) => setBank({ ...bank, name: e.target.value })} />
+          </div>
+          <p className="col-span-2 text-xs text-muted-foreground">แสดงตอนลูกค้าเลือกโอนเงิน บนจอลูกค้า และท้ายใบเสนอราคา/ใบแจ้งหนี้ · AI ใช้ตรวจชื่อผู้รับในสลิป</p>
+        </fieldset>
         <div className="space-y-2">
           <Label htmlFor="max">ส่วนลดสูงสุดที่แคชเชียร์ให้ได้เอง (%)</Label>
           <Input id="max" inputMode="decimal" value={maxDiscountPct} onChange={(e) => setMaxDiscountPct(e.target.value)} />

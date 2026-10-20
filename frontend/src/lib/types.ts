@@ -372,6 +372,15 @@ export interface PosOrderRow {
   items: number;
 }
 
+export interface BankAccount {
+  bank: string;
+  type: string;
+  number: string;
+  name: string;
+  /** XXX-X-XXXXX-X */
+  display?: string;
+}
+
 export interface PosSettings {
   promptpayId: string;
   receiptFooter: string;
@@ -379,6 +388,7 @@ export interface PosSettings {
   pointsEarnBaht: number;
   pointValue: number;
   cashLimit: number;
+  bankAccount: BankAccount;
   promptpayEnabled: boolean;
   org: { name: string; legalName: string | null; taxId: string | null; address: string | null; phone: string | null; vatRegistered: boolean };
 }
@@ -474,6 +484,7 @@ export interface AccDocument {
     email: string | null;
     vatRegistered: boolean;
     branchNo: string;
+    bankAccount: BankAccount | null;
   };
   whtSource?: {
     rate: number | null;

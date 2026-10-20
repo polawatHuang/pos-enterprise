@@ -89,6 +89,12 @@ export function CustomerDisplay() {
               <div className="mt-6 rounded-3xl bg-white p-4 shadow-xl" dangerouslySetInnerHTML={{ __html: qrSvg }} data-testid="display-qr" />
               <p className="mt-4 text-xl">สแกนด้วยแอปธนาคาร ยอดขึ้นอัตโนมัติ</p>
             </>
+          ) : screen.bank ? (
+            <div className="mt-6 rounded-3xl bg-card px-10 py-6 shadow-xl" data-testid="display-bank">
+              <p className="text-xl text-muted-foreground">โอนเข้าบัญชี {screen.bank.bank}</p>
+              <p className="mt-1 text-5xl font-bold tracking-wider tabular-nums">{screen.bank.number}</p>
+              <p className="mt-2 text-2xl">{screen.bank.name}</p>
+            </div>
           ) : (
             <p className="mt-6 text-2xl text-muted-foreground">ชำระด้วย{screen.method}</p>
           )}
