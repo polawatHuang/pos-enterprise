@@ -8,6 +8,7 @@ const elevenlabs = require('../../integrations/elevenlabs');
 const shotstack = require('../../integrations/shotstack');
 const r2 = require('../../integrations/r2');
 const { sceneTimings, buildSrt, buildShotstackEdit } = require('./timeline');
+const media = require('./media');
 
 /**
  * Generation runs as a chain of queued jobs so each step fits the cron tick's time budget:
@@ -168,15 +169,38 @@ const compose = step(async ({ projectId }) => {
   const byScene = (list) => p.scenes.map((_, i) => list.find((a) => a.scene_index === i && a.status === 'ready') ?? null);
   const voiceRows = byScene(voices);
   if (voiceRows.some((v) => !v)) throw new Error('ไฟล์เสียงพากย์ไม่ครบทุกฉาก');
-  const timings = sceneTimings(p.scenes, voiceRows.map((v) => v.duration_ms));
+  const timings = sceneTimings(
+    p.scenes,
+    voiceRows.map((v) => v.duration_ms),
+  );
   const srt = buildSrt(p.scenes, timings);
   const duration = Math.round(timings.at(-1).start + timings.at(-1).length);
   await db.query('UPDATE video_projects SET subtitle_srt = :srt, duration_sec = :duration WHERE id = :id', { id: p.id, srt, duration });
 
   const clips = byScene(p.visual_mode === 'ai_clips' ? await assets(p.id, 'broll') : []);
-  const visuals = p.scenes.map((_, i) =>
-    clips[i] ? { type: 'video', url: clips[i].external_url } : p.product_image ? { type: 'image', url: p.product_image } : null,
-  );
+  // Own footage / extra photos, served to the renderer through signed URLs
+  const own = (await db.query('SELECT * FROM video_media WHERE video_project_id = :id ORDER BY sort_order, id', { id: p.id }))
+    .map((m) => ({ type: m.kind, url: media.publicUrl('m', m.id), durationSec: m.duration_ms ? m.duration_ms / 1000 : null }))
+    .filter((m) => m.url);
+  const productImage = p.product_image ? { type: 'image', url: p.product_image } : null;
+  let visuals;
+  let pool;
+  if (p.visual_mode === 'my_footage' && own.length) {
+    visuals = p.scenes.map((sc) => (sc.media ? (own[sc.media - 1] ?? null) : null));
+    pool = [...own, ...(productImage ? [productImage] : [])];
+  } else {
+    visuals = p.scenes.map((_, i) => (clips[i] ? { type: 'video', url: clips[i].external_url } : productImage));
+    pool = own.filter((m) => m.type === 'image');
+    if (pool.length && productImage) pool.push(productImage);
+  }
+  let introUrl = null;
+  if (p.cover_id) {
+    const cover = await db.one("SELECT orientation FROM cover_projects WHERE id = :id AND org_id = :orgId AND status = 'ready'", {
+      id: p.cover_id,
+      orgId: p.org_id,
+    });
+    if (cover?.orientation === 'portrait') introUrl = media.publicUrl('c', p.cover_id);
+  }
 
   if (!shotstack.isConfigured()) {
     await setStage(p.id, 'parts_ready', 'ยังไม่ได้ตั้งค่า Shotstack — ดาวน์โหลดเสียง คลิป และซับไปตัดต่อเองได้');
@@ -187,6 +211,9 @@ const compose = step(async ({ projectId }) => {
     timings,
     voiceUrls: voiceRows.map((v) => v.external_url),
     visuals,
+    pool,
+    captionStyle: p.caption_style || 'pop',
+    introUrl,
     fontUrl: process.env.SHOTSTACK_FONT_URL || undefined,
     musicUrl: process.env.VIDEO_MUSIC_URL || null,
   });
@@ -216,10 +243,11 @@ const composePoll = step(async ({ projectId, polls = 1 }) => {
   if (r.status === 'failed') throw new Error(`Shotstack: ${r.error}`);
   const stored = await persist(r.url, keyFor(p, 'final.mp4'), 'video/mp4');
   await db.query("UPDATE video_assets SET status = 'ready', external_url = :url WHERE id = :id", { id: final.id, url: stored.url });
-  await db.query(
-    "UPDATE video_projects SET status = 'ready', output_url = :url, stage_detail = :d, error = NULL WHERE id = :id",
-    { id: p.id, url: stored.url, d: stored.stored ? null : 'ลิงก์จาก Shotstack หมดอายุใน 24 ชม. — ตั้งค่า R2 เพื่อเก็บไฟล์ถาวร' },
-  );
+  await db.query("UPDATE video_projects SET status = 'ready', output_url = :url, stage_detail = :d, error = NULL WHERE id = :id", {
+    id: p.id,
+    url: stored.url,
+    d: stored.stored ? null : 'ลิงก์จาก Shotstack หมดอายุใน 24 ชม. — ตั้งค่า R2 เพื่อเก็บไฟล์ถาวร',
+  });
   return { status: 'ready', url: stored.url };
 });
 

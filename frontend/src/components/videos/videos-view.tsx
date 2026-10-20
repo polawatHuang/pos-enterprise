@@ -7,14 +7,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Clapperboard, Loader2, Plus, Sparkles, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, api } from "@/lib/api";
-import type { Product, VideoMeta, VideoProject } from "@/lib/types";
+import type { CaptionStyle, Product, VideoMeta, VideoProject, VideoVisualMode } from "@/lib/types";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, Label, NativeSelect, Skeleton, TabBar, Textarea } from "@/components/ui/primitives";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
 import { ProductPicker } from "@/components/common/product-picker";
-import { IN_PROGRESS, LENGTHS, VIDEO_STATUS } from "./labels";
+import { ANGLE_LABELS, CAPTION_STYLES, IN_PROGRESS, LENGTHS, VIDEO_STATUS, VISUAL_MODES } from "./labels";
 
 type Tab = "all" | "in_progress" | "ready" | "draft";
 
@@ -117,7 +117,9 @@ function CreateDialog({ trendId, onDone }: { trendId: number | null; onDone: () 
   const [lengthSec, setLength] = useState(30);
   const [audience, setAudience] = useState("");
   const [notes, setNotes] = useState("");
-  const [visualMode, setVisualMode] = useState<"product_images" | "ai_clips">("product_images");
+  const [visualMode, setVisualMode] = useState<VideoVisualMode>("my_footage");
+  const [angle, setAngle] = useState("auto");
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("pop");
   const [saving, setSaving] = useState(false);
   const caps = meta.data?.capabilities;
 
@@ -131,6 +133,8 @@ function CreateDialog({ trendId, onDone }: { trendId: number | null; onDone: () 
         json: {
           ...(trendId && !product ? { trendId } : { productId: product?.id }),
           tone,
+          angle,
+          captionStyle,
           lengthSec,
           audience: audience || undefined,
           notes: notes || undefined,
@@ -198,6 +202,28 @@ function CreateDialog({ trendId, onDone }: { trendId: number | null; onDone: () 
             </NativeSelect>
           </div>
         </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="v-angle">โครงเรื่อง</Label>
+            <NativeSelect id="v-angle" value={angle} onChange={(e) => setAngle(e.target.value)}>
+              {Object.keys(meta.data?.angles ?? ANGLE_LABELS).map((k) => (
+                <option key={k} value={k}>
+                  {ANGLE_LABELS[k] ?? k}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="v-cap">ซับ</Label>
+            <NativeSelect id="v-cap" value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value as CaptionStyle)}>
+              {CAPTION_STYLES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+        </div>
         <div className="space-y-1.5">
           <Label htmlFor="v-aud">กลุ่มเป้าหมาย (ไม่บังคับ)</Label>
           <Input id="v-aud" value={audience} onChange={(e) => setAudience(e.target.value)} maxLength={200} placeholder="เช่น นักศึกษา, แม่บ้าน, คนทำงานออฟฟิศ" />
@@ -208,13 +234,8 @@ function CreateDialog({ trendId, onDone }: { trendId: number | null; onDone: () 
         </div>
         <div className="space-y-1.5">
           <Label>ภาพในคลิป</Label>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {(
-              [
-                ["product_images", "รูปสินค้า + เคลื่อนไหว", "เร็ว ประหยัด ใช้รูปสินค้าในระบบ"],
-                ["ai_clips", "คลิป AI (Hailuo)", "สวยกว่า มีค่าใช้จ่ายต่อฉาก ใช้เวลาหลายนาที"],
-              ] as const
-            ).map(([value, title, hint]) => (
+          <div className="grid gap-2 sm:grid-cols-3">
+            {VISUAL_MODES.map(({ value, title, hint }) => (
               <button
                 key={value}
                 type="button"

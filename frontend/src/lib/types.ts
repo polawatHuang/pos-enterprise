@@ -871,6 +871,28 @@ export interface VideoScene {
   visual: string;
   showProduct: boolean;
   durationSec: number;
+  /** 1-based number of the user's footage used for this scene */
+  media?: number | null;
+}
+
+export type VideoVisualMode = "ai_clips" | "product_images" | "my_footage";
+export type CaptionStyle = "pop" | "clean" | "none";
+
+export interface VideoHook {
+  angle: string;
+  voiceover: string;
+  caption: string;
+}
+
+export interface VideoMedia {
+  id: number;
+  kind: "video" | "image";
+  mime: string;
+  sizeBytes: number;
+  durationMs: number | null;
+  label: string | null;
+  sortOrder: number;
+  url: string;
 }
 
 export interface VideoProject {
@@ -880,13 +902,16 @@ export interface VideoProject {
   productName: string | null;
   trendId: number | null;
   imageUrl: string | null;
-  brief: { tone?: string; lengthSec?: number; audience?: string; notes?: string };
+  brief: { tone?: string; angle?: string; lengthSec?: number; audience?: string; notes?: string };
   scenes: VideoScene[];
   postCaption: string | null;
   hashtags: string | null;
   voiceProvider: "minimax" | "elevenlabs";
   voiceId: string | null;
-  visualMode: "ai_clips" | "product_images";
+  visualMode: VideoVisualMode;
+  captionStyle: CaptionStyle;
+  coverId: number | null;
+  hooks: VideoHook[];
   status: VideoStatus;
   stageDetail: string | null;
   error: string | null;
@@ -909,6 +934,7 @@ export interface VideoAsset {
 }
 
 export interface VideoDetail extends VideoProject {
+  media: VideoMedia[];
   assets: VideoAsset[];
 }
 
@@ -924,8 +950,10 @@ export interface VideoMeta {
     clips: Capability & { model: string };
     compose: Capability & { env: string };
     storage: Capability;
+    publicMedia: Capability;
   };
   tones: Record<string, string>;
+  angles: Record<string, string>;
 }
 
 /* ----------------------------------------------------------------- social */

@@ -92,6 +92,7 @@ function createApp() {
   app.use('/api/scraping', require('./modules/scraping/scraping.routes').router);
   app.use('/api/videos', require('./modules/video/video.routes').router);
   app.use('/api/covers', require('./modules/covers/covers.routes').router);
+  app.use('/api/media', require('./modules/video/media.routes').router);
   app.use('/api/social', require('./modules/social/social.routes').router);
 
   app.use('/internal', require('./routes/internal').router);

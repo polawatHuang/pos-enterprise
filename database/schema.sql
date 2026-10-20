@@ -21,7 +21,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
 DROP TABLE IF EXISTS cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
-  post_results, scheduled_posts, video_assets, video_projects, affiliate_links, social_accounts,
+  post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
   discount_codes, promotions, pos_shifts, payments, sales_order_items, sales_orders, customers,
@@ -834,7 +834,9 @@ CREATE TABLE video_projects (
   avatar_id          VARCHAR(100) NULL,
   voice_id           VARCHAR(100) NULL,
   voice_provider     VARCHAR(30) NULL,
-  visual_mode        ENUM('ai_clips','product_images') NOT NULL DEFAULT 'product_images',
+  visual_mode        ENUM('ai_clips','product_images','my_footage') NOT NULL DEFAULT 'product_images',
+  caption_style      VARCHAR(20) NOT NULL DEFAULT 'pop' COMMENT 'pop | clean | none (word-by-word captions)',
+  cover_id           BIGINT UNSIGNED NULL COMMENT 'AI cover shown as the first frame',
   aspect_ratio       VARCHAR(10) NOT NULL DEFAULT '9:16',
   duration_sec       INT NULL,
   status             ENUM('draft','scripting','script_ready','voicing','generating_clips','rendering_avatar','compositing','parts_ready','ready','failed') NOT NULL DEFAULT 'draft',
@@ -852,6 +854,21 @@ CREATE TABLE video_projects (
   CONSTRAINT fk_vp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_vp_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
   CONSTRAINT fk_vp_output FOREIGN KEY (output_file_id) REFERENCES files(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE video_media (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  video_project_id BIGINT UNSIGNED NOT NULL,
+  kind             ENUM('video','image') NOT NULL,
+  mime             VARCHAR(50) NOT NULL,
+  storage_key      VARCHAR(255) NOT NULL COMMENT 'file name under MEDIA_DIR',
+  size_bytes       BIGINT NOT NULL,
+  duration_ms      INT NULL,
+  label            VARCHAR(100) NULL COMMENT 'what the shot shows, e.g. แกะกล่อง',
+  sort_order       INT NOT NULL DEFAULT 0,
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_vm_project (video_project_id, sort_order),
+  CONSTRAINT fk_vm_project FOREIGN KEY (video_project_id) REFERENCES video_projects(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE video_assets (
@@ -1086,6 +1103,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade');
 
 SET FOREIGN_KEY_CHECKS = 1;
