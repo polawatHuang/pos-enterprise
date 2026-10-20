@@ -49,6 +49,7 @@ handlers['video.clips_start'] = (p) => video().clipsStart(p);
 handlers['video.clips_poll'] = (p) => video().clipsPoll(p);
 handlers['video.compose'] = (p) => video().compose(p);
 handlers['video.compose_poll'] = (p) => video().composePoll(p);
+handlers['cover.generate'] = (p) => require('../../modules/covers/covers.service').generateCover(p);
 
 /** Social posting: publish a due post, then poll the platform until the video is live. */
 handlers['social.publish'] = (p) => require('../../modules/social/publish').publish(p);

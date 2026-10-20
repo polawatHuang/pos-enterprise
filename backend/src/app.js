@@ -51,8 +51,10 @@ function createApp() {
 
   // Receipt photos for AI extraction are sent as base64 JSON; everything else stays small.
   const jsonSmall = express.json({ limit: '1mb' });
-  const jsonLarge = express.json({ limit: '6mb' });
-  app.use((req, res, next) => (req.path === '/api/accounting/ai/extract-receipt' ? jsonLarge : jsonSmall)(req, res, next));
+  const jsonLarge = express.json({ limit: '8mb' });
+  // Image uploads (receipt photos, cover images) come as base64 JSON
+  const LARGE_BODY = /^\/api\/(accounting\/ai\/extract-receipt|covers(\/\d+\/final)?)$/;
+  app.use((req, res, next) => (LARGE_BODY.test(req.path) ? jsonLarge : jsonSmall)(req, res, next));
   app.use(cookieParser());
 
   app.get('/api/health', async (req, res) => {
@@ -89,6 +91,7 @@ function createApp() {
   app.use('/api/inbox', require('./modules/inbox/aftersales.routes').router);
   app.use('/api/scraping', require('./modules/scraping/scraping.routes').router);
   app.use('/api/videos', require('./modules/video/video.routes').router);
+  app.use('/api/covers', require('./modules/covers/covers.routes').router);
   app.use('/api/social', require('./modules/social/social.routes').router);
 
   app.use('/internal', require('./routes/internal').router);

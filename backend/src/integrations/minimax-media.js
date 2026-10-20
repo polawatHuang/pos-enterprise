@@ -14,7 +14,7 @@ const adapter = defineAdapter(
     id: 'minimax_media',
     name: 'MiniMax Speech + Hailuo Video (ค่าเริ่มต้น)',
     category: 'video',
-    usedBy: ['video'],
+    usedBy: ['video', 'covers'],
     phase: 6,
     purpose: 'เสียงพากย์ (speech) และคลิปวิดีโอ AI (Hailuo) ใช้ key เดียวกับ MiniMax chat',
     applyUrl: 'https://platform.minimax.io/',
@@ -25,11 +25,12 @@ const adapter = defineAdapter(
       { name: 'MINIMAX_VOICE_ID', optional: true },
       { name: 'MINIMAX_TTS_LANGUAGE', optional: true, default: 'auto' },
       { name: 'MINIMAX_VIDEO_MODEL', optional: true, default: 'MiniMax-Hailuo-2.3' },
+      { name: 'MINIMAX_IMAGE_MODEL', optional: true, default: 'image-01' },
       { name: 'MINIMAX_GROUP_ID', optional: true },
     ],
   },
   {
-    async call(path, { method = 'GET', body } = {}) {
+    async call(path, { method = 'GET', body, timeoutMs = 60_000 } = {}) {
       const env = adapter.requireConfig();
       const host = (env.MINIMAX_API_HOST || 'https://api.minimax.io').replace(/\/+$/, '');
       const sep = path.includes('?') ? '&' : '?';
@@ -39,7 +40,7 @@ const adapter = defineAdapter(
         method,
         headers: { Authorization: `Bearer ${env.MINIMAX_API_KEY}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
         body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       const json = await res.json().catch(() => null);
       const code = json?.base_resp?.status_code;
@@ -48,6 +49,35 @@ const adapter = defineAdapter(
         throw new AppError(502, 'MINIMAX_MEDIA_ERROR', `MiniMax: ${msg}`.slice(0, 300), { status: res.status, code });
       }
       return json;
+    },
+
+    /**
+     * Text → image (image-01). Returns the image bytes; provider URLs expire so callers store them.
+     * subjectImage (data URL) keeps a person's likeness ("character" reference only on MiniMax).
+     * @returns {Promise<{buffer: Buffer, mime: string}>}
+     */
+    async generateImage({ prompt, aspectRatio = '9:16', subjectImage = null }) {
+      const env = adapter.requireConfig();
+      const r = await adapter.call('/v1/image_generation', {
+        method: 'POST',
+        timeoutMs: 120_000,
+        body: {
+          model: env.MINIMAX_IMAGE_MODEL || 'image-01',
+          prompt: String(prompt).slice(0, 1500),
+          aspect_ratio: aspectRatio,
+          response_format: 'base64',
+          n: 1,
+          prompt_optimizer: true,
+          ...(subjectImage ? { subject_reference: [{ type: 'character', image_file: subjectImage }] } : {}),
+        },
+      });
+      const b64 = r?.data?.image_base64?.[0];
+      if (b64) return { buffer: Buffer.from(b64, 'base64'), mime: 'image/jpeg' };
+      const url = r?.data?.image_urls?.[0];
+      if (!url) throw new AppError(502, 'MINIMAX_MEDIA_ERROR', 'MiniMax: ไม่ได้รับภาพกลับมา');
+      const img = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+      if (!img.ok) throw new AppError(502, 'MINIMAX_MEDIA_ERROR', `MiniMax: ดาวน์โหลดภาพไม่สำเร็จ (HTTP ${img.status})`);
+      return { buffer: Buffer.from(await img.arrayBuffer()), mime: img.headers.get('content-type') || 'image/jpeg' };
     },
 
     /**

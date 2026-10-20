@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -1002,6 +1002,38 @@ CREATE TABLE trending_products (
   CONSTRAINT fk_tp_aff FOREIGN KEY (affiliate_link_id) REFERENCES affiliate_links(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE cover_projects (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  created_by  BIGINT UNSIGNED NULL,
+  orientation ENUM('portrait','landscape') NOT NULL DEFAULT 'portrait',
+  style       VARCHAR(200) NOT NULL,
+  headline    VARCHAR(80) NOT NULL,
+  subtext     VARCHAR(120) NULL,
+  badge       VARCHAR(30) NULL,
+  upload_kind ENUM('product','person') NULL COMMENT 'how the attached photo is used',
+  design      JSON NULL COMMENT 'AI layout/palette/font + user edits',
+  status      ENUM('generating','ready','failed') NOT NULL DEFAULT 'generating',
+  error       VARCHAR(1000) NULL,
+  provider    VARCHAR(30) NULL,
+  model       VARCHAR(100) NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_cover_org (org_id, created_at),
+  CONSTRAINT fk_cover_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE cover_assets (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  cover_id    BIGINT UNSIGNED NOT NULL,
+  kind        ENUM('upload','background','final') NOT NULL,
+  mime        VARCHAR(50) NOT NULL,
+  data        MEDIUMBLOB NOT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_cover_asset (cover_id, kind),
+  CONSTRAINT fk_ca_cover FOREIGN KEY (cover_id) REFERENCES cover_projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE trend_category_benchmarks (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   org_id      BIGINT UNSIGNED NOT NULL,
@@ -1054,6 +1086,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers');
 
 SET FOREIGN_KEY_CHECKS = 1;
