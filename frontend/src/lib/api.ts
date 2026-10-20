@@ -18,18 +18,13 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Failures worth retrying: the network dropped (status 0), a timeout, rate limiting, or a 5xx —
- * e.g. the backend host waking up from idle. 4xx answers are final.
- */
+/** Network drop (status 0) or a 5xx: worth one more try; any 4xx answer is final. */
 export function isTransient(err: unknown) {
   if (!(err instanceof ApiError)) return true;
-  return err.status === 0 || err.status === 408 || err.status === 429 || err.status >= 500;
+  return err.status === 0 || err.status >= 500;
 }
 
-/** TanStack Query retry policy: up to 4 retries (0.5s, 1s, 2s, 4s) so a sleeping server has time to start. */
-export const retryTransient = (count: number, err: unknown) => count < 4 && isTransient(err);
-export const retryDelay = (attempt: number) => Math.min(500 * 2 ** attempt, 4000);
+export const retryTransient = (count: number, err: unknown) => count < 2 && isTransient(err);
 
 type Query = Record<string, string | number | boolean | null | undefined>;
 
@@ -55,10 +50,27 @@ function refreshSession(): Promise<boolean> {
 }
 
 async function parse<T>(res: Response): Promise<T> {
-  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  const text = res.status === 204 ? "" : await res.text().catch(() => "");
+  let body: { error?: { code?: string; message?: string; details?: unknown } } | null = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = null;
+  }
   if (!res.ok) {
-    const err = body?.error ?? {};
-    throw new ApiError(res.status, err.code ?? "HTTP_ERROR", err.message ?? `Request failed (${res.status})`, err.details);
+    const err = body?.error;
+    if (err?.message) throw new ApiError(res.status, err.code ?? "HTTP_ERROR", err.message, err.details);
+    // The backend always answers errors as JSON, so anything else was produced in front of it
+    // (hosting firewall such as ModSecurity/Imunify360, web server, or the Vercel proxy).
+    const server = res.headers.get("server") ?? res.headers.get("x-vercel-error") ?? "unknown";
+    const snippet = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+    console.error(`[api] ${res.status} from upstream (server: ${server}) ${res.url}\n${snippet}`);
+    throw new ApiError(
+      res.status,
+      "UPSTREAM",
+      `เซิร์ฟเวอร์ปฏิเสธคำขอ (${res.status}) ก่อนถึงระบบ — server: ${server}${snippet ? ` · ${snippet.slice(0, 80)}` : ""}`,
+      { server, snippet },
+    );
   }
   return body as T;
 }

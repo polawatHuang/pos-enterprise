@@ -12,7 +12,6 @@ import { SearchTrigger } from "./command-palette";
 import { NotificationBell } from "./notification-bell";
 import { ThemeToggle, UserMenu } from "./user-menu";
 import { findNavItem } from "@/config/nav";
-import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const COLLAPSE_KEY = "pe.sidebar.collapsed";
@@ -30,12 +29,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       return false; // storage unavailable (private mode)
     }
   });
-
-  // Wake the backend as early as possible: a host that idles the app (Plesk) starts it on this
-  // request, while the data queries below retry until it answers.
-  useEffect(() => {
-    api.get("/health").catch(() => {});
-  }, []);
 
   // Close the drawer if this shell is hidden by Activity
   useLayoutEffect(() => () => setMobileOpen(false), []);
