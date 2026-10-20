@@ -159,6 +159,8 @@ export interface Product {
   supplierId: number | null;
   supplierName: string | null;
   packSize: number;
+  trackExpiry: boolean;
+  shelfLifeDays: number | null;
   imageUrl: string | null;
   status: ProductStatus;
   onHand: number;
@@ -349,7 +351,19 @@ export interface PurchaseOrder {
   createdAt: string;
   itemCount?: number;
   receivedPct?: number;
-  items?: { productId: number; sku: string; barcode: string | null; name: string; unit: string; quantity: number; receivedQty: number; unitCost: number; lineTotal: number }[];
+  items?: {
+    productId: number;
+    sku: string;
+    barcode: string | null;
+    name: string;
+    unit: string;
+    quantity: number;
+    receivedQty: number;
+    unitCost: number;
+    lineTotal: number;
+    trackExpiry: boolean;
+    shelfLifeDays: number | null;
+  }[];
 }
 
 export interface StockTransfer {
@@ -368,6 +382,33 @@ export interface StockTransfer {
   itemCount?: number;
   shortage?: number;
   items?: { productId: number; sku: string; barcode: string | null; name: string; unit: string; qtySent: number; qtyReceived: number | null }[];
+}
+
+export interface ExpiryLot {
+  lotId: number;
+  lotNo: string | null;
+  expiryDate: string;
+  daysLeft: number;
+  quantity: number;
+  unitCost: number;
+  value: number;
+  markdownPct: number;
+  receivedAt: string;
+  warehouseId: number;
+  warehouseName: string;
+  productId: number;
+  sku: string;
+  name: string;
+  unit: string;
+  price: number;
+}
+
+export type WasteReason = "expired" | "damaged" | "lost" | "other";
+
+export interface WasteReport {
+  month: string;
+  total: number;
+  items: { productId: number; name: string; unit: string; reason: WasteReason; reasonLabel: string; qty: number; value: number }[];
 }
 
 export interface AppNotification {
@@ -424,6 +465,9 @@ export interface CatalogItem {
   units: (ProductUnit & { price: number })[];
   /** Set by /pos/lookup when a pack/carton barcode was scanned. */
   matchedUnitId?: number | null;
+  trackExpiry: boolean;
+  /** Next lot to sell is marked down (near expiry): pct off for its qty base units */
+  markdown: { pct: number; qty: number; expiry: string | null } | null;
 }
 
 export type PaymentMethod = "cash" | "promptpay" | "card" | "transfer" | "ewallet";

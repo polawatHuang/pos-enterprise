@@ -11,6 +11,7 @@ const { badRequest, conflict, forbidden, notFound } = require('../../core/errors
 const { applyMovement, getWarehouse, getProductForUpdate, updateAverageCost } = require('../inventory/inventory.service');
 const { localDate } = require('../../utils/dates');
 const { suggestions } = require('./suggest');
+const { receiveLot, consumeFefo, restoreLots, addLot, parseAlloc } = require('../inventory/lots');
 
 /**
  * Ordering, receiving and branch transfers.
@@ -232,7 +233,7 @@ async function loadPo(orgId, id, conn = null) {
 
 async function poItems(poId) {
   const rows = await db.query(
-    `SELECT i.product_id, i.quantity, i.received_qty, i.unit_cost, p.sku, p.barcode, p.name, p.unit
+    `SELECT i.product_id, i.quantity, i.received_qty, i.unit_cost, p.sku, p.barcode, p.name, p.unit, p.track_expiry, p.shelf_life_days
        FROM purchase_order_items i JOIN products p ON p.id = i.product_id WHERE i.po_id = :poId ORDER BY i.id`,
     { poId },
   );
@@ -246,6 +247,8 @@ async function poItems(poId) {
     receivedQty: Number(r.received_qty),
     unitCost: Number(r.unit_cost),
     lineTotal: r2(Number(r.quantity) * Number(r.unit_cost)),
+    trackExpiry: Boolean(r.track_expiry),
+    shelfLifeDays: r.shelf_life_days == null ? null : Number(r.shelf_life_days),
   }));
 }
 
@@ -435,6 +438,8 @@ router.post(
             productId: z.number().int().positive(),
             quantity: z.coerce.number().min(0).max(1_000_000),
             unitCost: z.coerce.number().min(0).optional(),
+            expiryDate: z.iso.date().optional(),
+            lotNo: z.string().trim().max(40).optional(),
           }),
         )
         .min(1)
@@ -474,6 +479,15 @@ router.post(
           userId: req.user.id,
         });
         await updateAverageCost(conn, product, item.quantity, cost);
+        await receiveLot(conn, {
+          orgId,
+          warehouseId: po.warehouse_id,
+          productId: item.productId,
+          qty: item.quantity,
+          expiryDate: item.expiryDate,
+          lotNo: item.lotNo ?? po.po_no,
+          unitCost: cost,
+        });
         await conn.query('UPDATE purchase_order_items SET received_qty = :after WHERE id = :id', { after: r3(after), id: line.id });
         line.received_qty = after;
         received += 1;
@@ -602,10 +616,12 @@ router.post(
           note: `${no} ส่งไป ${to.name}`,
           userId: req.user.id,
         });
-        await conn.query('INSERT INTO stock_transfer_items (transfer_id, product_id, qty_sent) VALUES (:id, :productId, :q)', {
+        const lots = await consumeFefo(conn, { warehouseId: from.id, productId: item.productId, qty: item.quantity });
+        await conn.query('INSERT INTO stock_transfer_items (transfer_id, product_id, qty_sent, lot_allocations) VALUES (:id, :productId, :q, :lots)', {
           id: ins.insertId,
           productId: item.productId,
           q: item.quantity,
+          lots: lots.length ? JSON.stringify(lots) : null,
         });
       }
       return ins.insertId;
@@ -647,6 +663,14 @@ router.post(
             userId: req.user.id,
           });
         }
+        // Lots follow the goods (same expiry and cost), filled earliest-expiry first; a shortage comes off the last ones
+        let toPlace = quantity;
+        for (const a of parseAlloc(line.lot_allocations)) {
+          if (toPlace <= 1e-9) break;
+          const q = Math.min(a.qty, toPlace);
+          await addLot(conn, { orgId, warehouseId: t.to_warehouse_id, productId: line.product_id, qty: q, expiryDate: a.expiry, unitCost: a.cost });
+          toPlace -= q;
+        }
         await conn.query('UPDATE stock_transfer_items SET qty_received = :q WHERE transfer_id = :id AND product_id = :p', {
           q: quantity,
           id: t.id,
@@ -672,6 +696,7 @@ router.post('/transfers/:id/cancel', requirePermission('purchasing:write'), vali
     if (t.status !== 'in_transit') throw conflict('ใบโอนนี้ปิดแล้ว');
     const [lines] = await conn.query('SELECT * FROM stock_transfer_items WHERE transfer_id = :id', { id: t.id });
     for (const line of lines) {
+      await restoreLots(conn, parseAlloc(line.lot_allocations));
       await applyMovement(conn, {
         orgId,
         warehouseId: t.from_warehouse_id,

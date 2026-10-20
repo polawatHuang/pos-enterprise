@@ -3,6 +3,7 @@
 const db = require('../../db/pool');
 const { badRequest, conflict, forbidden, notFound } = require('../../core/errors');
 const { applyMovement } = require('../inventory/inventory.service');
+const { consumeFefo, restoreLots, parseAlloc } = require('../inventory/lots');
 const { postJournal, reverseJournalsFor, saleLines } = require('../accounting/ledger.service');
 const { localDate, localTime } = require('../../utils/dates');
 
@@ -313,7 +314,10 @@ async function checkout(user, input) {
       }
       const unitPrice = item.unitPrice ?? listPrice;
       const gross = unitPrice * item.quantity;
-      const discount = item.discount ?? 0;
+      // Expiry-tracked items leave first-expiry-first-out; near-expiry lots carry their markdown
+      const lotAllocations = await consumeFefo(conn, { warehouseId, productId: p.id, qty: r2(item.quantity * factor), forSale: true });
+      const markdown = r2(lotAllocations.reduce((s, a) => s + (a.qty * (unitPrice / factor) * a.markdownPct) / 100, 0));
+      const discount = r2((item.discount ?? 0) + markdown);
       if (discount > gross) throw badRequest(`ส่วนลดของ ${p.name} มากกว่าราคา`);
       lines.push({
         productId: p.id,
@@ -327,6 +331,8 @@ async function checkout(user, input) {
         discount,
         lineTotal: r2(gross - discount),
         vatType: p.vat_type,
+        markdown,
+        lotAllocations,
       });
     }
     if (needsAge && !input.ageConfirmed) throw badRequest('มีสินค้าจำกัดอายุ กรุณายืนยันว่าลูกค้าอายุ 20 ปีขึ้นไป');
@@ -334,7 +340,9 @@ async function checkout(user, input) {
     // Cashier discount limit is checked before points: redeeming points is the customer's right.
     const beforePoints = computeTotals(lines, input.discount ?? 0);
     const listGross = lines.reduce((s, l) => s + l.listPrice * l.quantity, 0);
-    const discountPct = listGross ? ((listGross - beforePoints.total) / listGross) * 100 : 0;
+    // Near-expiry markdowns are the shop's own price cut, not the cashier's discount
+    const markdownTotal = lines.reduce((s, l) => s + l.markdown, 0);
+    const discountPct = listGross ? ((listGross - beforePoints.total - markdownTotal) / listGross) * 100 : 0;
     if (discountPct > settings.maxDiscountPct + 1e-9 && !canOverride) {
       throw forbidden(`ส่วนลดรวมเกิน ${settings.maxDiscountPct}% ต้องให้ผู้จัดการอนุมัติ`);
     }
@@ -382,9 +390,9 @@ async function checkout(user, input) {
 
     for (const l of lines) {
       await conn.query(
-        `INSERT INTO sales_order_items (order_id, product_id, variant_id, name, unit_name, unit_factor, quantity, unit_price, unit_cost, discount, line_total)
-         VALUES (:orderId, :productId, 0, :name, :unitName, :unitFactor, :quantity, :unitPrice, :unitCost, :discount, :lineTotal)`,
-        { orderId, ...l },
+        `INSERT INTO sales_order_items (order_id, product_id, variant_id, name, unit_name, unit_factor, quantity, unit_price, unit_cost, discount, line_total, lot_allocations)
+         VALUES (:orderId, :productId, 0, :name, :unitName, :unitFactor, :quantity, :unitPrice, :unitCost, :discount, :lineTotal, :alloc)`,
+        { orderId, ...l, alloc: l.lotAllocations.length ? JSON.stringify(l.lotAllocations) : null },
       );
       await applyMovement(conn, {
         orgId: user.orgId,
@@ -500,8 +508,9 @@ async function voidOrder(user, orderId, reason) {
     if (o.channel !== 'pos') throw badRequest('ยกเลิกได้เฉพาะบิลหน้าร้าน');
     if (o.status !== 'completed') throw conflict('บิลนี้ถูกยกเลิกไปแล้ว');
     const warehouseId = await warehouseForBranch(conn, user.orgId, o.branch_id);
-    const [items] = await conn.query('SELECT product_id, quantity, unit_factor FROM sales_order_items WHERE order_id = :orderId', { orderId });
+    const [items] = await conn.query('SELECT product_id, quantity, unit_factor, lot_allocations FROM sales_order_items WHERE order_id = :orderId', { orderId });
     for (const i of items) {
+      await restoreLots(conn, parseAlloc(i.lot_allocations));
       await applyMovement(conn, {
         orgId: user.orgId,
         warehouseId,

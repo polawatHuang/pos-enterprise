@@ -18,6 +18,7 @@ interface Line {
   product: Product;
   quantity: string;
   unitCost: string;
+  expiryDate: string;
 }
 
 function useInvalidate() {
@@ -53,7 +54,11 @@ export function MultiLineStockDialog({ action, warehouses, onDone }: { action: "
   const [lines, setLines] = useState<Line[]>([]);
   const [busy, setBusy] = useState(false);
 
-  const valid = lines.length > 0 && lines.every((l) => Number(l.quantity) > 0) && (action === "receive" || from !== to);
+  const valid =
+    lines.length > 0 &&
+    lines.every((l) => Number(l.quantity) > 0) &&
+    (action === "transfer" || lines.every((l) => !l.product.trackExpiry || l.product.shelfLifeDays != null || l.expiryDate)) &&
+    (action === "receive" || from !== to);
   const update = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
   const submit = async () => {
@@ -67,6 +72,7 @@ export function MultiLineStockDialog({ action, warehouses, onDone }: { action: "
             productId: l.product.id,
             quantity: Number(l.quantity),
             ...(l.unitCost !== "" ? { unitCost: Number(l.unitCost) } : {}),
+            ...(l.expiryDate ? { expiryDate: l.expiryDate } : {}),
           })),
         });
         toast.success(`รับสินค้าเข้า ${lines.length} รายการแล้ว`);
@@ -111,7 +117,7 @@ export function MultiLineStockDialog({ action, warehouses, onDone }: { action: "
           <Label>เพิ่มสินค้า</Label>
           <ProductPicker
             exclude={lines.map((l) => l.product.id)}
-            onPick={(p) => setLines((ls) => [...ls, { product: p, quantity: "1", unitCost: action === "receive" ? String(p.cost) : "" }])}
+            onPick={(p) => setLines((ls) => [...ls, { product: p, quantity: "1", unitCost: action === "receive" ? String(p.cost) : "", expiryDate: "" }])}
           />
         </div>
         {lines.length > 0 && (
@@ -132,6 +138,20 @@ export function MultiLineStockDialog({ action, warehouses, onDone }: { action: "
                   <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     ต้นทุน/หน่วย
                     <Input className="h-9 w-24" inputMode="decimal" value={l.unitCost} onChange={(e) => update(i, { unitCost: e.target.value })} />
+                  </label>
+                )}
+                {action === "receive" && l.product.trackExpiry && (
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    หมดอายุ
+                    <Input
+                      type="date"
+                      className="h-9 w-36"
+                      value={l.expiryDate}
+                      onChange={(e) => update(i, { expiryDate: e.target.value })}
+                      required={l.product.shelfLifeDays == null}
+                      title={l.product.shelfLifeDays != null ? `เว้นว่าง = วันนี้ + ${l.product.shelfLifeDays} วัน` : "ต้องใส่วันหมดอายุ"}
+                      aria-label={`วันหมดอายุ ${l.product.name}`}
+                    />
                   </label>
                 )}
                 <button

@@ -4,7 +4,7 @@ const db = require('../../db/pool');
 const logger = require('../../core/logger');
 const { localDate, localTime } = require('../../utils/dates');
 const { notify } = require('../notifications/notify');
-const { salesStats, daysCover } = require('./analytics');
+const { salesStats, daysCover, LOCAL_TODAY } = require('./analytics');
 
 /** Days-of-cover below this counts as "running out" even before the reorder point. */
 const COVER_DAYS = 3;
@@ -133,6 +133,32 @@ async function checkOrg(orgId, { now = new Date() } = {}) {
       );
     }
     if (out.length) digest.push(`⛔ ${wh.name}: หมด ${out.length} รายการ`);
+
+    // Lots expiring within 3 days (or already expired) still on the shelf
+    const expiring = await db.query(
+      `SELECT p.name, l.quantity, DATEDIFF(l.expiry_date, ${LOCAL_TODAY}) AS days_left
+         FROM stock_lots l JOIN products p ON p.id = l.product_id
+        WHERE l.warehouse_id = :warehouseId AND l.quantity > 0 AND l.expiry_date IS NOT NULL AND l.expiry_date <= ${LOCAL_TODAY} + INTERVAL 3 DAY
+        ORDER BY l.expiry_date`,
+      { warehouseId: wh.id },
+    );
+    if (expiring.length) {
+      const expired = expiring.filter((e) => Number(e.days_left) < 0).length;
+      await notify({
+        orgId,
+        type: 'stock.expiry',
+        severity: expired ? 'danger' : 'warning',
+        title: `ใกล้หมดอายุ ${expiring.length} ล็อต${expired ? ` (หมดแล้ว ${expired})` : ''} · ${wh.name}`,
+        body: expiring
+          .slice(0, 6)
+          .map((e) => `${e.name} ${Number(e.quantity)} ชิ้น · ${Number(e.days_left) < 0 ? 'หมดอายุแล้ว' : Number(e.days_left) === 0 ? 'หมดวันนี้' : `อีก ${e.days_left} วัน`}`)
+          .join('\n'),
+        link: `/inventory/expiry?warehouseId=${wh.id}`,
+        permission: 'inventory:read',
+        refKey: `exp:${wh.id}:${today}`,
+      });
+      digest.push(`⏰ ${wh.name}: ใกล้หมดอายุ ${expiring.length} ล็อต${expired ? ` (หมดแล้ว ${expired})` : ''}`);
+    }
   }
 
   // LINE: urgent out-of-stock right away, the roll-up once a day after the digest time

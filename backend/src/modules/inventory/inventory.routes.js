@@ -9,6 +9,7 @@ const { audit } = require('../../core/audit');
 const { badRequest } = require('../../core/errors');
 const { applyMovement, getWarehouse, getProductForUpdate, updateAverageCost } = require('./inventory.service');
 const { salesStats, stockStatus, daysCover, EMPTY } = require('./analytics');
+const { receiveLot } = require('./lots');
 
 const router = express.Router();
 router.use(authenticate);
@@ -252,6 +253,8 @@ router.post(
             productId: z.number().int().positive(),
             quantity: qty.refine((n) => n > 0, 'จำนวนต้องมากกว่า 0'),
             unitCost: z.coerce.number().min(0).max(99_999_999).optional(),
+            expiryDate: z.iso.date().optional(),
+            lotNo: z.string().trim().max(40).optional(),
           }),
         )
         .min(1)
@@ -279,7 +282,16 @@ router.post(
           userId,
         });
         if (item.unitCost !== undefined) await updateAverageCost(conn, product, item.quantity, item.unitCost);
-        out.push({ productId: item.productId, ...r });
+        const lotId = await receiveLot(conn, {
+          orgId,
+          warehouseId: b.warehouseId,
+          productId: item.productId,
+          qty: item.quantity,
+          expiryDate: item.expiryDate,
+          lotNo: item.lotNo,
+          unitCost: item.unitCost ?? Number(product.cost),
+        });
+        out.push({ productId: item.productId, ...r, lotId });
       }
       return out;
     });

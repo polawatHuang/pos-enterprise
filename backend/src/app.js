@@ -84,6 +84,7 @@ function createApp() {
   app.use('/api/dashboard', require('./modules/dashboard/dashboard.routes').router);
   app.use('/api/integrations', require('./modules/integrations/integrations.routes').router);
   app.use('/api/products', require('./modules/products/products.routes').router);
+  app.use('/api/inventory/expiry', require('./modules/inventory/expiry.routes').router);
   app.use('/api/inventory/counts', require('./modules/inventory/counts.routes').router);
   app.use('/api/inventory', require('./modules/inventory/inventory.routes').router);
   app.use('/api/purchasing', require('./modules/purchasing/purchasing.routes').router);
