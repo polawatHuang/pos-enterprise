@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, NativeSelect, Pagination, Skeleton, TabBar } from "@/components/ui/primitives";
 import { Dialog } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
+import { ErrorNote } from "@/components/dashboard/widgets";
 import { Sparkline } from "@/components/common/sparkline";
 import { AlertSettingsDialog } from "./alert-settings";
 import { MOVEMENT_META, MovementTypeBadge } from "./movement-badge";
@@ -223,6 +224,8 @@ function LevelsTable({
             <Skeleton key={i} className="h-10 w-full" />
           ))}
         </div>
+      ) : levels.isError && !levels.data ? (
+        <ErrorNote onRetry={() => levels.refetch()} />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-sm">
@@ -342,6 +345,13 @@ function MovementsTable({ warehouseId }: { warehouseId: string }) {
               <tr>
                 <td colSpan={7} className="p-4">
                   <Skeleton className="h-40 w-full" />
+                </td>
+              </tr>
+            )}
+            {movements.isError && !movements.data && (
+              <tr>
+                <td colSpan={7}>
+                  <ErrorNote onRetry={() => movements.refetch()} />
                 </td>
               </tr>
             )}

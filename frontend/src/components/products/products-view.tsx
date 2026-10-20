@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, NativeSelect, Pagination, Skeleton } from "@/components/ui/primitives";
 import { Dialog } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
+import { ErrorNote } from "@/components/dashboard/widgets";
 import { CategoryRulesDialog } from "./category-rules";
 import { ProductFormDialog, useCategories } from "./product-form";
 
@@ -106,6 +107,8 @@ export function ProductsView() {
               <Skeleton key={i} className="h-11 w-full" />
             ))}
           </div>
+        ) : products.isError && !products.data ? (
+          <ErrorNote onRetry={() => products.refetch()} />
         ) : products.data?.data.length === 0 ? (
           <p className="py-16 text-center text-sm text-muted-foreground">ไม่พบสินค้าที่ตรงกับเงื่อนไข</p>
         ) : (

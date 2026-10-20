@@ -18,6 +18,19 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Failures worth retrying: the network dropped (status 0), a timeout, rate limiting, or a 5xx —
+ * e.g. the backend host waking up from idle. 4xx answers are final.
+ */
+export function isTransient(err: unknown) {
+  if (!(err instanceof ApiError)) return true;
+  return err.status === 0 || err.status === 408 || err.status === 429 || err.status >= 500;
+}
+
+/** TanStack Query retry policy: up to 4 retries (0.5s, 1s, 2s, 4s) so a sleeping server has time to start. */
+export const retryTransient = (count: number, err: unknown) => count < 4 && isTransient(err);
+export const retryDelay = (attempt: number) => Math.min(500 * 2 ** attempt, 4000);
+
 type Query = Record<string, string | number | boolean | null | undefined>;
 
 function buildUrl(path: string, query?: Query) {
@@ -50,6 +63,14 @@ async function parse<T>(res: Response): Promise<T> {
   return body as T;
 }
 
+// Endpoints where a 401 is the answer itself; every other call (including /auth/me after the
+// 15-minute access token expired) refreshes the session once and retries.
+const NO_REFRESH = new Set(["/auth/login", "/auth/refresh", "/auth/logout"]);
+
+function networkError(): never {
+  throw new ApiError(0, "NETWORK", "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบอินเทอร์เน็ต");
+}
+
 export async function apiFetch<T>(
   path: string,
   init: RequestInit & { query?: Query; json?: unknown; skipRefresh?: boolean } = {},
@@ -63,9 +84,9 @@ export async function apiFetch<T>(
       body: json !== undefined ? JSON.stringify(json) : rest.body,
     });
 
-  let res = await doFetch();
-  if (res.status === 401 && !skipRefresh && !path.startsWith("/auth/")) {
-    if (await refreshSession()) res = await doFetch();
+  let res = await doFetch().catch(networkError);
+  if (res.status === 401 && !skipRefresh && !NO_REFRESH.has(path)) {
+    if (await refreshSession()) res = await doFetch().catch(networkError);
     else if (typeof window !== "undefined") {
       // Full reload clears all client state (Activity keeps hidden routes mounted otherwise)
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- intentional full reload

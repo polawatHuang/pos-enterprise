@@ -2,12 +2,15 @@
 
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api, ApiError } from "@/lib/api";
+import { api, retryDelay, retryTransient } from "@/lib/api";
 import type { User } from "@/lib/types";
 
 interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
+  /** /auth/me failed for a reason other than being signed out (server down, network). */
+  isError: boolean;
+  retry: () => void;
   can: (permission: string) => boolean;
   logout: () => Promise<void>;
 }
@@ -17,12 +20,14 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export const ME_QUERY_KEY = ["auth", "me"] as const;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ME_QUERY_KEY,
     queryFn: () => api.get<{ user: User }>("/auth/me").then((d) => d.user),
     staleTime: 5 * 60 * 1000,
-    retry: (count, err) => !(err instanceof ApiError && err.status === 401) && count < 2,
+    retry: retryTransient,
+    retryDelay,
   });
+  const retry = useCallback(() => void refetch(), [refetch]);
 
   const user = data ?? null;
   const can = useCallback((p: string) => Boolean(user?.permissions.includes(p)), [user]);
@@ -37,7 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const value = useMemo(() => ({ user, isLoading, can, logout }), [user, isLoading, can, logout]);
+  const value = useMemo(() => ({ user, isLoading, isError, retry, can, logout }), [user, isLoading, isError, retry, can, logout]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
