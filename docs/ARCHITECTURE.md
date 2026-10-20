@@ -155,6 +155,28 @@ frontend/src/config/nav.ts               # เพิ่มเมนู + permiss
 - API: `GET /api/notifications`, `/unread-count`, `POST /:id/read`, `/read-all`, `GET|PUT /settings`, `POST /test-line`, `POST /check-stock`
 - สิทธิ์ใหม่: `inventory:count` (แคชเชียร์มีด้วย), `inventory:approve`, `purchasing:write`
 
+### สั่งซื้อ รับของ โอนย้าย (เฟส 9, migration 013)
+
+**ยอดแนะนำ** (`modules/purchasing/suggest.js`)
+- เป้าหมาย = ขาย/วัน × (ระยะส่งของของผู้ขาย + รอบสั่ง 7 วัน) × 1.2 และไม่น้อยกว่าจุดสั่งซื้อ + ขาย/วัน × ระยะส่งของ
+- ยอดแนะนำ = เป้าหมาย − คงเหลือ − กำลังมา (ใบสั่งซื้อสถานะ ordered/partial)
+- ไม่เกิน `max_qty` และปัดขึ้นตาม `products.pack_size`
+
+**AI ปรับยอด** (`POST /api/purchasing/suggestions/ai`)
+- MiniMax ส่งตัวคูณรายสินค้ากลับมา (0.5–2.0) พร้อมเหตุผล โดยพิจารณาวันหยุด เทศกาล และวันเงินเดือนออก
+- ระบบไม่บันทึกอะไรเอง ผู้ใช้ปรับต่อได้
+
+**ใบสั่งซื้อ** (`/api/purchasing/orders`): draft → ordered → partial / received
+- รับของ (`/receive`) ใช้ `applyMovement` ชนิด purchase และ `updateAverageCost`
+- รับเกินจำนวนที่สั่งต้องมี `inventory:approve`
+- ไม่ลงบัญชีเจ้าหนี้: ใบแจ้งหนี้ของผู้ขายยังบันทึกที่หน้าบัญชีตามเดิม
+
+**โอนย้าย** (`/api/purchasing/transfers`): ส่งของ → ตัดสต๊อกต้นทาง (status `in_transit`) → ปลายทางรับตามจำนวนจริง (บันทึกของที่ขาดไว้ใน `qty_received`)
+- ยกเลิกระหว่างทางจะคืนของเข้าคลังต้นทาง
+- ปุ่ม "โอนย้าย" ในหน้าสต๊อกใช้ flow นี้แล้ว ส่วน `POST /api/inventory/transfer` แบบโอนทันทียังใช้ได้ผ่าน API
+
+**แก้บั๊ก:** `PATCH /api/products/:id` เดิมใช้ค่า default ของ schema แทนช่องที่ไม่ได้ส่งมา (เช่น แก้ราคาแล้วต้นทุนกลายเป็น 0) ตอนนี้อัปเดตเฉพาะช่องที่ส่งมา
+
 ## บัญชี เอกสาร และภาษี (เฟส 3)
 
 **บัญชีคู่อัตโนมัติ:** ทุกธุรกรรมลงบัญชีผ่าน `postJournal()` ใน `backend/src/modules/accounting/ledger.service.js` ภายใน transaction เดียวกับธุรกรรมต้นทาง ระบบตรวจว่าเดบิตเท่ากับเครดิตทุกครั้ง การยกเลิกจะไม่ลบรายการเดิม แต่สร้างรายการกลับ (reversal) ที่ลงวันที่เดียวกับรายการเดิม ยอดที่ยกเลิกจึงหายไปจากงบของงวดนั้นอย่างถูกต้อง และยังตรวจย้อนหลัง (audit) ได้

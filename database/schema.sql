@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -242,6 +242,7 @@ CREATE TABLE products (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   org_id          BIGINT UNSIGNED NOT NULL,
   category_id     BIGINT UNSIGNED NULL,
+  supplier_id     BIGINT UNSIGNED NULL COMMENT 'usual supplier',
   sku             VARCHAR(64)  NOT NULL,
   barcode         VARCHAR(64)  NULL,
   name            VARCHAR(255) NOT NULL,
@@ -252,6 +253,7 @@ CREATE TABLE products (
   cost            DECIMAL(14,2) NOT NULL DEFAULT 0,
   vat_type        ENUM('vat7','exempt','zero') NOT NULL DEFAULT 'vat7',
   reorder_point   INT NOT NULL DEFAULT 0,
+  pack_size       DECIMAL(12,3) NOT NULL DEFAULT 1 COMMENT 'order in multiples of this many base units',
   image_url       VARCHAR(1000) NULL,
   shopee_item_id  VARCHAR(64) NULL,
   tiktok_product_id VARCHAR(64) NULL,
@@ -260,6 +262,7 @@ CREATE TABLE products (
   updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_product_sku (org_id, sku),
   KEY idx_product_barcode (barcode),
+  KEY idx_product_supplier (supplier_id),
   FULLTEXT KEY ft_product_knowledge (name, description, selling_points),
   CONSTRAINT fk_product_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_product_cat FOREIGN KEY (category_id) REFERENCES product_categories(id) ON DELETE SET NULL
@@ -420,6 +423,9 @@ CREATE TABLE suppliers (
   phone       VARCHAR(50)  NULL,
   email       VARCHAR(191) NULL,
   address     TEXT NULL,
+  lead_time_days INT NOT NULL DEFAULT 2 COMMENT 'days from order to delivery',
+  note        VARCHAR(255) NULL,
+  is_active   TINYINT(1) NOT NULL DEFAULT 1,
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_sup_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -431,12 +437,15 @@ CREATE TABLE purchase_orders (
   warehouse_id  BIGINT UNSIGNED NULL,
   po_no         VARCHAR(32) NOT NULL,
   status        ENUM('draft','ordered','partial','received','cancelled') NOT NULL DEFAULT 'draft',
+  source        ENUM('manual','suggestion') NOT NULL DEFAULT 'manual',
   order_date    DATE NOT NULL,
   expected_date DATE NULL,
   subtotal      DECIMAL(14,2) NOT NULL DEFAULT 0,
   vat_amount    DECIMAL(14,2) NOT NULL DEFAULT 0,
   total         DECIMAL(14,2) NOT NULL DEFAULT 0,
   note          TEXT NULL,
+  sent_at       DATETIME NULL,
+  received_at   DATETIME NULL,
   created_by    BIGINT UNSIGNED NULL,
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_po_no (org_id, po_no),
@@ -455,6 +464,34 @@ CREATE TABLE purchase_order_items (
   unit_cost     DECIMAL(14,2) NOT NULL,
   CONSTRAINT fk_poi_po FOREIGN KEY (po_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
   CONSTRAINT fk_poi_product FOREIGN KEY (product_id) REFERENCES products(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE stock_transfers (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id            BIGINT UNSIGNED NOT NULL,
+  transfer_no       VARCHAR(30) NOT NULL,
+  from_warehouse_id BIGINT UNSIGNED NOT NULL,
+  to_warehouse_id   BIGINT UNSIGNED NOT NULL,
+  status            ENUM('in_transit','received','cancelled') NOT NULL DEFAULT 'in_transit',
+  note              VARCHAR(255) NULL,
+  created_by        BIGINT UNSIGNED NOT NULL,
+  received_by       BIGINT UNSIGNED NULL,
+  shipped_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  received_at       DATETIME NULL,
+  KEY idx_tr_org (org_id, status),
+  CONSTRAINT fk_tr_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_tr_from FOREIGN KEY (from_warehouse_id) REFERENCES warehouses(id),
+  CONSTRAINT fk_tr_to FOREIGN KEY (to_warehouse_id) REFERENCES warehouses(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE stock_transfer_items (
+  transfer_id   BIGINT UNSIGNED NOT NULL,
+  product_id    BIGINT UNSIGNED NOT NULL,
+  qty_sent      DECIMAL(14,3) NOT NULL,
+  qty_received  DECIMAL(14,3) NULL,
+  PRIMARY KEY (transfer_id, product_id),
+  CONSTRAINT fk_tri_tr FOREIGN KEY (transfer_id) REFERENCES stock_transfers(id) ON DELETE CASCADE,
+  CONSTRAINT fk_tri_product FOREIGN KEY (product_id) REFERENCES products(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE customers (
@@ -1228,6 +1265,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing');
 
 SET FOREIGN_KEY_CHECKS = 1;

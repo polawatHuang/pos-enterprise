@@ -71,13 +71,14 @@ export function MultiLineStockDialog({ action, warehouses, onDone }: { action: "
         });
         toast.success(`รับสินค้าเข้า ${lines.length} รายการแล้ว`);
       } else {
-        await api.post("/inventory/transfer", {
+        // In-transit transfer: stock leaves now, the destination confirms what arrived (สั่งซื้อ & รับของ > โอนย้าย)
+        const t = await api.post<{ transferNo: string }>("/purchasing/transfers", {
           fromWarehouseId: Number(from),
           toWarehouseId: Number(to),
           note: reference || undefined,
           items: lines.map((l) => ({ productId: l.product.id, quantity: Number(l.quantity) })),
         });
-        toast.success(`โอนย้าย ${lines.length} รายการแล้ว`);
+        toast.success(`ส่งของแล้ว ${t.transferNo} — รอคลังปลายทางกดรับ`);
       }
       invalidate();
       onDone();

@@ -26,16 +26,20 @@ const productBody = z.object({
   cost: money.default(0),
   vatType: z.enum(['vat7', 'exempt', 'zero']).default('vat7'),
   reorderPoint: z.coerce.number().int().min(0).max(1_000_000).default(0),
+  supplierId: z.number().int().positive().nullable().optional(),
+  packSize: z.coerce.number().positive().max(100_000).default(1),
   imageUrl: z.url().max(1000).nullable().optional(),
   status: z.enum(['active', 'draft', 'archived']).default('active'),
 });
 
 const SELECT_PRODUCT = `
   SELECT p.id, p.sku, p.barcode, p.name, p.category_id, c.name AS category_name, p.description, p.selling_points,
-         p.unit, p.price, p.cost, p.vat_type, p.reorder_point, p.image_url, p.status, p.created_at, p.updated_at,
+         p.unit, p.price, p.cost, p.vat_type, p.reorder_point, p.supplier_id, p.pack_size, s.name AS supplier_name,
+         p.image_url, p.status, p.created_at, p.updated_at,
          COALESCE((SELECT SUM(sl.quantity) FROM stock_levels sl WHERE sl.product_id = p.id), 0) AS on_hand
     FROM products p
-    LEFT JOIN product_categories c ON c.id = p.category_id`;
+    LEFT JOIN product_categories c ON c.id = p.category_id
+    LEFT JOIN suppliers s ON s.id = p.supplier_id`;
 
 function mapProduct(r) {
   return {
@@ -52,6 +56,9 @@ function mapProduct(r) {
     cost: Number(r.cost),
     vatType: r.vat_type,
     reorderPoint: Number(r.reorder_point),
+    supplierId: r.supplier_id,
+    supplierName: r.supplier_name ?? null,
+    packSize: Number(r.pack_size ?? 1),
     imageUrl: r.image_url,
     status: r.status,
     onHand: Number(r.on_hand),
@@ -212,8 +219,10 @@ router.post('/', requirePermission('products:write'), validate({ body: productBo
   const b = req.valid.body;
   await assertUnique(req.user.orgId, b);
   const r = await db.query(
-    `INSERT INTO products (org_id, category_id, sku, barcode, name, description, selling_points, unit, price, cost, vat_type, reorder_point, image_url, status)
-     VALUES (:orgId, :categoryId, :sku, :barcode, :name, :description, :sellingPoints, :unit, :price, :cost, :vatType, :reorderPoint, :imageUrl, :status)`,
+    `INSERT INTO products (org_id, category_id, supplier_id, sku, barcode, name, description, selling_points, unit, price, cost, vat_type, reorder_point,
+                           pack_size, image_url, status)
+     VALUES (:orgId, :categoryId, :supplierId, :sku, :barcode, :name, :description, :sellingPoints, :unit, :price, :cost, :vatType, :reorderPoint,
+             :packSize, :imageUrl, :status)`,
     {
       orgId: req.user.orgId,
       categoryId: b.categoryId ?? null,
@@ -227,6 +236,8 @@ router.post('/', requirePermission('products:write'), validate({ body: productBo
       cost: b.cost,
       vatType: b.vatType,
       reorderPoint: b.reorderPoint,
+      supplierId: b.supplierId ?? null,
+      packSize: b.packSize,
       imageUrl: b.imageUrl ?? null,
       status: b.status,
     },
@@ -243,12 +254,14 @@ router.patch(
     const { id } = req.valid.params;
     const existing = await getProduct(req.user.orgId, id);
     if (!existing) throw notFound('ไม่พบสินค้า');
-    const merged = { ...existing, ...req.valid.body };
+    // .partial() still fills schema defaults (unit, cost, status...): only apply fields the client sent
+    const sent = Object.fromEntries(Object.entries(req.valid.body).filter(([k]) => Object.hasOwn(req.body ?? {}, k)));
+    const merged = { ...existing, ...sent };
     await assertUnique(req.user.orgId, merged, id);
     await db.query(
       `UPDATE products SET category_id = :categoryId, sku = :sku, barcode = :barcode, name = :name, description = :description,
               selling_points = :sellingPoints, unit = :unit, price = :price, cost = :cost, vat_type = :vatType,
-              reorder_point = :reorderPoint, image_url = :imageUrl, status = :status
+              reorder_point = :reorderPoint, supplier_id = :supplierId, pack_size = :packSize, image_url = :imageUrl, status = :status
         WHERE id = :id AND org_id = :orgId`,
       {
         id,
@@ -264,11 +277,13 @@ router.patch(
         cost: merged.cost,
         vatType: merged.vatType,
         reorderPoint: merged.reorderPoint,
+        supplierId: merged.supplierId ?? null,
+        packSize: merged.packSize ?? 1,
         imageUrl: merged.imageUrl ?? null,
         status: merged.status,
       },
     );
-    audit(req, 'product.update', 'product', id, { fields: Object.keys(req.valid.body) });
+    audit(req, 'product.update', 'product', id, { fields: Object.keys(sent) });
     res.json({ data: await getProduct(req.user.orgId, id) });
   },
 );
