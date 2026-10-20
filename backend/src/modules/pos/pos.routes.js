@@ -11,6 +11,7 @@ const { promptPayPayload, isValidPromptPayId } = require('../../utils/promptpay'
 const ai = require('../../integrations/ai');
 const service = require('./pos.service');
 const { SLIP_SCHEMA, SLIP_SYSTEM } = require('./slip');
+const { LOCAL_TODAY } = require('../inventory/analytics');
 
 const router = express.Router();
 router.use(authenticate, requirePermission('pos:sell'));
@@ -22,7 +23,12 @@ const money = z.coerce.number().min(0).max(99_999_999);
 
 const CATALOG_SELECT = `
   SELECT p.id, p.sku, p.barcode, p.name, p.price, p.unit, p.image_url, p.category_id, p.vat_type,
-         COALESCE(sl.quantity, 0) AS stock, c.age_restricted, c.sale_block
+         COALESCE(sl.quantity, 0) AS stock, c.age_restricted, c.sale_block, p.track_expiry,
+         (SELECT CONCAT(l.markdown_pct, '|', l.quantity, '|', COALESCE(DATE_FORMAT(l.expiry_date, '%Y-%m-%d'), ''))
+            FROM stock_lots l
+           WHERE l.warehouse_id = :warehouseId AND l.product_id = p.id AND l.quantity > 0
+             AND (l.expiry_date IS NULL OR l.expiry_date >= ${LOCAL_TODAY})
+           ORDER BY l.expiry_date IS NULL, l.expiry_date, l.id LIMIT 1) AS first_lot
     FROM products p
     LEFT JOIN product_categories c ON c.id = p.category_id
     LEFT JOIN stock_levels sl ON sl.product_id = p.id AND sl.variant_id = 0 AND sl.warehouse_id = :warehouseId`;
@@ -50,6 +56,13 @@ const mapCatalog = (r) => ({
   ageRestricted: Boolean(r.age_restricted),
   saleBlock: parseJson(r.sale_block),
   units: [],
+  trackExpiry: Boolean(r.track_expiry),
+  // The lot that sells next (FEFO); a markdown on it is applied automatically at checkout
+  markdown: (() => {
+    if (!r.first_lot) return null;
+    const [pct, qty, expiry] = String(r.first_lot).split('|');
+    return Number(pct) > 0 ? { pct: Number(pct), qty: Number(qty), expiry: expiry || null } : null;
+  })(),
 });
 
 const mapUnit = (u, basePrice) => ({

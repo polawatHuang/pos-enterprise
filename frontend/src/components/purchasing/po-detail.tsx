@@ -22,6 +22,7 @@ export function PoDetail({ id }: { id: number }) {
   const po = useQuery({ queryKey: key, queryFn: () => api.get<PurchaseOrder>(`/purchasing/orders/${id}`) });
   const org = useQuery({ queryKey: ["pos", "settings"], queryFn: () => api.get<PosSettings>("/pos/settings"), staleTime: 5 * 60_000 });
   const [recv, setRecv] = useState<Record<number, string>>({});
+  const [exp, setExp] = useState<Record<number, string>>({});
   const [onlyDiff, setOnlyDiff] = useState(false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -53,7 +54,9 @@ export function PoDetail({ id }: { id: number }) {
     setBusy(what);
     try {
       if (what === "receive") {
-        const list = items.map((i) => ({ productId: i.productId, quantity: val(i) ?? 0 })).filter((x) => x.quantity > 0);
+        const list = items
+          .map((i) => ({ productId: i.productId, quantity: val(i) ?? 0, ...(exp[i.productId] ? { expiryDate: exp[i.productId] } : {}) }))
+          .filter((x) => x.quantity > 0);
         await api.post(`/purchasing/orders/${id}/receive`, { items: list.length ? list : [{ productId: items[0].productId, quantity: 0 }], close });
         toast.success(close ? "รับของและปิดใบสั่งซื้อแล้ว" : "รับของเข้าสต๊อกแล้ว");
         setRecv({});
@@ -194,6 +197,16 @@ export function PoDetail({ id }: { id: number }) {
                           className={cn("ml-auto h-8 w-20 text-right", v !== null && v !== left && "border-warning", v !== null && v > left && "border-danger")}
                           aria-label={`รับ ${i.name}`}
                         />
+                        {i.trackExpiry && (
+                          <Input
+                            type="date"
+                            value={exp[i.productId] ?? ""}
+                            onChange={(e) => setExp((x) => ({ ...x, [i.productId]: e.target.value }))}
+                            className={cn("ml-auto mt-1 h-8 w-36", i.shelfLifeDays == null && (val(i) ?? 0) > 0 && !exp[i.productId] && "border-danger")}
+                            title={i.shelfLifeDays != null ? `เว้นว่าง = วันนี้ + ${i.shelfLifeDays} วัน` : "ต้องใส่วันหมดอายุ"}
+                            aria-label={`วันหมดอายุ ${i.name}`}
+                          />
+                        )}
                       </td>
                     )}
                   </tr>

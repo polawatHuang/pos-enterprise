@@ -27,6 +27,8 @@ const schema = z.object({
   reorderPoint: num("กรุณากรอกจุดสั่งซื้อ"),
   supplierId: z.string(),
   packSize: z.string().trim().refine((v) => v === "" || Number(v) > 0, "ต้องมากกว่า 0"),
+  trackExpiry: z.boolean(),
+  shelfLifeDays: z.string().trim().refine((v) => v === "" || (Number.isInteger(Number(v)) && Number(v) >= 0), "ต้องเป็นจำนวนวัน"),
   status: z.enum(["active", "draft", "archived"]),
   description: z.string().max(5000),
   sellingPoints: z.string().max(5000),
@@ -63,6 +65,8 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
       reorderPoint: product ? String(product.reorderPoint) : "5",
       supplierId: product?.supplierId ? String(product.supplierId) : "",
       packSize: product ? String(product.packSize ?? 1) : "1",
+      trackExpiry: product?.trackExpiry ?? false,
+      shelfLifeDays: product?.shelfLifeDays != null ? String(product.shelfLifeDays) : "",
       status: product?.status ?? "active",
       description: product?.description ?? "",
       sellingPoints: product?.sellingPoints ?? "",
@@ -88,6 +92,8 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
       reorderPoint: Number(v.reorderPoint),
       supplierId: v.supplierId ? Number(v.supplierId) : null,
       packSize: Number(v.packSize) || 1,
+      trackExpiry: v.trackExpiry,
+      shelfLifeDays: v.shelfLifeDays === "" ? null : Number(v.shelfLifeDays),
       status: v.status,
       description: v.description || null,
       sellingPoints: v.sellingPoints || null,
@@ -159,6 +165,12 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
           <Field label="สั่งทีละ (จำนวนต่อแพ็กที่ผู้ขายส่ง)" error={errors.packSize?.message}>
             <Input inputMode="decimal" {...register("packSize")} />
           </Field>
+          <Field label="อายุสินค้า (วัน) — ใช้เติมวันหมดอายุตอนรับของ" error={errors.shelfLifeDays?.message}>
+            <Input inputMode="numeric" placeholder="เช่น 7" {...register("shelfLifeDays")} />
+          </Field>
+          <label className="flex items-center gap-2 self-end rounded-lg border border-border px-3 py-2.5 text-sm">
+            <input type="checkbox" {...register("trackExpiry")} /> ติดตามวันหมดอายุ (ขายล็อตที่หมดก่อนออกก่อน)
+          </label>
           <Field label="สถานะ">
             <NativeSelect className="h-10 w-full" {...register("status")}>
               <option value="active">พร้อมขาย</option>

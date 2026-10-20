@@ -12,8 +12,10 @@ const SAFETY = 1.2;
  *   target  = avgDaily x (leadTime + REVIEW_DAYS) x SAFETY, at least reorderPoint + avgDaily x leadTime
  *   suggest = target - onHand - onOrder, capped by max_qty, rounded up to the order multiple (pack size)
  */
-function suggestQty({ avgDaily, leadTime, onHand, onOrder, reorderPoint, maxQty, packSize }) {
-  const target = Math.max(avgDaily * (leadTime + REVIEW_DAYS) * SAFETY, reorderPoint > 0 ? reorderPoint + avgDaily * leadTime : 0);
+function suggestQty({ avgDaily, leadTime, onHand, onOrder, reorderPoint, maxQty, packSize, wasteRate = 0 }) {
+  // Items that keep expiring on the shelf are ordered leaner (at most halved)
+  const lean = 1 - Math.min(Math.max(wasteRate, 0), 0.5);
+  const target = Math.max(avgDaily * (leadTime + REVIEW_DAYS) * SAFETY * lean, reorderPoint > 0 ? reorderPoint + avgDaily * leadTime * lean : 0);
   let need = target - onHand - onOrder;
   if (maxQty != null && maxQty > 0) need = Math.min(need, maxQty - onHand - onOrder);
   if (need <= 0) return 0;
@@ -41,6 +43,15 @@ async function suggestions({ orgId, warehouseId, supplierId = null, onlyNeeded =
     { orgId, warehouseId, supplierId },
   );
   const stats = await salesStats({ orgId, warehouseId, productIds: rows.map((r) => r.id) });
+  const wasteRows = rows.length
+    ? await db.query(
+        `SELECT product_id, -SUM(quantity) AS qty FROM stock_movements
+          WHERE warehouse_id = :warehouseId AND type = 'waste' AND created_at >= UTC_TIMESTAMP() - INTERVAL 28 DAY AND product_id IN (:ids)
+          GROUP BY product_id`,
+        { warehouseId, ids: rows.map((r) => r.id) },
+      )
+    : [];
+  const waste = new Map(wasteRows.map((w) => [w.product_id, Number(w.qty)]));
   const out = rows.map((r) => {
     const st = stats.get(r.id);
     const avgDaily = st?.avgDaily ?? 0;
@@ -49,7 +60,10 @@ async function suggestions({ orgId, warehouseId, supplierId = null, onlyNeeded =
     const reorderPoint = Number(r.reorder_point);
     const leadTime = Number(r.lead_time);
     const packSize = Number(r.pack_size) || 1;
-    const suggested = suggestQty({ avgDaily, leadTime, onHand, onOrder, reorderPoint, maxQty: r.max_qty == null ? null : Number(r.max_qty), packSize });
+    const wasted = waste.get(r.id) ?? 0;
+    const sold28 = st?.sold28 ?? 0;
+    const wasteRate = wasted > 0 ? wasted / (sold28 + wasted) : 0;
+    const suggested = suggestQty({ avgDaily, leadTime, onHand, onOrder, reorderPoint, maxQty: r.max_qty == null ? null : Number(r.max_qty), packSize, wasteRate });
     return {
       productId: r.id,
       sku: r.sku,
@@ -70,12 +84,14 @@ async function suggestions({ orgId, warehouseId, supplierId = null, onlyNeeded =
       spark: st?.daily ?? Array(14).fill(0),
       daysCover: daysCover(onHand + onOrder, avgDaily),
       suggested,
+      wasted28: wasted,
       reason:
-        avgDaily > 0
+        (wasted > 0 ? `ทิ้ง ${wasted} ใน 28 วัน สั่งลดลง ${Math.round(Math.min(wasteRate, 0.5) * 100)}% · ` : '') +
+        (avgDaily > 0
           ? `ขายเฉลี่ย ${avgDaily.toFixed(1)}/วัน × (ส่งของ ${leadTime} + รอบสั่ง ${REVIEW_DAYS} วัน) − มี ${onHand}${onOrder ? ` − กำลังมา ${onOrder}` : ''}`
           : reorderPoint > 0
             ? `ยังไม่มียอดขาย · เติมให้ถึงจุดสั่งซื้อ ${reorderPoint}`
-            : 'ยังไม่มียอดขาย',
+            : 'ยังไม่มียอดขาย'),
     };
   });
   const urgent = (x) => (x.onHand <= 0 ? -1 : (x.daysCover ?? 999));

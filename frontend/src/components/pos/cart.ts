@@ -21,7 +21,17 @@ export const unitPrice = (line: Pick<CartLine, "item" | "unitId">) => unitOf(lin
 export const unitName = (line: Pick<CartLine, "item" | "unitId">) => unitOf(line)?.name ?? line.item.unit;
 /** Base units (pieces) this line takes from stock. */
 export const baseQty = (line: Pick<CartLine, "item" | "unitId" | "quantity">) => line.quantity * (unitOf(line)?.factor ?? 1);
-export const lineTotal = (line: CartLine) => r2(unitPrice(line) * line.quantity - line.discount);
+/**
+ * Near-expiry markdown the till applies automatically (server is the authority: it allocates
+ * first-expiry-first-out and may differ slightly when one product sits on several cart lines).
+ */
+export function lineMarkdown(line: Pick<CartLine, "item" | "unitId" | "quantity">) {
+  const md = line.item.markdown;
+  if (!md) return 0;
+  const factor = unitOf(line)?.factor ?? 1;
+  return r2((Math.min(baseQty(line), md.qty) * (unitPrice(line) / factor) * md.pct) / 100);
+}
+export const lineTotal = (line: CartLine) => r2(unitPrice(line) * line.quantity - line.discount - lineMarkdown(line));
 
 /** Mirrors the server: VAT is extracted from VAT-inclusive prices after spreading bill-level discounts. */
 export function totalsOf(lines: CartLine[], billDiscount: number, pointsDiscount = 0) {

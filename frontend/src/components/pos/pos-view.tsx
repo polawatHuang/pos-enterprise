@@ -34,7 +34,7 @@ import { Badge, Card, Input, Skeleton } from "@/components/ui/primitives";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
 import { useCategories } from "@/components/products/product-form";
 import { BillsDialog } from "./bills-dialog";
-import { baseQty, blockedNow, type CartLine, lineKey, lineTotal, nowHHMM, r2, totalsOf, unitName, unitPrice } from "./cart";
+import { baseQty, blockedNow, type CartLine, lineKey, lineMarkdown, lineTotal, nowHHMM, r2, totalsOf, unitName, unitPrice } from "./cart";
 import { type DisplayMessage, openDisplayChannel } from "./display-channel";
 import { toggleFavorite, useFavorites } from "./favorites";
 import { HELD_KEY, HeldDialog } from "./held-dialog";
@@ -529,6 +529,7 @@ export function PosView() {
                       {l.unitId && <Badge tone="primary" className="mr-1 px-1.5 py-0 text-[10px]">{unitName(l)}</Badge>}
                       {formatMoney(unitPrice(l))}
                       {l.discount > 0 && <span className="text-danger"> · ลด {formatMoney(l.discount)}</span>}
+                      {lineMarkdown(l) > 0 && <span className="text-success"> · ลดใกล้หมดอายุ {l.item.markdown?.pct}%</span>}
                       {l.item.ageRestricted && <span className="text-warning"> · 20+</span>}
                     </p>
                   </div>
@@ -769,6 +770,11 @@ function ProductTile({
       >
         <Star className={cn("size-4", favorite ? "fill-warning text-warning" : "text-muted-foreground")} />
       </button>
+      {item.markdown && !out && (
+        <span className="pointer-events-none absolute -top-2 left-3 rounded-full bg-success px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
+          ลด {item.markdown.pct}% ใกล้หมดอายุ
+        </span>
+      )}
       {inCart > 0 && (
         <span className="absolute right-2 top-2 grid min-w-6 place-items-center rounded-full bg-primary px-1.5 py-0.5 text-xs font-semibold text-primary-foreground">
           {formatNumber(inCart)}

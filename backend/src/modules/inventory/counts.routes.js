@@ -8,6 +8,7 @@ const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
 const { badRequest, conflict, notFound } = require('../../core/errors');
 const { applyMovement, getWarehouse } = require('./inventory.service');
+const { addLot, consumeFefo } = require('./lots');
 const { postJournal, ACC } = require('../accounting/ledger.service');
 const { localDate } = require('../../utils/dates');
 
@@ -361,6 +362,12 @@ router.post('/:id/approve', requirePermission('inventory:approve'), validate({ p
         userId: req.user.id,
         allowNegative: true,
       });
+      // Missing units leave the earliest lots; extra found units go on a lot without a date
+      if (i.variance < 0) await consumeFefo(conn, { warehouseId: c.warehouse_id, productId: i.productId, qty: -i.variance });
+      else {
+        const [[t]] = await conn.query('SELECT track_expiry FROM products WHERE id = :id', { id: i.productId });
+        if (t?.track_expiry) await addLot(conn, { orgId, warehouseId: c.warehouse_id, productId: i.productId, qty: i.variance, unitCost: i.unitCost });
+      }
       if (i.value > 0) gain += i.value;
       else loss -= i.value;
     }
