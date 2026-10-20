@@ -4,10 +4,11 @@ import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Dialog } from "radix-ui";
-import { AlertTriangle, Loader2, Menu, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
+import { AlertTriangle, Loader2, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { SheetContent } from "@/components/ui/overlays";
 import { Brand, SidebarNav } from "./sidebar-nav";
+import { SearchTrigger } from "./command-palette";
 import { NotificationBell } from "./notification-bell";
 import { ThemeToggle, UserMenu } from "./user-menu";
 import { findNavItem } from "@/config/nav";
@@ -96,18 +97,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             <Menu className="size-5" />
           </button>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-muted-foreground lg:hidden">{current?.label ?? "POS Enterprise"}</p>
-            <div className="hidden max-w-md items-center gap-2 rounded-lg border border-border bg-card px-3 lg:flex">
-              <Search className="size-4 text-muted-foreground" />
-              <input
-                type="search"
-                placeholder="ค้นหาสินค้า ออร์เดอร์ ลูกค้า... (เร็วๆ นี้)"
-                aria-label="ค้นหา"
-                disabled
-                className="h-9 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
-              />
-            </div>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <p className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground lg:hidden">{current?.label ?? "POS Enterprise"}</p>
+            <SearchTrigger />
           </div>
           <NotificationBell />
           <ThemeToggle />

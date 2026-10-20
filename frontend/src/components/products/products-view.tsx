@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { apiFetch } from "@/lib/api";
@@ -26,7 +26,9 @@ export function ProductsView() {
   const router = useRouter();
   const { can } = useAuth();
   const categories = useCategories();
-  const [q, setQ] = useState("");
+  // The global search "ดูทั้งหมด" opens this page with ?q=
+  const searchParams = useSearchParams();
+  const [q, setQ] = useState(searchParams.get("q") ?? "");
   const [categoryId, setCategoryId] = useState("");
   const [status, setStatus] = useState("all");
   const [lowStock, setLowStock] = useState(false);

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { apiFetch } from "@/lib/api";
@@ -20,7 +20,9 @@ export function DocumentsView() {
   const router = useRouter();
   const [docType, setDocType] = useState<DocType | "">("");
   const [status, setStatus] = useState("");
-  const [q, setQ] = useState("");
+  // The global search "ดูทั้งหมด" opens this page with ?q=
+  const searchParams = useSearchParams();
+  const [q, setQ] = useState(searchParams.get("q") ?? "");
   const [page, setPage] = useState(1);
   const query = { docType, status, q, page, pageSize: 25 };
   const list = useQuery({
