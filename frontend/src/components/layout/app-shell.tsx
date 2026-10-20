@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Dialog } from "radix-ui";
-import { AlertTriangle, Loader2, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { AlertTriangle, Loader2, Menu, RefreshCw, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { SheetContent } from "@/components/ui/overlays";
 import { Brand, SidebarNav } from "./sidebar-nav";
@@ -12,12 +12,13 @@ import { SearchTrigger } from "./command-palette";
 import { NotificationBell } from "./notification-bell";
 import { ThemeToggle, UserMenu } from "./user-menu";
 import { findNavItem } from "@/config/nav";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const COLLAPSE_KEY = "pe.sidebar.collapsed";
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isError, retry } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -29,6 +30,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       return false; // storage unavailable (private mode)
     }
   });
+
+  // Wake the backend as early as possible: a host that idles the app (Plesk) starts it on this
+  // request, while the data queries below retry until it answers.
+  useEffect(() => {
+    api.get("/health").catch(() => {});
+  }, []);
 
   // Close the drawer if this shell is hidden by Activity
   useLayoutEffect(() => () => setMobileOpen(false), []);
@@ -48,6 +55,24 @@ export function AppShell({ children }: { children: ReactNode }) {
       return !c;
     });
   };
+
+  if (!user && isError) {
+    return (
+      <div className="grid min-h-dvh place-items-center px-4">
+        <div className="max-w-sm text-center">
+          <AlertTriangle className="mx-auto size-8 text-warning" />
+          <p className="mt-3 font-medium">เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ</p>
+          <p className="mt-1 text-sm text-muted-foreground">เซิร์ฟเวอร์อาจกำลังเริ่มทำงาน หรืออินเทอร์เน็ตขัดข้อง</p>
+          <button
+            onClick={retry}
+            className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
+          >
+            <RefreshCw className="size-4" /> ลองใหม่
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading || !user) {
     return (

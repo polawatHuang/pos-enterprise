@@ -164,6 +164,15 @@ https://api.example.com/internal/cron/tick?key=<CRON_SECRET>
 | จำกัดจำนวน connection MySQL ต่อ user | API ล่มเมื่อ traffic สูง | `DB_CONNECTION_LIMIT=5` (ปรับตามแพ็กเกจ) |
 | ไม่มี Redis | rate limit/cache แบบกระจาย | rate limit แบบ in-memory ต่อ process (พอสำหรับโปรเซสเดียว) |
 
+### กันแอปหลับ (โหลดหน้าแรกช้า/ไม่มีข้อมูล)
+Passenger ปิดแอปเมื่อไม่มีคนใช้สักพัก ทำให้คนแรกที่เปิดเว็บต้องรอแอปเริ่มใหม่ (หลายวินาที) และ MySQL ของ host ก็ตัด connection ที่ว่างนาน
+- ฝั่งโค้ดรองรับแล้ว:
+  - frontend retry อัตโนมัติ 4 ครั้ง (0.5 → 1 → 2 → 4 วินาที) และยิง `/api/health` ปลุก backend ตั้งแต่เปิดหน้า
+  - backend ปิด connection ที่ว่างเกิน 20 วินาทีเอง และลองคำสั่งอ่านซ้ำ 1 ครั้งเมื่อ connection หลุด
+- **แนะนำเพิ่ม** ให้แอปไม่หลับเลย ทำได้ทางใดทางหนึ่ง:
+  1. ใช้ uptime monitor ฟรี เช่น [UptimeRobot](https://uptimerobot.com) → Add New Monitor → HTTP(s) → URL `https://<โดเมน backend>/api/health` → ทุก 5 นาที (ได้แจ้งเตือนทางอีเมลเมื่อ backend ล่มด้วย)
+  2. หรือใน Plesk → Scheduled Tasks เพิ่มงาน **Fetch a URL** ไปที่ `/api/health` ทุก 5 นาที
+
 **เมื่อธุรกิจโตขึ้น:** ย้าย backend ไป VPS/Cloud Server (Atom มีให้) แล้วตั้ง `JOB_RUNNER=inprocess` + รันด้วย PM2 — โค้ดไม่ต้องแก้
 
 ## Troubleshooting
@@ -176,6 +185,7 @@ https://api.example.com/internal/cron/tick?key=<CRON_SECRET>
 | `/api/health` ได้ **503** `DEPENDENCIES_MISSING` | ยังไม่ได้ติดตั้งแพ็กเกจ — กด **NPM install** แล้ว Restart App |
 | Plesk เตือนเรื่อง Document Root | ตั้ง Document Root เป็น `<Application Root>/public` ห้ามชี้ที่ Application Root เพราะไฟล์อย่าง `.env` / `package.json` อาจถูกเปิดจากเว็บได้ |
 | `/api/health` ได้ `database: error` | ดู `databaseError` + `hint` ในผลลัพธ์: `ER_ACCESS_DENIED_ERROR` = user/รหัสผ่านผิดหรือ user ไม่มีสิทธิ์ในฐาน, `ER_BAD_DB_ERROR` = `DB_NAME` ผิด (ต้องรวม prefix), `ECONNREFUSED`/`ENOTFOUND` = ใช้ `DB_HOST=localhost` `DB_PORT=3306` — แก้แล้ว Restart App |
+| เปิดหน้าแรกไม่มีข้อมูล ต้องกด refresh | แอปหลับหรือ connection DB ค้าง: ตั้ง uptime ping ตามหัวข้อ "กันแอปหลับ" ด้านบน — ถ้ายังเป็น เปิด DevTools → Network ดู status ของ request `/api/...` ที่ล้ม (502/503/504 = แอปเริ่มไม่ทัน, 500 = ดู log ของแอป) |
 | login สำเร็จแต่เด้งกลับหน้า login | `COOKIE_SECURE=true` แต่ใช้ http, หรือเรียก API ตรงโดยไม่ได้ตั้ง `COOKIE_DOMAIN` — ใช้ rewrite ของ Vercel ตามค่าเริ่มต้น |
 | CORS error ใน console | เพิ่มโดเมน frontend ใน `CORS_ORIGINS` แล้ว Restart App |
 | แก้โค้ดแล้วไม่เปลี่ยน | กด **Restart App** หลัง deploy ทุกครั้ง (หรือ `touch tmp/restart.txt` ในโฟลเดอร์ backend) |
