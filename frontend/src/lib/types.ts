@@ -218,11 +218,89 @@ export interface StockLevel {
   cost: number;
   price: number;
   reorderPoint: number;
+  reorderOverride: boolean;
+  maxQty: number | null;
   quantity: number;
   value: number;
+  avgDaily: number;
+  sold7: number;
+  daysCover: number | null;
+  lastSoldAt: string | null;
+  /** units sold per day, oldest first (14 days) */
+  spark: number[];
+  status: StockStatus;
 }
 
-export type MovementType = "purchase" | "sale" | "return" | "adjustment" | "transfer_in" | "transfer_out" | "opening";
+export type StockStatus = "out" | "low" | "slow" | "ok";
+
+export type MovementType = "purchase" | "sale" | "return" | "adjustment" | "transfer_in" | "transfer_out" | "opening" | "count" | "waste";
+
+export type StockCountStatus = "counting" | "review" | "approved" | "cancelled";
+
+export interface StockCount {
+  id: number;
+  countNo: string;
+  warehouseId: number;
+  warehouseName: string;
+  scope: "full" | "category";
+  categoryId: number | null;
+  categoryName: string | null;
+  blind: boolean;
+  status: StockCountStatus;
+  note: string | null;
+  createdBy: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  createdAt: string;
+  totalItems?: number;
+  countedItems?: number;
+}
+
+export interface StockCountItem {
+  productId: number;
+  sku: string;
+  barcode: string | null;
+  name: string;
+  unit: string;
+  /** null for counters on a blind count */
+  snapshot: number | null;
+  movedDuringCount: number | null;
+  expected: number | null;
+  counted: number | null;
+  variance: number | null;
+  value: number | null;
+  unitCost: number;
+  reason: string | null;
+  countedBy: string | null;
+  countedAt: string | null;
+  needsReason: boolean;
+}
+
+export interface StockCountDetail extends StockCount {
+  canApprove: boolean;
+  total: number;
+  counted: number;
+  diffItems: number | null;
+  gainValue: number | null;
+  lossValue: number | null;
+  items: StockCountItem[];
+}
+
+export interface AppNotification {
+  id: number;
+  type: string;
+  severity: "info" | "warning" | "danger";
+  title: string;
+  body: string | null;
+  link: string | null;
+  createdAt: string;
+  read: boolean;
+}
+
+export interface NotifySettings {
+  line: { enabled: boolean; to: string[]; digestTime: string };
+  lineTargets: { id: string; name: string; lastMessageAt: string | null }[];
+}
 
 export interface StockMovement {
   id: number;

@@ -31,6 +31,12 @@ export function SidebarNav({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  // The most specific matching item wins (/inventory/counts must not also light up /inventory)
+  const matches = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const best = navGroups
+    .flatMap((g) => g.items.map((i) => i.href))
+    .filter(matches)
+    .sort((a, b) => b.length - a.length)[0];
   const groups = navGroups
     .map((g) => ({ ...g, items: g.items.filter((i) => permissions.includes(i.permission)) }))
     .filter((g) => g.items.length > 0);
@@ -44,7 +50,7 @@ export function SidebarNav({
           )}
           <ul className="space-y-0.5">
             {group.items.map((item) => {
-              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+              const active = item.href === best;
               const Icon = item.icon;
               return (
                 <li key={item.href}>

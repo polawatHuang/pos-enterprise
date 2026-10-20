@@ -4,6 +4,7 @@ import {
   Boxes,
   Calculator,
   CalendarClock,
+  ClipboardList,
   FileText,
   Landmark,
   Wallet,
@@ -50,6 +51,7 @@ export const navGroups: NavGroup[] = [
       { href: "/pos", label: "ขายหน้าร้าน (POS)", icon: ShoppingCart, permission: "pos:sell", phase: 1 },
       { href: "/products", label: "สินค้า", icon: Package, permission: "products:read", phase: 1 },
       { href: "/inventory", label: "สต๊อกสินค้า", icon: Boxes, permission: "inventory:read", phase: 1 },
+      { href: "/inventory/counts", label: "ตรวจนับสต๊อก", icon: ClipboardList, permission: "inventory:count", phase: 1 },
     ],
   },
   {

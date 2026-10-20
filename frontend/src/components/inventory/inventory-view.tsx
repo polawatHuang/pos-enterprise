@@ -1,25 +1,31 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowLeftRight, ClipboardCheck, PackagePlus, Search, Warehouse as WarehouseIcon } from "lucide-react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeftRight, BellRing, ClipboardCheck, ClipboardList, PackagePlus, Search, Warehouse as WarehouseIcon } from "lucide-react";
+import { toast } from "sonner";
 import { api, apiFetch } from "@/lib/api";
-import type { MovementType, Paged, StockLevel, StockMovement, Warehouse } from "@/lib/types";
-import { formatCompact, formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
+import type { MovementType, Paged, StockLevel, StockMovement, StockStatus, Warehouse } from "@/lib/types";
+import { cn, formatCompact, formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, NativeSelect, Pagination, Skeleton, TabBar } from "@/components/ui/primitives";
 import { Dialog } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
+import { Sparkline } from "@/components/common/sparkline";
+import { AlertSettingsDialog } from "./alert-settings";
 import { MOVEMENT_META, MovementTypeBadge } from "./movement-badge";
 import { AdjustDialog, MultiLineStockDialog, type StockAction } from "./stock-dialogs";
 
 export function InventoryView() {
   const { can } = useAuth();
   const [tab, setTab] = useState<"levels" | "movements">("levels");
-  const [warehouseId, setWarehouseId] = useState("");
-  const [action, setAction] = useState<StockAction | null>(null);
+  // Links from stock alerts open the right warehouse and filter (e.g. /inventory?warehouseId=2&status=low)
+  const params = useSearchParams();
+  const [warehouseId, setWarehouseId] = useState(params.get("warehouseId") ?? "");
+  const [action, setAction] = useState<StockAction | "alerts" | null>(null);
   const warehouses = useQuery({ queryKey: ["inventory", "warehouses"], queryFn: () => api.get<Warehouse[]>("/inventory/warehouses") });
   const whs = warehouses.data ?? [];
   const totalValue = whs.reduce((s, w) => s + w.stockValue, 0);
@@ -28,9 +34,22 @@ export function InventoryView() {
     <>
       <PageHeader
         title="สต๊อกสินค้า"
-        description="คงเหลือแยกคลัง ประวัติการเคลื่อนไหว รับเข้า ปรับยอด และโอนย้าย"
+        description="คงเหลือแยกคลัง ยอดขายต่อวัน พอขายอีกกี่วัน ประวัติการเคลื่อนไหว รับเข้า ปรับยอด และโอนย้าย"
         actions={
-          can("inventory:write") && (
+          <>
+            {can("inventory:count") && (
+              <Button variant="outline" asChild>
+                <Link href="/inventory/counts">
+                  <ClipboardList /> ตรวจนับสต๊อก
+                </Link>
+              </Button>
+            )}
+            {can("inventory:write") && (
+              <Button variant="outline" onClick={() => setAction("alerts")}>
+                <BellRing /> แจ้งเตือน
+              </Button>
+            )}
+            {can("inventory:write") && (
             <>
               <Button variant="outline" onClick={() => setAction("adjust")}>
                 <ClipboardCheck /> ปรับยอด
@@ -42,7 +61,8 @@ export function InventoryView() {
                 <PackagePlus /> รับสินค้าเข้า
               </Button>
             </>
-          )
+            )}
+          </>
         }
       />
 
@@ -80,10 +100,21 @@ export function InventoryView() {
             ]}
           />
         </div>
-        {tab === "levels" ? <LevelsTable warehouseId={warehouseId} warehouses={whs} onWarehouse={setWarehouseId} /> : <MovementsTable warehouseId={warehouseId} />}
+        {tab === "levels" ? (
+          <LevelsTable
+            warehouseId={warehouseId}
+            warehouses={whs}
+            onWarehouse={setWarehouseId}
+            initialStatus={(params.get("status") as StatusFilter | null) ?? ""}
+            editable={can("inventory:write")}
+          />
+        ) : (
+          <MovementsTable warehouseId={warehouseId} />
+        )}
       </Card>
 
       <Dialog open={action !== null} onOpenChange={(o) => !o && setAction(null)}>
+        {action === "alerts" && <AlertSettingsDialog onDone={() => setAction(null)} />}
         {action === "adjust" && <AdjustDialog warehouses={whs} onDone={() => setAction(null)} />}
         {(action === "receive" || action === "transfer") && <MultiLineStockDialog action={action} warehouses={whs} onDone={() => setAction(null)} />}
       </Dialog>
@@ -91,21 +122,55 @@ export function InventoryView() {
   );
 }
 
-function LevelsTable({ warehouseId, warehouses, onWarehouse }: { warehouseId: string; warehouses: Warehouse[]; onWarehouse: (v: string) => void }) {
+type StatusFilter = "" | "out" | "low";
+const STATUS_META: Record<StockStatus, { label: string; tone: "danger" | "warning" | "neutral" | "success" }> = {
+  out: { label: "หมด", tone: "danger" },
+  low: { label: "ใกล้หมด", tone: "warning" },
+  slow: { label: "ขายไม่ออก", tone: "neutral" },
+  ok: { label: "ปกติ", tone: "success" },
+};
+
+function LevelsTable({
+  warehouseId,
+  warehouses,
+  onWarehouse,
+  initialStatus,
+  editable,
+}: {
+  warehouseId: string;
+  warehouses: Warehouse[];
+  onWarehouse: (v: string) => void;
+  initialStatus: StatusFilter;
+  editable: boolean;
+}) {
+  const qc = useQueryClient();
   const [q, setQ] = useState("");
-  const [low, setLow] = useState(false);
+  const [status, setStatus] = useState<StatusFilter>(initialStatus);
   const [page, setPage] = useState(1);
-  const query = { warehouseId, q, lowStock: low ? "true" : undefined, page, pageSize: 50 };
+  const query = { warehouseId, q, status: status || undefined, page, pageSize: 50 };
   const levels = useQuery({
     queryKey: ["inventory", "levels", query],
     queryFn: () => apiFetch<Paged<StockLevel>>("/inventory/levels", { query }),
     placeholderData: keepPreviousData,
   });
 
+  const saveReorder = async (l: StockLevel, value: string) => {
+    const n = value === "" ? null : Number(value);
+    if (n !== null && (!Number.isFinite(n) || n < 0)) return;
+    if (n === l.reorderPoint) return;
+    try {
+      await api.patch("/inventory/levels", { warehouseId: Number(warehouseId), productId: l.productId, reorderPoint: n });
+      toast.success(`ตั้งจุดสั่งซื้อ ${l.name} แล้ว`);
+      void qc.invalidateQueries({ queryKey: ["inventory", "levels"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
+    }
+  };
+
   return (
     <>
-      <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
-        <div className="relative w-full sm:max-w-xs">
+      <div className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center">
+        <div className="relative w-full lg:max-w-xs">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={q}
@@ -126,18 +191,31 @@ function LevelsTable({ warehouseId, warehouses, onWarehouse }: { warehouseId: st
             </option>
           ))}
         </NativeSelect>
-        <label className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm">
-          <input
-            type="checkbox"
-            checked={low}
-            onChange={(e) => {
-              setLow(e.target.checked);
-              setPage(1);
-            }}
-            className="accent-[var(--primary)]"
-          />
-          เฉพาะต่ำกว่าจุดสั่งซื้อ
-        </label>
+        <div className="flex gap-1.5" role="radiogroup" aria-label="สถานะสต๊อก">
+          {(
+            [
+              ["", "ทั้งหมด"],
+              ["low", "ต่ำกว่าจุดสั่งซื้อ"],
+              ["out", "หมด"],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={v}
+              role="radio"
+              aria-checked={status === v}
+              onClick={() => {
+                setStatus(v);
+                setPage(1);
+              }}
+              className={cn(
+                "h-9 rounded-lg border px-3 text-sm",
+                status === v ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:bg-accent",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
       {levels.isPending ? (
         <div className="space-y-2 px-4 pb-4">
@@ -147,41 +225,72 @@ function LevelsTable({ warehouseId, warehouses, onWarehouse }: { warehouseId: st
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] text-sm">
+          <table className="w-full min-w-[900px] text-sm">
             <thead>
               <tr className="border-y border-border text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3 font-medium">สินค้า</th>
                 <th className="px-4 py-3 text-right font-medium">คงเหลือ</th>
+                <th className="px-4 py-3 font-medium">ยอดขาย 14 วัน</th>
+                <th className="px-4 py-3 text-right font-medium">ขาย/วัน</th>
+                <th className="px-4 py-3 text-right font-medium">พอขายอีก</th>
                 <th className="px-4 py-3 text-right font-medium">จุดสั่งซื้อ</th>
-                <th className="px-4 py-3 text-right font-medium">ต้นทุน/หน่วย</th>
                 <th className="px-4 py-3 text-right font-medium">มูลค่า</th>
               </tr>
             </thead>
             <tbody>
               {levels.data?.data.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-muted-foreground">
+                  <td colSpan={7} className="py-12 text-center text-muted-foreground">
                     ไม่พบรายการ
                   </td>
                 </tr>
               )}
               {levels.data?.data.map((l) => {
-                const isLow = l.quantity <= l.reorderPoint;
+                const meta = STATUS_META[l.status];
                 return (
                   <tr key={l.productId} className="border-b border-border last:border-0 hover:bg-muted/40">
                     <td className="px-4 py-3">
                       <Link href={`/products/${l.productId}`} className="font-medium hover:text-primary">
                         {l.name}
                       </Link>
-                      <p className="text-xs text-muted-foreground">{l.sku}</p>
+                      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        {l.sku}
+                        {l.status !== "ok" && <Badge tone={meta.tone} className="px-1.5 py-0 text-[10px]">{meta.label}</Badge>}
+                      </p>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Badge tone={l.quantity <= 0 ? "danger" : isLow ? "warning" : "neutral"}>
+                      <Badge tone={l.status === "out" ? "danger" : l.status === "low" ? "warning" : "neutral"}>
                         {formatNumber(l.quantity)} {l.unit}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{formatNumber(l.reorderPoint)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{formatMoney(l.cost)}</td>
+                    <td className="px-4 py-3">
+                      <Sparkline values={l.spark} />
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">{l.avgDaily ? l.avgDaily.toFixed(1) : "–"}</td>
+                    <td
+                      className={cn(
+                        "px-4 py-3 text-right font-medium tabular-nums",
+                        l.daysCover !== null && l.daysCover < 3 ? "text-danger" : l.daysCover !== null && l.daysCover < 7 ? "text-warning" : "",
+                      )}
+                    >
+                      {l.daysCover === null ? "–" : `${formatNumber(l.daysCover)} วัน`}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                      {editable && warehouseId ? (
+                        <Input
+                          key={`${l.productId}-${l.reorderPoint}`}
+                          defaultValue={l.reorderPoint}
+                          inputMode="numeric"
+                          onBlur={(e) => void saveReorder(l, e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                          className={cn("ml-auto h-8 w-20 text-right", l.reorderOverride && "border-primary")}
+                          aria-label={`จุดสั่งซื้อ ${l.name}`}
+                          title={l.reorderOverride ? "ตั้งเฉพาะคลังนี้" : "ใช้ค่าตั้งต้นของสินค้า"}
+                        />
+                      ) : (
+                        formatNumber(l.reorderPoint)
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right font-medium tabular-nums">{formatMoney(l.value)}</td>
                   </tr>
                 );
@@ -190,6 +299,7 @@ function LevelsTable({ warehouseId, warehouses, onWarehouse }: { warehouseId: st
           </table>
         </div>
       )}
+      {editable && !warehouseId && <p className="px-4 pb-2 text-xs text-muted-foreground">เลือกคลังเพื่อตั้งจุดสั่งซื้อเฉพาะคลังนั้นได้ในตาราง</p>}
       {levels.data && <Pagination {...levels.data.meta} onChange={setPage} />}
     </>
   );

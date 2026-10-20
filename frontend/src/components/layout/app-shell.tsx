@@ -8,6 +8,7 @@ import { AlertTriangle, Loader2, Menu, PanelLeftClose, PanelLeftOpen, Search } f
 import { useAuth } from "@/components/auth/auth-provider";
 import { SheetContent } from "@/components/ui/overlays";
 import { Brand, SidebarNav } from "./sidebar-nav";
+import { NotificationBell } from "./notification-bell";
 import { ThemeToggle, UserMenu } from "./user-menu";
 import { findNavItem } from "@/config/nav";
 import { cn } from "@/lib/utils";
@@ -108,6 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               />
             </div>
           </div>
+          <NotificationBell />
           <ThemeToggle />
           <UserMenu />
         </header>
