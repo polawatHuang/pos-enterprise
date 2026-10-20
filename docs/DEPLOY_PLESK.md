@@ -28,7 +28,7 @@ Webhooks (Meta / LINE / TikTok) ────────────────
 3. แท็บ **Import** → เลือกไฟล์ `database/schema.sql` → Character set `utf-8` → **Import**
 4. ทำซ้ำกับ `database/seed.sql` (ข้อมูลอ้างอิง + ข้อมูลตัวอย่าง)
 
-**อัปเกรดจากเวอร์ชันก่อน (ติดตั้งไว้ตั้งแต่เฟส 1–2):** ห้าม import `schema.sql` ซ้ำ ให้ import ไฟล์ใน `database/migrations/` ที่ยังไม่เคยรันทีละไฟล์ตามลำดับเลขแทน เช่น `002_accounting.sql` สำหรับเฟส 3 `003_inbox.sql` สำหรับเฟส 4 `004_trends.sql` สำหรับเฟส 5 `005_video.sql` สำหรับเฟส 6 `006_social.sql` สำหรับเฟส 7 `007_trend_lifecycle.sql` สำหรับระบบ Phase/เช็กลิสต์สินค้าเทรนด์ `008_ai_search.sql` สำหรับปุ่ม AI ค้นหาสินค้าขายดี และ `009_covers.sql` สำหรับหน้า AI ปกคลิป ตรวจว่ารันไฟล์ไหนไปแล้วได้ด้วย `SELECT * FROM schema_migrations;` (การติดตั้งใหม่ที่ใช้ `schema.sql` ปัจจุบันมี migration ครบแล้ว)
+**อัปเกรดจากเวอร์ชันก่อน (ติดตั้งไว้ตั้งแต่เฟส 1–2):** ห้าม import `schema.sql` ซ้ำ ให้ import ไฟล์ใน `database/migrations/` ที่ยังไม่เคยรันทีละไฟล์ตามลำดับเลขแทน เช่น `002_accounting.sql` สำหรับเฟส 3 `003_inbox.sql` สำหรับเฟส 4 `004_trends.sql` สำหรับเฟส 5 `005_video.sql` สำหรับเฟส 6 `006_social.sql` สำหรับเฟส 7 `007_trend_lifecycle.sql` สำหรับระบบ Phase/เช็กลิสต์สินค้าเทรนด์ `008_ai_search.sql` สำหรับปุ่ม AI ค้นหาสินค้าขายดี `009_covers.sql` สำหรับหน้า AI ปกคลิป และ `010_video_upgrade.sql` สำหรับ AI Video รุ่นใหม่ (ฟุตเทจของฉัน, hook 3 แบบ, ปกเฟรมแรก) ตรวจว่ารันไฟล์ไหนไปแล้วได้ด้วย `SELECT * FROM schema_migrations;` (การติดตั้งใหม่ที่ใช้ `schema.sql` ปัจจุบันมี migration ครบแล้ว)
 
 > ⚠️ `schema.sql` มี `DROP TABLE IF EXISTS` อยู่ด้านบน — **import ซ้ำ = ข้อมูลหายหมด** ใช้กับการติดตั้งครั้งแรกเท่านั้น การเปลี่ยนโครงสร้างในอนาคตจะมาเป็นไฟล์ `database/migrations/NNN_*.sql` ให้ import ทีละไฟล์ตามลำดับ
 >
@@ -96,12 +96,14 @@ APP_TZ_OFFSET=+07:00
 # AI (MiniMax เป็นค่าเริ่มต้น)
 AI_PROVIDER=minimax
 MINIMAX_API_KEY=<key จาก platform.minimax.io>
-# Inbox webhooks
+# Inbox webhooks + ลิงก์ฟุตเทจ/ปกที่ส่งให้ Shotstack ตัดต่อ (ต้องเป็น HTTPS ที่เข้าจากภายนอกได้)
 PUBLIC_API_URL=https://api.example.com
 LINE_CHANNEL_SECRET=<ถ้าใช้ LINE OA>
 META_APP_SECRET=<ถ้าใช้ Messenger/IG>
 META_WEBHOOK_VERIFY_TOKEN=<ตั้งเองแล้วใส่ค่าเดียวกันใน Meta App>
 ```
+   - ไฟล์ "ฟุตเทจของฉัน" เก็บใน `backend/storage/media` (เปลี่ยนได้ด้วย `MEDIA_DIR`) โฟลเดอร์นี้ต้องอยู่รอดเวลา deploy ใหม่ (อย่าลบตอนอัปโหลดโค้ด) และควรรวมในการสำรองข้อมูล
+   - ถ้าคลิปใหญ่ อาจต้องเพิ่มขนาดอัปโหลดใน Plesk/nginx (`client_max_body_size 64m`) เพราะรับไฟล์ได้สูงสุด 60 MB
    สร้าง secret ได้ด้วย `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` (หรือ `npm run gen-secret` บนเครื่องตัวเอง)
    และ `APP_ENCRYPTION_KEY` ด้วย `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
 4. กด **Restart App**

@@ -24,11 +24,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import type { VideoDetail, VideoScene } from "@/lib/types";
+import type { CaptionStyle, CoverProject, VideoDetail, VideoScene, VideoVisualMode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Input, Label, NativeSelect, Skeleton, Textarea } from "@/components/ui/primitives";
-import { IN_PROGRESS, steps, VIDEO_STATUS } from "./labels";
+import { CAPTION_STYLES, IN_PROGRESS, steps, VIDEO_STATUS, VISUAL_MODES } from "./labels";
+import { MediaPanel } from "./media-panel";
 import { useVideoMeta } from "./videos-view";
 
 export function VideoDetailView({ id }: { id: number }) {
@@ -60,7 +61,11 @@ function Editor({ v }: { v: VideoDetail }) {
   const [scenes, setScenes] = useState<VideoScene[]>(v.scenes);
   const [postCaption, setPostCaption] = useState(v.postCaption ?? "");
   const [hashtags, setHashtags] = useState(v.hashtags ?? "");
-  const [visualMode, setVisualMode] = useState(v.visualMode);
+  const [visualMode, setVisualMode] = useState<VideoVisualMode>(v.visualMode);
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(v.captionStyle);
+  const [coverId, setCoverId] = useState<number | null>(v.coverId);
+  const covers = useQuery({ queryKey: ["covers"], queryFn: () => api.get<CoverProject[]>("/covers") });
+  const portraitCovers = (covers.data ?? []).filter((c) => c.orientation === "portrait" && c.status === "ready");
   const [voiceProvider, setVoiceProvider] = useState(v.voiceProvider);
   const [voiceId, setVoiceId] = useState(v.voiceId ?? "");
   const [busy, setBusy] = useState<string | null>(null);
@@ -71,6 +76,8 @@ function Editor({ v }: { v: VideoDetail }) {
     postCaption !== (v.postCaption ?? "") ||
     hashtags !== (v.hashtags ?? "") ||
     visualMode !== v.visualMode ||
+    captionStyle !== v.captionStyle ||
+    coverId !== v.coverId ||
     voiceProvider !== v.voiceProvider ||
     voiceId !== (v.voiceId ?? "");
   const total = scenes.reduce((n, s) => n + (Number(s.durationSec) || 0), 0);
@@ -97,6 +104,8 @@ function Editor({ v }: { v: VideoDetail }) {
       postCaption: postCaption || null,
       hashtags: hashtags || null,
       visualMode,
+      captionStyle,
+      coverId,
       voiceProvider,
       voiceId: voiceId || null,
     });
@@ -182,12 +191,41 @@ function Editor({ v }: { v: VideoDetail }) {
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="vm">ภาพในคลิป</Label>
-                <NativeSelect id="vm" value={visualMode} onChange={(e) => setVisualMode(e.target.value as typeof visualMode)} disabled={locked}>
-                  <option value="product_images">รูปสินค้า + เคลื่อนไหว</option>
-                  <option value="ai_clips">คลิป AI (MiniMax Hailuo)</option>
+                <NativeSelect id="vm" value={visualMode} onChange={(e) => setVisualMode(e.target.value as VideoVisualMode)} disabled={locked}>
+                  {VISUAL_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.title}
+                    </option>
+                  ))}
                 </NativeSelect>
               </div>
               <div className="flex flex-col gap-1.5">
+                <Label htmlFor="vcs">ซับ</Label>
+                <NativeSelect id="vcs" value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value as CaptionStyle)} disabled={locked}>
+                  {CAPTION_STYLES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="vcover">ปกเป็นเฟรมแรก</Label>
+                <NativeSelect id="vcover" value={coverId ?? ""} onChange={(e) => setCoverId(e.target.value ? Number(e.target.value) : null)} disabled={locked}>
+                  <option value="">ไม่ใช้ปก</option>
+                  {portraitCovers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.headline}
+                    </option>
+                  ))}
+                </NativeSelect>
+                {!portraitCovers.length && (
+                  <Link href="/covers" className="text-[11px] text-primary hover:underline">
+                    สร้างปกแนวตั้งที่หน้า AI ปกคลิป
+                  </Link>
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5 sm:col-span-2">
                 <Label htmlFor="vp">เสียงพากย์</Label>
                 <div className="flex gap-2">
                   <NativeSelect id="vp" value={voiceProvider} onChange={(e) => setVoiceProvider(e.target.value as typeof voiceProvider)} disabled={locked} className="w-auto">
@@ -206,6 +244,56 @@ function Editor({ v }: { v: VideoDetail }) {
               </div>
             </CardContent>
           </Card>
+
+          <MediaPanel projectId={v.id} media={v.media} locked={locked} highlight={visualMode === "my_footage"} />
+
+          {v.hooks.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Hook 3 แบบ</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 pt-0">
+                {v.hooks.map((h, i) => {
+                  const current = scenes[0]?.voiceover === h.voiceover;
+                  return (
+                    <div key={i} className={cn("flex flex-wrap items-center gap-2 rounded-lg border p-2.5 text-sm", current ? "border-primary bg-primary-soft/40" : "border-border")}>
+                      <Badge tone={current ? "primary" : "neutral"}>{h.angle || `แบบ ${i + 1}`}</Badge>
+                      <span className="min-w-0 flex-1">
+                        &quot;{h.voiceover}&quot; <span className="text-xs text-muted-foreground">· {h.caption}</span>
+                      </span>
+                      {current ? (
+                        <span className="text-xs font-medium text-primary">ใช้อยู่</span>
+                      ) : (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={locked || busy !== null}
+                            onClick={() => void run(`hook${i}`, () => api.post(`/videos/${v.id}/hook`, { index: i }), "เปลี่ยน hook แล้ว")}
+                          >
+                            ใช้ hook นี้
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy !== null}
+                            onClick={() =>
+                              void run(`var${i}`, async () => {
+                                const r = await api.post<{ id: number }>(`/videos/${v.id}/variant`, { hookIndex: i });
+                                router.push(`/videos/${r.id}`);
+                              }, "สร้างอีกเวอร์ชันแล้ว — ใช้ทดสอบว่า hook ไหนได้ผลดีกว่า")
+                            }
+                          >
+                            ทำอีกเวอร์ชัน
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
 
           {scenes.map((s, i) => (
             <Card key={i} className="p-4">
@@ -251,6 +339,27 @@ function Editor({ v }: { v: VideoDetail }) {
                   <Input id={`vis-${i}`} value={s.visual} onChange={(e) => update(i, { visual: e.target.value })} disabled={locked || visualMode !== "ai_clips"} maxLength={600} />
                 </div>
               </div>
+              {visualMode === "my_footage" && v.media.length > 0 && (
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  <Label htmlFor={`med-${i}`} className="text-xs text-muted-foreground">
+                    ฟุตเทจเปิดฉาก
+                  </Label>
+                  <NativeSelect
+                    id={`med-${i}`}
+                    value={s.media ?? ""}
+                    onChange={(e) => update(i, { media: e.target.value ? Number(e.target.value) : null })}
+                    disabled={locked}
+                    className="h-8 w-auto text-xs"
+                  >
+                    <option value="">อัตโนมัติ</option>
+                    {v.media.map((m, j) => (
+                      <option key={m.id} value={j + 1}>
+                        {j + 1}. {m.label || (m.kind === "video" ? "คลิป" : "รูป")}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </div>
+              )}
               {visualMode === "ai_clips" && (
                 <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                   <input type="checkbox" checked={s.showProduct} onChange={(e) => update(i, { showProduct: e.target.checked })} disabled={locked} className="size-4 accent-primary" />
@@ -287,7 +396,7 @@ function Editor({ v }: { v: VideoDetail }) {
           <Progress v={v} visualMode={visualMode} />
           <Card>
             <CardContent className="space-y-3 p-4 text-sm">
-              {caps && <Readiness caps={caps} visualMode={visualMode} voiceProvider={voiceProvider} />}
+              {caps && <Readiness caps={caps} visualMode={visualMode} voiceProvider={voiceProvider} needsPublic={visualMode === "my_footage" || coverId !== null} />}
               <Button className="w-full" disabled={locked || busy !== null || !scenes.length || scenes.some((s) => !s.voiceover.trim())} onClick={() => void generate()}>
                 {busy === "gen" || locked ? <Loader2 className="animate-spin" /> : <Sparkles />}
                 {v.status === "ready" || v.status === "parts_ready" ? "สร้างวิดีโอใหม่" : "สร้างวิดีโอ"}
@@ -295,6 +404,7 @@ function Editor({ v }: { v: VideoDetail }) {
               <p className="text-xs text-muted-foreground">
                 ใช้เสียงพากย์ {scenes.length} ช่วง ({scenes.reduce((n, s) => n + s.voiceover.length, 0)} ตัวอักษร)
                 {visualMode === "ai_clips" ? ` และคลิป AI ${scenes.length} คลิป (มีค่าใช้จ่ายต่อคลิป)` : ""} — ระบบมีป้าย &quot;สร้างด้วย AI&quot; ในคลิปตามข้อกำหนดของแพลตฟอร์ม
+                {visualMode === "my_footage" ? " · ฟุตเทจจริงช่วยให้คลิปดูน่าเชื่อถือ และไม่ติดข้อห้ามคอนเทนต์ AI ล้วน" : ""}
               </p>
             </CardContent>
           </Card>
@@ -305,8 +415,21 @@ function Editor({ v }: { v: VideoDetail }) {
   );
 }
 
-function Readiness({ caps, visualMode, voiceProvider }: { caps: NonNullable<ReturnType<typeof useVideoMeta>["data"]>["capabilities"]; visualMode: string; voiceProvider: "minimax" | "elevenlabs" }) {
+function Readiness({
+  caps,
+  visualMode,
+  voiceProvider,
+  needsPublic,
+}: {
+  caps: NonNullable<ReturnType<typeof useVideoMeta>["data"]>["capabilities"];
+  visualMode: string;
+  voiceProvider: "minimax" | "elevenlabs";
+  needsPublic: boolean;
+}) {
   const rows = [
+    ...(needsPublic && caps.publicMedia
+      ? [{ label: "ลิงก์ฟุตเทจ/ปกให้ระบบตัดต่อ", ok: caps.publicMedia.configured, missing: caps.publicMedia.missing, required: visualMode === "my_footage", note: "โดเมน HTTPS ของ backend" }]
+      : []),
     { label: "เสียงพากย์", ok: caps.voice[voiceProvider].configured, missing: caps.voice[voiceProvider].missing, required: true },
     ...(visualMode === "ai_clips" ? [{ label: "คลิป AI", ok: caps.clips.configured, missing: caps.clips.missing, required: true }] : []),
     { label: "ประกอบคลิป (Shotstack)", ok: caps.compose.configured, missing: caps.compose.missing, required: false, note: "ถ้าไม่มี จะได้ชิ้นส่วนไปตัดต่อเอง" },
@@ -327,7 +450,7 @@ function Readiness({ caps, visualMode, voiceProvider }: { caps: NonNullable<Retu
   );
 }
 
-function Progress({ v, visualMode }: { v: VideoDetail; visualMode: "ai_clips" | "product_images" }) {
+function Progress({ v, visualMode }: { v: VideoDetail; visualMode: VideoVisualMode }) {
   const list = steps(visualMode);
   const current = list.findIndex((s) => s.statuses.includes(v.status));
   const failed = v.status === "failed";

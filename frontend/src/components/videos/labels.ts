@@ -1,4 +1,4 @@
-import type { VideoStatus } from "@/lib/types";
+import type { CaptionStyle, VideoStatus, VideoVisualMode } from "@/lib/types";
 
 type Tone = "neutral" | "primary" | "success" | "danger" | "warning";
 
@@ -18,7 +18,7 @@ export const VIDEO_STATUS: Record<VideoStatus, { label: string; tone: Tone }> = 
 export const IN_PROGRESS: VideoStatus[] = ["scripting", "voicing", "generating_clips", "rendering_avatar", "compositing"];
 
 /** Steps shown on the progress rail (AI clips step only when chosen). */
-export function steps(visualMode: "ai_clips" | "product_images") {
+export function steps(visualMode: VideoVisualMode) {
   return [
     { key: "script", label: "สคริปต์", statuses: ["script_ready"] },
     { key: "voice", label: "เสียงพากย์", statuses: ["voicing"] },
@@ -29,3 +29,25 @@ export function steps(visualMode: "ai_clips" | "product_images") {
 }
 
 export const LENGTHS = [15, 30, 45, 60];
+
+export const VISUAL_MODES: { value: VideoVisualMode; title: string; hint: string }[] = [
+  { value: "my_footage", title: "ฟุตเทจของฉัน (แนะนำ)", hint: "อัปคลิป/รูปสินค้าจริงที่ถ่ายเอง AI ตัดต่อให้ ดูจริง ไม่เสี่ยงกฎ AI ของแพลตฟอร์ม" },
+  { value: "product_images", title: "รูปสินค้า + เคลื่อนไหว", hint: "เร็ว ประหยัด ใช้รูปสินค้าในระบบ" },
+  { value: "ai_clips", title: "คลิป AI (Hailuo)", hint: "ภาพสร้างโดย AI ทั้งหมด มีค่าใช้จ่ายต่อฉาก" },
+];
+
+export const CAPTION_STYLES: { value: CaptionStyle; label: string }[] = [
+  { value: "pop", label: "ซับเด้งทีละคำ (ตัวใหญ่ ขอบดำ)" },
+  { value: "clean", label: "ซับทีละคำ แบบมีพื้นหลัง" },
+  { value: "none", label: "ไม่ใส่ซับทีละคำ" },
+];
+
+export const ANGLE_LABELS: Record<string, string> = {
+  auto: "ให้ AI เลือก",
+  problem_solution: "ปัญหา → ทางแก้",
+  unboxing: "แกะกล่อง",
+  before_after: "ก่อน/หลัง",
+  top3: "3 เหตุผลที่ต้องมี",
+  pov: "POV ชีวิตประจำวัน",
+  comparison: "เทียบของทั่วไป",
+};

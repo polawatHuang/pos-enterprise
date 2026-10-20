@@ -196,6 +196,18 @@ AI วิเคราะห์ (MiniMax, tool บังคับ; ใส่ Phas
 - ไม่มี Shopee Affiliate → นำเข้าเป็น "AI พบ" ไม่มีตัวเลข/ลิงก์สินค้า; มี → ค้น Shopee ด้วยคีย์เวิร์ดแล้วนำเข้าสินค้าจริง
 - ความคืบหน้าและสรุปผลอยู่ใน `scrape_runs.stage` / `state`
 
+**AI Video รุ่นใหม่** (migration 010):
+- **ฟุตเทจของฉัน** (`visual_mode = my_footage`, ตาราง `video_media`):
+  - อัปโหลดแบบ raw body ไปที่ `POST /api/videos/:id/media` แล้วเก็บไฟล์บนดิสก์ใน `MEDIA_DIR`
+  - Shotstack ดึงไฟล์ผ่าน `GET /api/media/:token` เป็นลิงก์ลงลายเซ็น HMAC อายุ 6 ชม. (`video/media.js`) จึงต้องตั้ง `PUBLIC_API_URL`
+- **สคริปต์**: มี `hooks` 3 แบบ และแต่ละฉากเลือกฟุตเทจ (`media`) ได้
+  - `POST /:id/hook`: สลับฉากเปิด
+  - `POST /:id/variant`: คัดลอกเป็นโปรเจกต์ใหม่ โดยใช้ไฟล์ฟุตเทจร่วมกัน
+- **การตัดต่อ** (`timeline.js`):
+  - ช็อตยาวไม่เกิน 1.8 วินาที วนใช้ฟุตเทจ/รูป และคลิปเดิมใช้ต่อจากจุดที่ตัดไว้
+  - ซับทีละคำด้วยฟอนต์ Kanit ที่ตัดคำด้วย `Intl.Segmenter('th')` และเน้นตัวเลข/ราคา/คำว่าฟรีเป็นสีเหลือง
+  - ปกแนวตั้งจาก AI ปกคลิป (`cover_id`) แสดงเป็นเฟรมแรก 0.5 วินาที
+
 **AI ปกคลิป** (`backend/src/modules/covers`, หน้า `/covers`):
 - `POST /api/covers` → job `cover.generate`: MiniMax ออกแบบ (forced tool: imagePrompt, layout, palette, font, คำเด่น) → MiniMax `image-01` สร้างภาพพื้นหลังแบบไม่มีตัวหนังสือ (9:16 / 16:9) → เก็บไฟล์ใน `cover_assets` (MEDIUMBLOB เพราะ URL ของผู้ให้บริการหมดอายุ)
 - รูปที่แนบ: รูปสินค้าวางทับตอนประกอบปก, รูปคนส่งเป็น `subject_reference` ให้ AI คงหน้าตา
