@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -232,6 +232,8 @@ CREATE TABLE product_categories (
   parent_id  BIGINT UNSIGNED NULL,
   name       VARCHAR(191) NOT NULL,
   sort_order INT NOT NULL DEFAULT 0,
+  sale_block JSON NULL COMMENT '{"from":"00:00","to":"11:00","label":"..."} no-sale window (local time)',
+  age_restricted TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'ask the customer to confirm age 20+',
   CONSTRAINT fk_cat_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_cat_parent FOREIGN KEY (parent_id) REFERENCES product_categories(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -261,6 +263,21 @@ CREATE TABLE products (
   FULLTEXT KEY ft_product_knowledge (name, description, selling_points),
   CONSTRAINT fk_product_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_product_cat FOREIGN KEY (category_id) REFERENCES product_categories(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE product_units (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  product_id  BIGINT UNSIGNED NOT NULL,
+  name        VARCHAR(30) NOT NULL COMMENT 'แพ็ก, ลัง, ...',
+  factor      DECIMAL(12,3) NOT NULL COMMENT 'base units per this unit',
+  barcode     VARCHAR(64) NULL,
+  price       DECIMAL(14,2) NULL COMMENT 'NULL = factor x base price',
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_unit_barcode (org_id, barcode),
+  KEY idx_unit_product (product_id),
+  CONSTRAINT fk_unit_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_unit_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE product_variants (
@@ -383,6 +400,7 @@ CREATE TABLE customers (
   id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   org_id         BIGINT UNSIGNED NOT NULL,
   name           VARCHAR(191) NOT NULL,
+  member_no      VARCHAR(20)  NULL,
   phone          VARCHAR(50)  NULL,
   email          VARCHAR(191) NULL,
   tax_id         VARCHAR(20)  NULL,
@@ -391,10 +409,12 @@ CREATE TABLE customers (
   tags           VARCHAR(500) NULL,
   total_spent    DECIMAL(14,2) NOT NULL DEFAULT 0,
   order_count    INT NOT NULL DEFAULT 0,
+  points         INT NOT NULL DEFAULT 0,
   consent_marketing TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'PDPA consent',
   created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_cust_phone (org_id, phone),
+  UNIQUE KEY uq_cust_member (org_id, member_no),
   CONSTRAINT fk_cust_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -408,6 +428,7 @@ CREATE TABLE pos_shifts (
   opening_cash   DECIMAL(14,2) NOT NULL DEFAULT 0,
   closing_cash   DECIMAL(14,2) NULL,
   expected_cash  DECIMAL(14,2) NULL,
+  denominations  JSON NULL COMMENT 'closing count per note/coin',
   note           VARCHAR(255) NULL,
   CONSTRAINT fk_shift_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_shift_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
@@ -431,6 +452,8 @@ CREATE TABLE sales_orders (
   total            DECIMAL(14,2) NOT NULL DEFAULT 0,
   cost_total       DECIMAL(14,2) NOT NULL DEFAULT 0 COMMENT 'COGS snapshot for gross profit',
   platform_fee     DECIMAL(14,2) NOT NULL DEFAULT 0,
+  points_earned    INT NOT NULL DEFAULT 0,
+  points_used      INT NOT NULL DEFAULT 0,
   ordered_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by       BIGINT UNSIGNED NULL,
   conversation_id  BIGINT UNSIGNED NULL COMMENT 'set when closed by AI agent',
@@ -451,6 +474,8 @@ CREATE TABLE sales_order_items (
   product_id  BIGINT UNSIGNED NOT NULL,
   variant_id  BIGINT UNSIGNED NOT NULL DEFAULT 0,
   name        VARCHAR(255) NOT NULL COMMENT 'snapshot',
+  unit_name   VARCHAR(30) NULL COMMENT 'pack/carton name when sold by unit',
+  unit_factor DECIMAL(12,3) NOT NULL DEFAULT 1 COMMENT 'base units per sold unit',
   quantity    DECIMAL(14,3) NOT NULL,
   unit_price  DECIMAL(14,2) NOT NULL,
   unit_cost   DECIMAL(14,2) NOT NULL DEFAULT 0,
@@ -465,12 +490,51 @@ CREATE TABLE payments (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   org_id      BIGINT UNSIGNED NOT NULL,
   order_id    BIGINT UNSIGNED NULL,
-  method      ENUM('cash','promptpay','card','transfer','platform','cod','other') NOT NULL,
+  method      ENUM('cash','promptpay','card','transfer','ewallet','platform','cod','other') NOT NULL,
   amount      DECIMAL(14,2) NOT NULL,
   reference   VARCHAR(191) NULL,
   paid_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_pay_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_pay_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE held_bills (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  branch_id   BIGINT UNSIGNED NOT NULL,
+  user_id     BIGINT UNSIGNED NOT NULL,
+  label       VARCHAR(100) NULL,
+  cart        JSON NOT NULL,
+  customer_id BIGINT UNSIGNED NULL,
+  total       DECIMAL(14,2) NOT NULL DEFAULT 0,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_held_branch (org_id, branch_id),
+  CONSTRAINT fk_held_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE cash_movements (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  shift_id    BIGINT UNSIGNED NOT NULL,
+  type        ENUM('pay_in','pay_out','pickup') NOT NULL COMMENT 'pickup = cash moved to the safe',
+  amount      DECIMAL(14,2) NOT NULL,
+  reason      VARCHAR(200) NOT NULL,
+  created_by  BIGINT UNSIGNED NOT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_cm_shift (shift_id),
+  CONSTRAINT fk_cm_shift FOREIGN KEY (shift_id) REFERENCES pos_shifts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE payment_slips (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  trans_ref   VARCHAR(64) NOT NULL COMMENT 'bank transaction reference read from the slip',
+  amount      DECIMAL(14,2) NOT NULL,
+  order_id    BIGINT UNSIGNED NULL,
+  raw         JSON NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_slip_ref (org_id, trans_ref),
+  CONSTRAINT fk_slip_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_slip_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE promotions (
@@ -1103,6 +1167,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail');
 
 SET FOREIGN_KEY_CHECKS = 1;

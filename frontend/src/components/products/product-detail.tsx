@@ -11,6 +11,7 @@ import { formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Skeleton, Textarea } from "@/components/ui/primitives";
+import { UnitsPanel } from "./units-panel";
 import { Dialog } from "@/components/ui/overlays";
 import { MovementTypeBadge } from "@/components/inventory/movement-badge";
 import { ProductFormDialog } from "./product-form";
@@ -111,6 +112,8 @@ export function ProductDetail({ id }: { id: number }) {
           </CardContent>
         </Card>
       </div>
+
+      <UnitsPanel productId={p.id} baseUnit={p.unit} basePrice={p.price} writable={can("products:write")} />
 
       <KnowledgePanel productId={p.id} writable={can("products:write")} />
 

@@ -8,7 +8,9 @@ export const METHOD_LABEL: Record<string, string> = {
   promptpay: "PromptPay",
   card: "บัตร",
   transfer: "โอนเงิน",
+  ewallet: "e-Wallet",
   platform: "แพลตฟอร์ม",
+  split: "แบ่งจ่าย",
 };
 
 /**
@@ -48,7 +50,8 @@ export function Receipt({ order, settings }: { order: PosOrder; settings?: PosSe
                 {i.name}
                 <br />
                 <span className="text-[11px]">
-                  {i.quantity} x {i.unitPrice.toFixed(2)}
+                  {i.quantity}
+                  {i.unitName ? ` ${i.unitName}` : ""} x {i.unitPrice.toFixed(2)}
                   {i.discount > 0 ? ` ลด ${i.discount.toFixed(2)}` : ""}
                 </span>
               </td>
@@ -72,6 +75,15 @@ export function Receipt({ order, settings }: { order: PosOrder; settings?: PosSe
         <Row key={i} label={METHOD_LABEL[p.method] ?? p.method} value={p.method === "cash" && order.change ? p.amount + order.change : p.amount} />
       ))}
       {!!order.change && <Row label="เงินทอน" value={order.change} />}
+      {order.customerName && (
+        <>
+          <div className="my-2 border-t border-dashed border-black" />
+          <p>สมาชิก {order.customerName}</p>
+          {order.pointsUsed > 0 && <p>ใช้แต้ม {order.pointsUsed.toLocaleString("th-TH")} แต้ม</p>}
+          {order.pointsEarned > 0 && <p>ได้รับแต้ม +{order.pointsEarned.toLocaleString("th-TH")} แต้ม</p>}
+          {order.customerPoints !== null && <p>แต้มคงเหลือ {order.customerPoints.toLocaleString("th-TH")} แต้ม</p>}
+        </>
+      )}
       <p className="mt-3 text-center">{settings?.receiptFooter || "ขอบคุณที่อุดหนุน"}</p>
     </div>
   );

@@ -1,0 +1,56 @@
+import type { CatalogItem, SaleBlock } from "@/lib/types";
+
+export interface CartLine {
+  /** product id + unit id: the same product sold by piece and by pack are separate lines */
+  key: string;
+  item: CatalogItem;
+  unitId: number | null;
+  quantity: number;
+  /** baht off this line */
+  discount: number;
+}
+
+export const r2 = (n: number) => Math.round(n * 100) / 100;
+export const lineKey = (productId: number, unitId: number | null) => `${productId}:${unitId ?? 0}`;
+
+export function unitOf(line: Pick<CartLine, "item" | "unitId">) {
+  return line.unitId ? (line.item.units.find((u) => u.id === line.unitId) ?? null) : null;
+}
+
+export const unitPrice = (line: Pick<CartLine, "item" | "unitId">) => unitOf(line)?.price ?? line.item.price;
+export const unitName = (line: Pick<CartLine, "item" | "unitId">) => unitOf(line)?.name ?? line.item.unit;
+/** Base units (pieces) this line takes from stock. */
+export const baseQty = (line: Pick<CartLine, "item" | "unitId" | "quantity">) => line.quantity * (unitOf(line)?.factor ?? 1);
+export const lineTotal = (line: CartLine) => r2(unitPrice(line) * line.quantity - line.discount);
+
+/** Mirrors the server: VAT is extracted from VAT-inclusive prices after spreading bill-level discounts. */
+export function totalsOf(lines: CartLine[], billDiscount: number, pointsDiscount = 0) {
+  const gross = r2(lines.reduce((s, l) => s + unitPrice(l) * l.quantity, 0));
+  const subtotal = r2(lines.reduce((s, l) => s + lineTotal(l), 0));
+  const total = r2(Math.max(subtotal - billDiscount - pointsDiscount, 0));
+  const ratio = subtotal ? total / subtotal : 0;
+  const vatable = lines.filter((l) => l.item.vatType === "vat7").reduce((s, l) => s + lineTotal(l), 0);
+  return {
+    gross,
+    subtotal,
+    total,
+    lineDiscounts: r2(gross - subtotal),
+    vat: r2((vatable * ratio * 7) / 107),
+    units: lines.reduce((s, l) => s + l.quantity, 0),
+  };
+}
+
+/** True when local "HH:MM" falls inside the window (windows may wrap midnight). */
+export function inWindow(now: string, from: string, to: string) {
+  if (from === to) return false;
+  return from < to ? now >= from && now < to : now >= from || now < to;
+}
+
+export function blockedNow(block: SaleBlock | null, now: string) {
+  return block ? inWindow(now, block.from, block.to) : false;
+}
+
+export const nowHHMM = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};

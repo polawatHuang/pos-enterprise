@@ -172,3 +172,13 @@
     padding: 0 !important;
   }
 }
+
+/* POS: a line flashes when it is scanned into the cart */
+@keyframes pos-flash {
+  from {
+    background-color: color-mix(in oklch, var(--primary) 28%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
