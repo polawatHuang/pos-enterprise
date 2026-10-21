@@ -21,6 +21,7 @@ const { wordChunks, captionCues, planShots, buildShotstackEdit, MAX_SHOT_SEC } =
 const media = require('../src/modules/video/media');
 
 const app = createApp();
+const shotstackGen = { n: 0, jobs: new Map(), refuse: null, fail: null };
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const RUN = Date.now().toString(36);
 const originalFetch = global.fetch;
@@ -106,11 +107,31 @@ before(async () => {
     if (u.includes('/v1/query/video_generation')) return json({ status: 'Success', file_id: new URL(u).searchParams.get('task_id'), base_resp: { status_code: 0 } });
     if (u.includes('/v1/files/retrieve')) return json({ file: { download_url: `https://cdn.minimax.test/${new URL(u).searchParams.get('file_id')}.mp4` }, base_resp: { status_code: 0 } });
     if (u === 'https://img.example.com/p16.jpg') return new Response(Buffer.from(PNG_B64, 'base64'), { headers: { 'content-type': 'image/png' } });
-    if (u.includes('api.shotstack.io/create/stage/assets/'))
-      return json({ data: { type: 'asset', id: u.split('/').pop(), attributes: { status: 'done', url: `https://shotstack.test/${u.split('/').pop()}.png` } } });
-    if (u.includes('api.shotstack.io/create/stage/assets'))
-      return json({ data: { type: 'asset', id: `img${calls.filter((c) => c.url.endsWith('/create/stage/assets')).length}`, attributes: { status: 'queued' } } }, 201);
-    if (u.startsWith('https://shotstack.test/img')) return new Response(Buffer.from(PNG_B64, 'base64'), { headers: { 'content-type': 'image/png' } });
+    // Shotstack Edit API generation (models, /generate jobs) — shotstackGen lets a test fail a job or the request
+    if (u.includes('api.shotstack.io/edit/stage/models/')) {
+      const model = decodeURIComponent(u.split('/').pop());
+      const video = model.includes('video');
+      return json({
+        model,
+        type: video ? 'video' : 'image',
+        available: true,
+        options: { properties: video ? { startSrc: { type: 'string' }, aspectRatio: { enum: ['16:9', '9:16'] } } : { aspectRatio: { enum: ['1:1', '9:16'] } } },
+      });
+    }
+    if (u.endsWith('api.shotstack.io/edit/stage/generate')) {
+      const body = JSON.parse(init.body);
+      if (shotstackGen.refuse?.(body)) return json({ error: 'Access to AI generation is not included', code: 'AiCapabilityNotIncluded' }, 403);
+      const id = `g${(shotstackGen.n += 1)}`;
+      shotstackGen.jobs.set(id, body);
+      return json({ id, status: 'queued' }, 202);
+    }
+    if (u.includes('api.shotstack.io/edit/stage/generate/')) {
+      const id = u.split('/').pop();
+      const job = shotstackGen.jobs.get(id);
+      if (shotstackGen.fail?.(job)) return json({ id, status: 'failed', error: 'content policy' });
+      return json({ id, status: 'done', url: `https://shotstack.test/${id}.${job.asset.type === 'image' ? 'png' : 'mp4'}` });
+    }
+    if (u.startsWith('https://shotstack.test/g')) return new Response(Buffer.from(PNG_B64, 'base64'), { headers: { 'content-type': 'image/png' } });
     if (u.includes('/v1/get_voice'))
       return json({
         system_voice: [
@@ -512,60 +533,105 @@ describe('scene pictures → AI video', () => {
 });
 
 describe('scene pictures → AI video with Shotstack (VIDEO_SCENE_AI=shotstack)', () => {
-  test('missing pictures drawn by Shotstack text-to-image; each picture resized and animated by image-to-video; no MiniMax media models', async () => {
+  const statusOf = async (id) => db.one('SELECT status, error, stage_detail FROM video_projects WHERE id = :id', { id });
+  async function run(id) {
+    calls.length = 0;
+    shotstackGen.jobs.clear();
+    const gen = await marketer.post(`/api/videos/${id}/generate`);
+    assert.equal(gen.status, 202, JSON.stringify(gen.body));
+    for (let i = 0; i < 25 && !['ready', 'failed'].includes((await statusOf(id)).status); i += 1) await drain();
+    return statusOf(id);
+  }
+  async function project() {
     mockScript();
+    const res = await marketer.post('/api/videos', { productId: 16, tone: 'friendly', lengthSec: 15, visualMode: 'my_footage' });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    created.push(res.body.data.id);
+    return res.body.data.id;
+  }
+  before(() => {
     env.PUBLIC_API_URL = 'https://api.example.com';
     process.env.SHOTSTACK_API_KEY = 'ss-key';
     process.env.VIDEO_SCENE_AI = 'shotstack';
+  });
+  after(() => {
+    process.env.VIDEO_SCENE_AI = 'minimax';
+    delete process.env.SHOTSTACK_API_KEY;
+    Object.assign(shotstackGen, { refuse: null, fail: null });
+  });
+
+  test('pictures drawn and animated with /generate (image model, then image-to-video from each picture), clips played in order', async () => {
+    const id = await project();
+    const v = await run(id);
+    assert.equal(v.status, 'ready', v.error);
+    assert.equal(calls.filter((c) => c.url.includes('/v1/image_generation') || c.url.includes('/v1/video_generation')).length, 0);
+
+    const gens = calls.filter((c) => c.url.endsWith('/edit/stage/generate')).map((c) => JSON.parse(c.init.body));
+    const imgs = gens.filter((g) => g.asset.type === 'image');
+    assert.equal(imgs.length, 3);
+    assert.deepEqual(imgs[0].asset.options, { aspectRatio: '9:16' });
+    assert.equal(imgs[0].asset.model, 'nano-banana-2');
+    const files = await db.query('SELECT label FROM video_media WHERE video_project_id = :id ORDER BY sort_order, id', { id });
+    assert.deepEqual(
+      files.map((f) => f.label),
+      ['AI · ฉาก 1', 'AI · ฉาก 2', 'AI · ฉาก 3'],
+    );
+
+    const vids = gens.filter((g) => g.asset.type === 'video');
+    assert.equal(vids.length, 3);
+    assert.equal(vids[0].asset.model, 'seedance-2.0-image-to-video');
+    assert.match(vids[0].asset.options.startSrc, /^https:\/\/api\.example\.com\/api\/media\/[^/]+\.png$/);
+    assert.equal(vids[0].asset.options.aspectRatio, '9:16');
+    assert.ok(vids.every((g) => g.length > 1), 'clip length follows the scene');
+    assert.ok(!calls.some((c) => c.url.includes('/create/')), 'no deprecated Create API');
+
+    const edit = JSON.parse(calls.filter((x) => x.url.endsWith('/edit/stage/render')).at(-1).init.body);
+    const shots = edit.timeline.tracks
+      .flatMap((t) => t.clips)
+      .filter((x) => x.asset.type === 'video')
+      .sort((a, b) => a.start - b.start);
+    assert.deepEqual(
+      shots.map((x) => x.asset.src),
+      ['g4', 'g5', 'g6'].map((g) => `https://shotstack.test/${g}.mp4`),
+    );
+  });
+
+  test('plan without AI video: the project fails with the reason instead of rendering stills', async () => {
+    shotstackGen.refuse = (body) => body.asset.type === 'video';
     try {
-      const res = await marketer.post('/api/videos', { productId: 16, tone: 'friendly', lengthSec: 15, visualMode: 'my_footage' });
-      assert.equal(res.status, 201, JSON.stringify(res.body));
-      const id = res.body.data.id;
-      created.push(id);
-      calls.length = 0;
-      assert.equal((await marketer.post(`/api/videos/${id}/generate`)).status, 202);
-      for (let i = 0; i < 25 && (await db.one('SELECT status FROM video_projects WHERE id = :id', { id })).status !== 'ready'; i += 1) await drain();
-      const v = await db.one('SELECT status, error FROM video_projects WHERE id = :id', { id });
-      assert.equal(v.status, 'ready', v.error);
-
-      assert.equal(calls.filter((c) => c.url.includes('/v1/image_generation') || c.url.includes('/v1/video_generation')).length, 0);
-      const created3 = calls.filter((c) => c.url.endsWith('/create/stage/assets') && JSON.parse(c.init.body).options.type === 'text-to-image');
-      assert.equal(created3.length, 3);
-      const opt = JSON.parse(created3[0].init.body);
-      assert.equal(opt.provider, 'shotstack');
-      assert.deepEqual([opt.options.type, opt.options.width, opt.options.height], ['text-to-image', 576, 1024]);
-      assert.equal(created3[0].init.headers['x-api-key'], 'ss-key');
-      const files = await db.query('SELECT label FROM video_media WHERE video_project_id = :id ORDER BY sort_order, id', { id });
-      assert.deepEqual(
-        files.map((f) => f.label),
-        ['AI · ฉาก 1', 'AI · ฉาก 2', 'AI · ฉาก 3'],
-      );
-      assert.equal(await db.one("SELECT COUNT(*) AS n FROM video_assets WHERE video_project_id = :id AND kind = 'thumbnail'", { id }).then((r) => Number(r.n)), 0);
-
-      // Each picture is rendered to an exact 576x1024 jpg, then animated by Create API image-to-video
-      const resizes = calls.filter((x) => x.url.endsWith('/edit/stage/render') && JSON.parse(x.init.body).output.format === 'jpg');
-      assert.equal(resizes.length, 3);
-      const rz = JSON.parse(resizes[0].init.body);
-      assert.deepEqual(rz.output.size, { width: 576, height: 1024 });
-      assert.match(rz.timeline.tracks[0].clips[0].asset.src, /^https:\/\/api\.example\.com\/api\/media\/[^/]+\.png$/);
-      const i2v = calls.filter((x) => x.url.endsWith('/create/stage/assets') && JSON.parse(x.init.body).options.type === 'image-to-video');
-      assert.equal(i2v.length, 3);
-      assert.deepEqual(JSON.parse(i2v[0].init.body), { provider: 'shotstack', options: { type: 'image-to-video', imageUrl: 'https://shotstack.test/out.mp4' } });
-      // The final render plays the three AI clips in scene order (4s each, then the picture held)
-      const final = calls.filter((x) => x.url.endsWith('/edit/stage/render') && JSON.parse(x.init.body).output.format === 'mp4');
-      const edit = JSON.parse(final.at(-1).init.body);
-      const vids = edit.timeline.tracks
-        .flatMap((t) => t.clips)
-        .filter((x) => x.asset.type === 'video')
-        .sort((a, b) => a.start - b.start);
-      assert.deepEqual(
-        vids.map((x) => x.asset.src),
-        ['https://shotstack.test/img4.png', 'https://shotstack.test/img5.png', 'https://shotstack.test/img6.png'],
-      );
-      assert.ok(vids.every((x) => x.length <= 4));
+      const id = await project();
+      const v = await run(id);
+      assert.equal(v.status, 'failed');
+      assert.match(v.error, /แพ็กเกจ Shotstack ของคุณไม่รวม AI generation/);
+      assert.ok(!calls.some((c) => c.url.endsWith('/edit/stage/render')), 'nothing rendered');
     } finally {
-      process.env.VIDEO_SCENE_AI = 'minimax';
-      delete process.env.SHOTSTACK_API_KEY;
+      shotstackGen.refuse = null;
+    }
+  });
+
+  test('a scene whose clip fails shows its picture, and the reason stays visible after the render', async () => {
+    // the second scene's clip job fails
+    shotstackGen.fail = (job) => job.asset.type === 'video' && job === [...shotstackGen.jobs.values()].filter((j) => j.asset.type === 'video')[1];
+    try {
+      const id = await project();
+      const v = await run(id);
+      assert.equal(v.status, 'ready', v.error);
+      assert.match(v.stage_detail, /ฉาก 2 ใช้ภาพนิ่ง: Shotstack สร้างคลิปไม่สำเร็จ: content policy/);
+      assert.ok(v.stage_detail.length <= 255);
+    } finally {
+      shotstackGen.fail = null;
+    }
+  });
+
+  test('everything fails: the project fails with the reason', async () => {
+    shotstackGen.fail = (job) => job.asset.type === 'video';
+    try {
+      const id = await project();
+      const v = await run(id);
+      assert.equal(v.status, 'failed');
+      assert.match(v.error, /สร้างคลิป AI ไม่สำเร็จทุกฉาก — Shotstack สร้างคลิปไม่สำเร็จ: content policy/);
+    } finally {
+      shotstackGen.fail = null;
     }
   });
 });
@@ -579,8 +645,8 @@ describe('Shotstack errors', () => {
       global.fetch = async () =>
         json({ success: false, message: 'Bad Request', response: { error: { details: [{ message: '"output.size.width" must be a number' }] } } }, 400);
       await assert.rejects(shotstack.render({}), /Bad Request — "output\.size\.width" must be a number/);
-      global.fetch = async () => json({ errors: [{ status: '400', title: 'Bad Request', detail: 'imageUrl dimensions must be 576x1024' }] }, 400);
-      await assert.rejects(shotstack.createImageToVideo('https://x.test/a.jpg'), /HTTP 400 — imageUrl dimensions must be 576x1024/);
+      global.fetch = async () => json({ error: 'Insufficient generation credits.', available: 1.5 }, 402);
+      await assert.rejects(shotstack.generate({ type: 'image', prompt: 'x' }), /HTTP 402 — Insufficient generation credits\.; เครดิต Shotstack ไม่พอ \(เหลือ 1\.5\)/);
     } finally {
       global.fetch = saved;
       delete process.env.SHOTSTACK_API_KEY;
