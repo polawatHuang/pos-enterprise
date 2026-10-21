@@ -70,11 +70,24 @@ function verifyToken(token) {
   }
 }
 
-/** Absolute URL the renderer can reach (needs PUBLIC_API_URL, the backend's public HTTPS origin). */
-function publicUrl(kind, id) {
+/**
+ * Absolute URL the renderer can reach (needs PUBLIC_API_URL, the backend's public HTTPS origin).
+ * Ends in the file's real extension: Shotstack reads the type from the URL, and the token itself
+ * contains a dot, so without it the tail of the signature looks like an extension (".ik").
+ */
+function publicUrl(kind, id, ext) {
   const base = (env.PUBLIC_API_URL || '').replace(/\/+$/, '');
   if (!base) return null;
-  return `${base}/api/media/${signToken(kind, id)}`;
+  return `${base}/api/media/${signToken(kind, id)}${ext ? `.${ext}` : ''}`;
+}
+
+/** File extension of a stored file ("jpg", "mp4" …), from its storage key. */
+const extOf = (storageKey) => /\.([a-z0-9]+)$/.exec(String(storageKey))?.[1] ?? null;
+const URL_EXTS = new Set(Object.values(TYPES).map((t) => t.ext));
+/** Token from a media URL path segment, without the extension publicUrl adds. */
+function tokenFromParam(param) {
+  const m = /^(.+)\.([a-z0-9]+)$/.exec(String(param));
+  return m && URL_EXTS.has(m[2]) ? m[1] : String(param);
 }
 
 /* ----------------------------------------------------- chunked uploads */
@@ -184,4 +197,6 @@ module.exports = {
   signToken,
   verifyToken,
   publicUrl,
+  extOf,
+  tokenFromParam,
 };

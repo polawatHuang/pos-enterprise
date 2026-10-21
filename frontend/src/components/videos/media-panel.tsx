@@ -10,8 +10,11 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@/components/ui/primitives";
 import { isUnreadable, readFilesNow, UNREADABLE_HELP } from "@/lib/files";
+import { isImageFile, toUploadableImage } from "@/lib/image";
 
-const ACCEPT = "video/mp4,video/quicktime,video/webm,image/jpeg,image/png,image/webp";
+const VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
+// Any picture is accepted: ones the server doesn't keep as is are converted to JPG before upload
+const ACCEPT = [...VIDEO_TYPES, "image/*", ".heic", ".heif"].join(",");
 const MAX_FILES = 10;
 const MAX_VIDEO_MB = 60;
 
@@ -124,9 +127,19 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
     if (!picked.length) return toast.error(`อัปโหลดได้สูงสุด ${MAX_FILES} ไฟล์`);
     // Read the bytes now, before the input is disabled/re-rendered (Safari may refuse a late read)
     const list = await readFilesNow(picked, (f, err) => toast.error(`${f.name}: ${isUnreadable(err) ? UNREADABLE_HELP : "อ่านไฟล์ไม่สำเร็จ"}`));
-    for (const [i, file] of list.entries()) {
-      if (!ACCEPT.split(",").includes(file.type)) {
-        toast.error(`${file.name}: รองรับ MP4/MOV/WebM และ JPG/PNG/WebP`);
+    for (const [i, picked] of list.entries()) {
+      let file = picked;
+      if (isImageFile(picked)) {
+        try {
+          const r = await toUploadableImage(picked);
+          file = r.file;
+          if (r.converted) toast.info(`แปลง ${picked.name} เป็น ${file.name} แล้ว`);
+        } catch (err) {
+          toast.error(`${picked.name}: ${err instanceof Error ? err.message : "แปลงเป็น JPG ไม่ได้"} — ลองบันทึกเป็น JPG แล้วอัปโหลดใหม่`);
+          continue;
+        }
+      } else if (!VIDEO_TYPES.includes(file.type)) {
+        toast.error(`${file.name}: คลิปรองรับ MP4/MOV/WebM (รูปทุกชนิดระบบแปลงเป็น JPG ให้)`);
         continue;
       }
       if (file.type.startsWith("video/") && file.size > MAX_VIDEO_MB * 1024 * 1024) {
