@@ -16,7 +16,7 @@ const r2 = require('../../integrations/r2');
 const { generateScript, productFacts, normalizeScene, TONES, ANGLES } = require('./script');
 const media = require('./media');
 const env = require('../../config/env');
-const { VOICE_PROVIDERS, missingSceneImages } = require('./pipeline');
+const { VOICE_PROVIDERS, missingSceneImages, sceneAi } = require('./pipeline');
 const runtime = require('../../config/runtime');
 const { singleFile } = require('../../utils/multipart');
 
@@ -40,6 +40,11 @@ function capabilities() {
       },
     },
     clips: { configured: minimaxMedia.isConfigured(), missing: minimaxMedia.missing(), model: runtime.get('MINIMAX_VIDEO_MODEL') || 'MiniMax-Hailuo-2.3' },
+    // Scene pictures → AI clips (and missing pictures): VIDEO_SCENE_AI
+    sceneClips:
+      sceneAi() === 'shotstack'
+        ? { provider: 'shotstack', configured: shotstack.isConfigured(), missing: shotstack.missing() }
+        : { provider: 'minimax', configured: minimaxMedia.isConfigured(), missing: minimaxMedia.missing() },
     compose: { configured: shotstack.isConfigured(), missing: shotstack.missing(), env: runtime.get('SHOTSTACK_ENV') || 'stage' },
     storage: { configured: r2.isConfigured(), missing: r2.missing() },
     // Own footage and cover intro are fetched by the renderer from this server
@@ -364,7 +369,9 @@ router.post('/:id/generate', validate({ params: idParam }), async (req, res) => 
   // Scene images: scenes without an uploaded picture get one drawn by AI first
   const missing = await missingSceneImages({ id: v.id, visual_mode: v.visual_mode, scenes });
   if (v.visual_mode === 'my_footage') {
-    minimaxMedia.requireConfig(); // scene pictures become AI clips (Hailuo image-to-video)
+    // scene pictures become AI clips: Shotstack image-to-video in the render, or MiniMax Hailuo
+    if (sceneAi() === 'shotstack') shotstack.requireConfig();
+    else minimaxMedia.requireConfig();
     if (!env.PUBLIC_API_URL) throw badRequest('ต้องตั้ง PUBLIC_API_URL (โดเมน HTTPS ของ backend) ก่อน เพื่อให้ระบบตัดต่อดึงภาพฉากได้');
   }
   const [status, job, detail] = missing.length

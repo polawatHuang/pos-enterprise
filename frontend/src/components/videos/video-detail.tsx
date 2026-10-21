@@ -530,7 +530,20 @@ function Readiness({
     caps.voice[voiceProvider].configured
       ? { label: "เสียงพากย์", ok: hasVoice, missing: [], required: true, problem: "ยังไม่ได้เลือกเสียง (เลือกที่ช่องเสียงพากย์ทางซ้าย)" }
       : { label: "เสียงพากย์", ok: false, missing: caps.voice[voiceProvider].missing, required: true },
-    ...(visualMode !== "product_images" ? [{ label: "คลิป AI (MiniMax Hailuo)", ok: caps.clips.configured, missing: caps.clips.missing, required: true }] : []),
+    ...(visualMode === "ai_clips" ? [{ label: "คลิป AI (MiniMax Hailuo)", ok: caps.clips.configured, missing: caps.clips.missing, required: true }] : []),
+    ...(visualMode === "my_footage"
+      ? [
+          caps.sceneClips?.provider === "minimax"
+            ? { label: "ภาพ → คลิป AI (MiniMax Hailuo)", ok: caps.sceneClips.configured, missing: caps.sceneClips.missing, required: true }
+            : {
+                label: "ภาพ → คลิป AI (Shotstack)",
+                ok: caps.sceneClips?.configured ?? caps.compose.configured,
+                missing: caps.sceneClips?.missing ?? caps.compose.missing,
+                required: true,
+                note: "ใช้เครดิต Shotstack",
+              },
+        ]
+      : []),
     { label: "ประกอบคลิป (Shotstack)", ok: caps.compose.configured, missing: caps.compose.missing, required: false, note: "ถ้าไม่มี จะได้ชิ้นส่วนไปตัดต่อเอง" },
     { label: "เก็บไฟล์ถาวร (R2)", ok: caps.storage.configured, missing: caps.storage.missing, required: false, note: "ถ้าไม่มี ลิงก์ไฟล์หมดอายุใน ~24 ชม." },
   ];

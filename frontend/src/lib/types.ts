@@ -1281,6 +1281,7 @@ export interface VideoMeta {
     script: { configured: boolean; provider: string };
     voice: { minimax: Capability & { defaultVoiceId: string | null }; elevenlabs: Capability & { defaultVoiceId: string | null } };
     clips: Capability & { model: string };
+    sceneClips?: Capability & { provider: "shotstack" | "minimax" };
     compose: Capability & { env: string };
     storage: Capability;
     publicMedia: Capability;
