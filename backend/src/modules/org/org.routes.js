@@ -121,6 +121,57 @@ router.get('/organization', async (req, res) => {
   res.json({ data: org });
 });
 
+/**
+ * Delete a branch that was never used. Deleting a warehouse cascades to stock movements, levels,
+ * lots and counts, and sales orders would lose their branch, so a branch with any history can
+ * only be disabled (its sales and stock records stay intact).
+ */
+router.delete('/branches/:id', requirePermission('settings:manage'), validate({ params: branchId }), async (req, res) => {
+  const orgId = req.user.orgId;
+  const { id } = req.valid.params;
+  const branch = await db.one('SELECT id, name FROM branches WHERE id = :id AND org_id = :orgId', { id, orgId });
+  if (!branch) throw notFound('ไม่พบสาขา');
+  const others = await db.one('SELECT COUNT(*) AS n FROM branches WHERE org_id = :orgId AND is_active = 1 AND id <> :id', { orgId, id });
+  if (!Number(others.n)) throw badRequest('ต้องมีสาขาที่เปิดใช้งานอย่างน้อย 1 สาขา จึงลบสาขานี้ได้');
+
+  const wh = 'SELECT id FROM warehouses WHERE branch_id = :id';
+  const usage = await db.one(
+    `SELECT (SELECT COUNT(*) FROM sales_orders WHERE branch_id = :id) AS orders,
+            (SELECT COUNT(*) FROM pos_shifts WHERE branch_id = :id) AS shifts,
+            (SELECT COUNT(*) FROM transactions WHERE branch_id = :id) AS transactions,
+            (SELECT COUNT(*) FROM stock_movements WHERE warehouse_id IN (${wh})) AS movements,
+            (SELECT COUNT(*) FROM stock_levels WHERE warehouse_id IN (${wh}) AND quantity <> 0) AS stocked,
+            (SELECT COUNT(*) FROM purchase_orders WHERE warehouse_id IN (${wh})) AS purchases,
+            (SELECT COUNT(*) FROM stock_transfers WHERE from_warehouse_id IN (${wh}) OR to_warehouse_id IN (${wh})) AS transfers,
+            (SELECT COUNT(*) FROM stock_counts WHERE warehouse_id IN (${wh})) AS counts`,
+    { id },
+  );
+  const LABEL = {
+    orders: 'บิลขาย',
+    shifts: 'กะขาย',
+    transactions: 'รายการรับ-จ่าย',
+    movements: 'ความเคลื่อนไหวสต๊อก',
+    stocked: 'สินค้าคงเหลือในคลัง',
+    purchases: 'ใบสั่งซื้อ',
+    transfers: 'ใบโอนสินค้า',
+    counts: 'รอบตรวจนับ',
+  };
+  const used = Object.keys(LABEL).filter((k) => Number(usage[k]));
+  if (used.length) {
+    throw conflict(
+      `ลบสาขา "${branch.name}" ไม่ได้ เพราะมี${used.map((k) => `${LABEL[k]} ${Number(usage[k]).toLocaleString('th-TH')} รายการ`).join(', ')} — ใช้ "ปิดใช้งาน" แทนเพื่อเก็บประวัติไว้`,
+    );
+  }
+
+  await db.tx(async (conn) => {
+    await conn.query('DELETE FROM held_bills WHERE branch_id = :id AND org_id = :orgId', { id, orgId });
+    await conn.query('DELETE FROM warehouses WHERE branch_id = :id AND org_id = :orgId', { id, orgId }); // empty: only zero stock rows cascade
+    await conn.query('DELETE FROM branches WHERE id = :id AND org_id = :orgId', { id, orgId }); // users of this branch get branch_id NULL
+  });
+  audit(req, 'branch.delete', 'branch', id, { name: branch.name });
+  res.json({ data: { id } });
+});
+
 /* ------------------------------------------------------- demo data reset */
 
 const OWNER_ROLES = ['owner', 'admin'];

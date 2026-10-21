@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, MapPin, Pencil, Plus, Store, Warehouse } from "lucide-react";
+import { Loader2, MapPin, Pencil, Plus, Store, Trash2, Warehouse } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Branch } from "@/lib/types";
@@ -96,6 +96,24 @@ function BranchDialog({ branch, onClose }: { branch: Branch | null; onClose: () 
   const [address, setAddress] = useState(branch?.address ?? "");
   const [isActive, setIsActive] = useState(branch?.isActive ?? true);
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const remove = async () => {
+    if (!branch) return;
+    if (!confirmDelete) return setConfirmDelete(true);
+    setBusy(true);
+    try {
+      await api.del(`/org/branches/${branch.id}`);
+      await qc.invalidateQueries({ queryKey: BRANCHES_KEY });
+      toast.success(`ลบสาขา ${branch.name} แล้ว`);
+      onClose();
+    } catch (err) {
+      // e.g. the branch has sales or stock history: the message suggests disabling it instead
+      toast.error(err instanceof Error ? err.message : "ลบไม่สำเร็จ", { duration: 10_000 });
+      setBusy(false);
+      setConfirmDelete(false);
+    }
+  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,7 +178,13 @@ function BranchDialog({ branch, onClose }: { branch: Branch | null; onClose: () 
             เปิดใช้งาน (สาขาที่ปิดจะเลือกเปิดกะขายไม่ได้ แต่ข้อมูลเดิมยังอยู่ครบ)
           </label>
         )}
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+          {branch && (
+            <Button type="button" variant={confirmDelete ? "danger" : "ghost"} onClick={remove} disabled={busy} className={cn("mr-auto", !confirmDelete && "text-danger")}>
+              <Trash2 className="size-4" />
+              {confirmDelete ? "ยืนยันลบสาขานี้" : "ลบสาขา"}
+            </Button>
+          )}
           <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
             ยกเลิก
           </Button>
