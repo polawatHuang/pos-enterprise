@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { Loader2, Store } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -16,13 +17,15 @@ import { METHOD_LABEL } from "./receipt";
 export const SHIFT_KEY = ["pos", "shift"] as const;
 
 export function OpenShiftCard() {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const qc = useQueryClient();
   const branches = useQuery({ queryKey: ["org", "branches"], queryFn: () => api.get<Branch[]>("/org/branches"), staleTime: 10 * 60_000 });
   const [branchId, setBranchId] = useState(user?.branchId ? String(user.branchId) : "");
   const [cash, setCash] = useState("0");
   const [busy, setBusy] = useState(false);
-  const selected = branchId || String(branches.data?.[0]?.id ?? "");
+  const active = branches.data?.filter((b) => b.isActive) ?? [];
+  // The user's own branch when it is still active, otherwise the first active one
+  const selected = active.some((b) => String(b.id) === branchId) ? branchId : String(active[0]?.id ?? "");
 
   const open = async () => {
     setBusy(true);
@@ -47,13 +50,35 @@ export function OpenShiftCard() {
       <div className="mt-6 grid gap-4">
         <div className="space-y-2">
           <Label htmlFor="branch">สาขา</Label>
-          <NativeSelect id="branch" className="h-10 w-full" value={selected} onChange={(e) => setBranchId(e.target.value)}>
-            {branches.data?.map((b) => (
+          <NativeSelect id="branch" className="h-10 w-full" value={selected} onChange={(e) => setBranchId(e.target.value)} disabled={!active.length}>
+            {active.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.name}
               </option>
             ))}
           </NativeSelect>
+          {branches.isError ? (
+            <p className="text-sm text-danger">
+              โหลดรายชื่อสาขาไม่สำเร็จ{" "}
+              <button type="button" onClick={() => branches.refetch()} className="font-medium underline underline-offset-2">
+                ลองใหม่
+              </button>
+            </p>
+          ) : (
+            branches.data &&
+            !active.length && (
+              <p className="text-sm text-warning">
+                ยังไม่มีสาขาที่เปิดใช้งาน{" "}
+                {can("settings:manage") ? (
+                  <Link href="/settings/branches" className="font-medium underline underline-offset-2">
+                    เพิ่มสาขา
+                  </Link>
+                ) : (
+                  "ติดต่อเจ้าของร้านเพื่อเพิ่มสาขา"
+                )}
+              </p>
+            )
+          )}
         </div>
         <div className="space-y-2">
           <Label htmlFor="opening">เงินทอนเริ่มต้น (บาท)</Label>

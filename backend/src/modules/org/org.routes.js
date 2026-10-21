@@ -6,19 +6,100 @@ const { z } = require('zod');
 const { authenticate, requirePermission } = require('../../core/auth');
 const { validate } = require('../../core/http');
 const { audit } = require('../../core/audit');
-const { badRequest, forbidden } = require('../../core/errors');
+const { badRequest, conflict, forbidden, notFound } = require('../../core/errors');
 const { resetOrgData, CONFIRM_PHRASE } = require('./reset');
 
 const router = express.Router();
 router.use(authenticate);
 
+/* ---------------------------------------------------------------- branches */
+
 router.get('/branches', async (req, res) => {
   const rows = await db.query(
-    'SELECT id, code, name, branch_no AS branchNo, is_active AS isActive FROM branches WHERE org_id = :orgId ORDER BY code',
+    `SELECT b.id, b.code, b.name, b.branch_no AS branchNo, b.address, b.is_active AS isActive,
+            (SELECT w.id FROM warehouses w WHERE w.branch_id = b.id ORDER BY w.id LIMIT 1) AS warehouseId,
+            (SELECT w.name FROM warehouses w WHERE w.branch_id = b.id ORDER BY w.id LIMIT 1) AS warehouseName
+       FROM branches b WHERE b.org_id = :orgId ORDER BY b.code`,
     { orgId: req.user.orgId },
   );
   res.json({ data: rows.map((r) => ({ ...r, isActive: Boolean(r.isActive) })) });
 });
+
+const branchBody = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(1, 'ใส่รหัสสาขา')
+    .max(32)
+    .regex(/^[A-Za-z0-9_-]+$/, 'รหัสสาขาใช้ได้เฉพาะ A-Z, 0-9, - และ _')
+    .transform((v) => v.toUpperCase()),
+  name: z.string().trim().min(1, 'ใส่ชื่อสาขา').max(191),
+  // Revenue Department branch number on tax invoices: 00000 = head office
+  branchNo: z.string().trim().regex(/^\d{5}$/, 'เลขที่สาขาต้องเป็นตัวเลข 5 หลัก (สำนักงานใหญ่ = 00000)'),
+  address: z.string().trim().max(1000).nullable().optional(),
+});
+const branchId = z.object({ id: z.coerce.number().int().positive() });
+const duplicateCode = (err) => {
+  if (err.code === 'ER_DUP_ENTRY') throw conflict('รหัสสาขานี้มีอยู่แล้ว');
+  throw err;
+};
+
+/** New branch with its own stock location, so POS sales there have a warehouse to draw from. */
+router.post('/branches', requirePermission('settings:manage'), validate({ body: branchBody }), async (req, res) => {
+  const b = req.valid.body;
+  const orgId = req.user.orgId;
+  const id = await db
+    .tx(async (conn) => {
+      const [r] = await conn.query(
+        'INSERT INTO branches (org_id, code, name, branch_no, address) VALUES (:orgId, :code, :name, :branchNo, :address)',
+        { orgId, ...b, address: b.address || null },
+      );
+      // Warehouse codes are unique per org too; add a suffix if WH-<code> is taken
+      const [[taken]] = await conn.query('SELECT COUNT(*) AS n FROM warehouses WHERE org_id = :orgId AND code = :code', { orgId, code: `WH-${b.code}` });
+      await conn.query('INSERT INTO warehouses (org_id, branch_id, code, name) VALUES (:orgId, :branchId, :code, :name)', {
+        orgId,
+        branchId: r.insertId,
+        code: Number(taken.n) ? `WH-${b.code}-${r.insertId}` : `WH-${b.code}`,
+        name: `คลัง ${b.name}`.slice(0, 191),
+      });
+      return r.insertId;
+    })
+    .catch(duplicateCode);
+  audit(req, 'branch.create', 'branch', id, { code: b.code, name: b.name });
+  res.status(201).json({ data: { id } });
+});
+
+router.patch(
+  '/branches/:id',
+  requirePermission('settings:manage'),
+  validate({ params: branchId, body: branchBody.partial().extend({ isActive: z.boolean().optional() }) }),
+  async (req, res) => {
+    const orgId = req.user.orgId;
+    const { id } = req.valid.params;
+    const b = req.valid.body;
+    const current = await db.one('SELECT id, is_active FROM branches WHERE id = :id AND org_id = :orgId', { id, orgId });
+    if (!current) throw notFound('ไม่พบสาขา');
+
+    if (b.isActive === false && current.is_active) {
+      const active = await db.one('SELECT COUNT(*) AS n FROM branches WHERE org_id = :orgId AND is_active = 1', { orgId });
+      if (Number(active.n) <= 1) throw badRequest('ต้องมีสาขาที่เปิดใช้งานอย่างน้อย 1 สาขา');
+      const open = await db.one('SELECT COUNT(*) AS n FROM pos_shifts WHERE branch_id = :id AND closed_at IS NULL', { id });
+      if (Number(open.n)) throw badRequest('สาขานี้ยังมีกะขายที่เปิดอยู่ ปิดกะก่อนจึงปิดใช้งานสาขาได้');
+    }
+
+    // Only the fields that were sent
+    const cols = { code: 'code', name: 'name', branchNo: 'branch_no', address: 'address', isActive: 'is_active' };
+    const sets = Object.keys(cols).filter((k) => b[k] !== undefined);
+    if (!sets.length) throw badRequest('ไม่มีข้อมูลที่จะแก้ไข');
+    const params = { id, orgId };
+    for (const k of sets) params[k] = k === 'isActive' ? (b[k] ? 1 : 0) : k === 'address' ? b[k] || null : b[k];
+    await db
+      .query(`UPDATE branches SET ${sets.map((k) => `${cols[k]} = :${k}`).join(', ')} WHERE id = :id AND org_id = :orgId`, params)
+      .catch(duplicateCode);
+    audit(req, 'branch.update', 'branch', id, { fields: sets });
+    res.json({ data: { id } });
+  },
+);
 
 router.get('/roles', requirePermission('users:read'), async (req, res) => {
   const rows = await db.query(

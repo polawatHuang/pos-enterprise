@@ -17,7 +17,11 @@ export interface Branch {
   code: string;
   name: string;
   branchNo: string;
+  address: string | null;
   isActive: boolean;
+  /** Stock location the POS sells from at this branch */
+  warehouseId: number | null;
+  warehouseName: string | null;
 }
 
 export interface Role {
