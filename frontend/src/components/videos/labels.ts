@@ -22,7 +22,7 @@ export function steps(visualMode: VideoVisualMode) {
   return [
     { key: "script", label: "สคริปต์", statuses: ["script_ready"] },
     { key: "voice", label: "เสียงพากย์", statuses: ["voicing"] },
-    ...(visualMode === "ai_clips" ? [{ key: "clips", label: "คลิป AI", statuses: ["generating_clips"] }] : []),
+    ...(visualMode !== "product_images" ? [{ key: "clips", label: "คลิป AI", statuses: ["generating_clips"] }] : []),
     { key: "compose", label: "ประกอบคลิป", statuses: ["compositing"] },
     { key: "done", label: "เสร็จ", statuses: ["ready", "parts_ready"] },
   ] as { key: string; label: string; statuses: VideoStatus[] }[];
@@ -31,9 +31,13 @@ export function steps(visualMode: VideoVisualMode) {
 export const LENGTHS = [15, 30, 45, 60];
 
 export const VISUAL_MODES: { value: VideoVisualMode; title: string; hint: string }[] = [
-  { value: "my_footage", title: "ฟุตเทจของฉัน (แนะนำ)", hint: "อัปคลิป/รูปสินค้าจริงที่ถ่ายเอง AI ตัดต่อให้ ดูจริง ไม่เสี่ยงกฎ AI ของแพลตฟอร์ม" },
+  {
+    value: "my_footage",
+    title: "AI วิดีโอจากภาพฉาก (แนะนำ)",
+    hint: "ใส่ภาพฉากเรียงตามลำดับ (ไม่ใส่ AI สร้างให้) แล้ว AI ทำแต่ละภาพให้เคลื่อนไหวเป็นคลิป ต่อกันตามลำดับ · มีค่าใช้จ่ายต่อฉาก",
+  },
   { value: "product_images", title: "รูปสินค้า + เคลื่อนไหว", hint: "เร็ว ประหยัด ใช้รูปสินค้าในระบบ" },
-  { value: "ai_clips", title: "คลิป AI (Hailuo)", hint: "ภาพสร้างโดย AI ทั้งหมด มีค่าใช้จ่ายต่อฉาก" },
+  { value: "ai_clips", title: "คลิป AI จากข้อความ", hint: "AI สร้างคลิปจาก prompt ของแต่ละฉากโดยไม่ใช้ภาพ มีค่าใช้จ่ายต่อฉาก" },
 ];
 
 export const CAPTION_STYLES: { value: CaptionStyle; label: string }[] = [

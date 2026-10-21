@@ -96,6 +96,10 @@ function Editor({ v }: { v: VideoDetail }) {
   const caps = meta.data?.capabilities;
   // Speech fails without a voice, so don't let the user start (and pay for) a run that can't finish
   const hasVoice = Boolean(voiceId || caps?.voice[voiceProvider].defaultVoiceId);
+  // Scene pictures play in order; scenes past the uploaded ones get an AI picture, own videos skip the AI clip
+  const pictureOf = scenes.map((s, i) => (s.media && s.media <= v.media.length ? s.media - 1 : i < v.media.length ? i : null));
+  const missingImages = visualMode === "my_footage" ? pictureOf.filter((k) => k === null).length : 0;
+  const ownVideos = pictureOf.filter((k) => k !== null && v.media[k]?.kind === "video").length;
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["videos"] });
   const run = async (key: string, fn: () => Promise<unknown>, ok?: string) => {
@@ -386,13 +390,13 @@ function Editor({ v }: { v: VideoDetail }) {
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor={`vis-${i}`}>ภาพ (prompt ภาษาอังกฤษ)</Label>
-                  <Input id={`vis-${i}`} value={s.visual} onChange={(e) => update(i, { visual: e.target.value })} disabled={locked || visualMode !== "ai_clips"} maxLength={600} />
+                  <Input id={`vis-${i}`} value={s.visual} onChange={(e) => update(i, { visual: e.target.value })} disabled={locked || visualMode === "product_images"} maxLength={600} />
                 </div>
               </div>
-              {visualMode === "my_footage" && v.media.length > 0 && (
+              {visualMode === "my_footage" && (
                 <div className="mt-2 flex items-center gap-2 text-xs">
                   <Label htmlFor={`med-${i}`} className="text-xs text-muted-foreground">
-                    ฟุตเทจเปิดฉาก
+                    ภาพของฉากนี้
                   </Label>
                   <NativeSelect
                     id={`med-${i}`}
@@ -401,7 +405,9 @@ function Editor({ v }: { v: VideoDetail }) {
                     disabled={locked}
                     className="h-8 w-auto text-xs"
                   >
-                    <option value="">อัตโนมัติ</option>
+                    <option value="">
+                      {i < v.media.length ? `ตามลำดับ (ภาพที่ ${i + 1})` : s.showProduct ? "ใช้รูปสินค้า (อัตโนมัติ)" : "ให้ AI สร้างภาพ (จาก prompt)"}
+                    </option>
                     {v.media.map((m, j) => (
                       <option key={m.id} value={j + 1}>
                         {j + 1}. {m.label || (m.kind === "video" ? "คลิป" : "รูป")}
@@ -410,10 +416,10 @@ function Editor({ v }: { v: VideoDetail }) {
                   </NativeSelect>
                 </div>
               )}
-              {visualMode === "ai_clips" && (
+              {visualMode !== "product_images" && (
                 <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                   <input type="checkbox" checked={s.showProduct} onChange={(e) => update(i, { showProduct: e.target.checked })} disabled={locked} className="size-4 accent-primary" />
-                  ใช้รูปสินค้าเป็นเฟรมแรกของคลิปนี้
+                  {visualMode === "my_footage" ? "ฉากนี้โชว์สินค้า (ถ้าไม่มีภาพ ใช้รูปสินค้าจริงแทนภาพ AI)" : "ใช้รูปสินค้าเป็นเฟรมแรกของคลิปนี้"}
                 </label>
               )}
             </Card>
@@ -489,8 +495,11 @@ function Editor({ v }: { v: VideoDetail }) {
               {done && <p className="text-xs text-warning">คลิปเสร็จแล้ว — กดปุ่มด้านบนเฉพาะเมื่อต้องการทำใหม่ (ใช้เครดิต Shotstack อีกครั้ง)</p>}
               <p className="text-xs text-muted-foreground">
                 ใช้เสียงพากย์ {scenes.length} ช่วง ({scenes.reduce((n, s) => n + s.voiceover.length, 0)} ตัวอักษร)
-                {visualMode === "ai_clips" ? ` และคลิป AI ${scenes.length} คลิป (มีค่าใช้จ่ายต่อคลิป)` : ""} — ระบบมีป้าย &quot;สร้างด้วย AI&quot; ในคลิปตามข้อกำหนดของแพลตฟอร์ม
-                {visualMode === "my_footage" ? " · ฟุตเทจจริงช่วยให้คลิปดูน่าเชื่อถือ และไม่ติดข้อห้ามคอนเทนต์ AI ล้วน" : ""}
+                {visualMode === "ai_clips" ? ` และคลิป AI ${scenes.length} คลิป (มีค่าใช้จ่ายต่อคลิป)` : ""}
+                {visualMode === "my_footage"
+                  ? ` · ${missingImages ? `AI สร้างภาพฉาก ${missingImages} ภาพ · ` : ""}ทำภาพเป็นคลิป AI ${scenes.length - ownVideos} ฉาก (มีค่าใช้จ่ายต่อฉาก)`
+                  : ""}{" "}
+                — ระบบมีป้าย &quot;สร้างด้วย AI&quot; ในคลิปตามข้อกำหนดของแพลตฟอร์ม
               </p>
             </CardContent>
           </Card>
@@ -516,12 +525,12 @@ function Readiness({
 }) {
   const rows = [
     ...(needsPublic && caps.publicMedia
-      ? [{ label: "ลิงก์ฟุตเทจ/ปกให้ระบบตัดต่อ", ok: caps.publicMedia.configured, missing: caps.publicMedia.missing, required: visualMode === "my_footage", note: "โดเมน HTTPS ของ backend" }]
+      ? [{ label: "ลิงก์ภาพฉาก/ปกให้ระบบตัดต่อ", ok: caps.publicMedia.configured, missing: caps.publicMedia.missing, required: visualMode === "my_footage", note: "โดเมน HTTPS ของ backend" }]
       : []),
     caps.voice[voiceProvider].configured
       ? { label: "เสียงพากย์", ok: hasVoice, missing: [], required: true, problem: "ยังไม่ได้เลือกเสียง (เลือกที่ช่องเสียงพากย์ทางซ้าย)" }
       : { label: "เสียงพากย์", ok: false, missing: caps.voice[voiceProvider].missing, required: true },
-    ...(visualMode === "ai_clips" ? [{ label: "คลิป AI", ok: caps.clips.configured, missing: caps.clips.missing, required: true }] : []),
+    ...(visualMode !== "product_images" ? [{ label: "คลิป AI (MiniMax Hailuo)", ok: caps.clips.configured, missing: caps.clips.missing, required: true }] : []),
     { label: "ประกอบคลิป (Shotstack)", ok: caps.compose.configured, missing: caps.compose.missing, required: false, note: "ถ้าไม่มี จะได้ชิ้นส่วนไปตัดต่อเอง" },
     { label: "เก็บไฟล์ถาวร (R2)", ok: caps.storage.configured, missing: caps.storage.missing, required: false, note: "ถ้าไม่มี ลิงก์ไฟล์หมดอายุใน ~24 ชม." },
   ];

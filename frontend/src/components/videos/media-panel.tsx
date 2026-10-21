@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Film, ImageIcon, Loader2, Trash2, Upload } from "lucide-react";
+import { ArrowDown, ArrowUp, Film, ImageIcon, Loader2, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiBlob, ApiError } from "@/lib/api";
 import type { VideoMedia } from "@/lib/types";
@@ -117,7 +117,10 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
 
   const upload = async (files: FileList | null) => {
     if (!files?.length) return;
-    const picked = Array.from(files).slice(0, MAX_FILES - media.length);
+    // Several pictures at once play in file-name order (scene-01.jpg, scene-02.jpg …)
+    const picked = Array.from(files)
+      .sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true }))
+      .slice(0, MAX_FILES - media.length);
     if (!picked.length) return toast.error(`อัปโหลดได้สูงสุด ${MAX_FILES} ไฟล์`);
     // Read the bytes now, before the input is disabled/re-rendered (Safari may refuse a late read)
     const list = await readFilesNow(picked, (f, err) => toast.error(`${f.name}: ${isUnreadable(err) ? UNREADABLE_HELP : "อ่านไฟล์ไม่สำเร็จ"}`));
@@ -163,6 +166,24 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
     }
   };
 
+  // Order = scene order: rewrite every position so equal sort values can't keep two files tied
+  const [moving, setMoving] = useState(false);
+  const move = async (i: number, d: -1 | 1) => {
+    const order = [...media];
+    [order[i], order[i + d]] = [order[i + d], order[i]];
+    setMoving(true);
+    try {
+      for (const [j, m] of order.entries()) {
+        if (m.sortOrder !== j + 1) await api.patch(`/videos/${projectId}/media/${m.id}`, { sortOrder: j + 1 });
+      }
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "เรียงลำดับไม่สำเร็จ");
+    } finally {
+      setMoving(false);
+    }
+  };
+
   const remove = async (m: VideoMedia) => {
     if (!window.confirm("ลบไฟล์นี้?")) return;
     try {
@@ -176,9 +197,10 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
   return (
     <Card className={cn(highlight && !media.length && "border-primary")}>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">ฟุตเทจของฉัน ({media.length}/{MAX_FILES})</CardTitle>
+        <CardTitle className="text-base">ภาพฉาก ({media.length}/{MAX_FILES})</CardTitle>
         <CardDescription>
-          ถ่ายสินค้าจริงสั้นๆ คลิปละ 3–15 วินาที เช่น แกะกล่อง ถือโชว์ ใช้งานจริง แล้วตั้งชื่อว่าคลิปเป็นภาพอะไร — AI จะเลือกใช้ให้ตรงกับแต่ละฉากเมื่อกด &quot;เขียนใหม่ด้วย AI&quot;
+          ภาพที่ 1 = ฉาก 1, ภาพที่ 2 = ฉาก 2 … แต่ละภาพจะถูก AI ทำให้เคลื่อนไหวเป็นคลิป แล้วต่อกันตามลำดับ ใช้ภาพแนวตั้งที่ไม่มีตัวหนังสือ (ระบบใส่ซับให้เอง) ·
+          อัปโหลดแล้วกด &quot;เขียนใหม่ด้วย AI&quot; ให้บทพากย์ตรงกับภาพ · ฉากที่ไม่มีภาพ AI จะสร้างภาพให้ตอนกดสร้างวิดีโอ
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
@@ -188,7 +210,7 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
               <li key={m.id} className="flex items-center gap-2 rounded-lg border border-border p-2">
                 <span className="relative size-14 shrink-0 overflow-hidden rounded-md bg-muted">
                   <Preview m={m} />
-                  <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 text-[10px] font-semibold text-white">{i + 1}</span>
+                  <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 text-[10px] font-semibold text-white">ฉาก {i + 1}</span>
                 </span>
                 <div className="min-w-0 flex-1 space-y-1">
                   <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -201,12 +223,27 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
                     onBlur={() => void saveLabel(m)}
                     disabled={locked}
                     maxLength={100}
-                    placeholder="เป็นภาพอะไร เช่น แกะกล่อง"
-                    aria-label={`ชื่อฟุตเทจ ${i + 1}`}
+                    placeholder="ภาพนี้คืออะไร เช่น ถือตลับแป้ง"
+                    aria-label={`ชื่อภาพ ${i + 1}`}
                     className="h-8 text-xs"
                   />
                 </div>
-                <Button size="sm" variant="ghost" disabled={locked} onClick={() => void remove(m)} aria-label={`ลบฟุตเทจ ${i + 1}`}>
+                <div className="flex flex-col">
+                  <Button size="icon" variant="ghost" className="size-7" disabled={locked || moving || i === 0} onClick={() => void move(i, -1)} aria-label={`เลื่อนภาพ ${i + 1} ขึ้น`}>
+                    <ArrowUp className="size-3.5" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    disabled={locked || moving || i === media.length - 1}
+                    onClick={() => void move(i, 1)}
+                    aria-label={`เลื่อนภาพ ${i + 1} ลง`}
+                  >
+                    <ArrowDown className="size-3.5" />
+                  </Button>
+                </div>
+                <Button size="sm" variant="ghost" disabled={locked} onClick={() => void remove(m)} aria-label={`ลบภาพ ${i + 1}`}>
                   <Trash2 />
                 </Button>
               </li>
@@ -223,7 +260,7 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
             }}
           >
             {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-            {uploading ?? "อัปโหลดคลิป/รูป (ลากมาวางได้ เลือกหลายไฟล์ได้)"}
+            {uploading ?? "อัปโหลดภาพฉาก (ลากมาวางได้ เลือกหลายไฟล์ได้ — เรียงตามชื่อไฟล์)"}
             <input type="file" accept={ACCEPT} multiple className="sr-only" disabled={uploading !== null} onChange={(e) => void upload(e.target.files).then(() => (e.target.value = ""))} />
           </label>
         )}

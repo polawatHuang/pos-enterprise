@@ -146,7 +146,26 @@ function dropUpload(upload) {
   fs.rmSync(upload.files.meta, { force: true });
 }
 
+/**
+ * Which file (0-based position in the project's list) each scene shows: the editor's explicit pick,
+ * otherwise the file at the same position, so uploads play in order. null = no file for that scene.
+ */
+function sceneMediaIndex(scenes, count) {
+  return scenes.map((sc, i) => (Number.isInteger(sc?.media) && sc.media >= 1 && sc.media <= count ? sc.media - 1 : i < count ? i : null));
+}
+
+const AI_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+/** Image bytes for the script writer to look at; videos and very large files are described by label only. */
+function imageForAi(row) {
+  if (row.kind !== 'image' || Number(row.size_bytes) > AI_IMAGE_MAX_BYTES) return null;
+  const p = filePath(row.storage_key);
+  if (!p || !fs.existsSync(p)) return null;
+  return { mime: row.mime, data: fs.readFileSync(p).toString('base64') };
+}
+
 module.exports = {
+  sceneMediaIndex,
+  imageForAi,
   CHUNK_BYTES,
   MAX_CHUNK_BYTES,
   startUpload,
