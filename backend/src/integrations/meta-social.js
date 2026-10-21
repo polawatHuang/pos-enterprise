@@ -7,6 +7,8 @@ const { AppError } = require('../core/errors');
 const version = () => runtime.get('META_GRAPH_VERSION') || 'v23.0';
 const graph = () => `https://graph.facebook.com/${version()}`;
 const SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'business_management', 'instagram_basic', 'instagram_content_publish'];
+/** Inbox: read/answer Messenger and Instagram Direct, and subscribe the page to the app's webhook. */
+const INBOX_SCOPES = ['pages_show_list', 'pages_manage_metadata', 'pages_messaging', 'business_management', 'instagram_basic', 'instagram_manage_messages'];
 
 async function call(path, { method = 'GET', params = {}, headers = {} } = {}) {
   const url = new URL(`${graph()}${path}`);
@@ -37,9 +39,10 @@ const adapter = defineAdapter(
     ],
   },
   {
-    getAuthorizeUrl(state) {
+    getAuthorizeUrl(state, { inbox = false } = {}) {
       const env = adapter.requireConfig();
-      const q = new URLSearchParams({ client_id: env.META_APP_ID, redirect_uri: env.META_REDIRECT_URI, state, response_type: 'code', scope: SCOPES.join(',') });
+      const scope = (inbox ? INBOX_SCOPES : SCOPES).join(',');
+      const q = new URLSearchParams({ client_id: env.META_APP_ID, redirect_uri: env.META_REDIRECT_URI, state, response_type: 'code', scope });
       return `https://www.facebook.com/${version()}/dialog/oauth?${q}`;
     },
 
@@ -69,6 +72,26 @@ const adapter = defineAdapter(
           ? { id: p.instagram_business_account.id, username: p.instagram_business_account.username, picture: p.instagram_business_account.profile_picture_url ?? null }
           : null,
       }));
+    },
+
+    /**
+     * Deliver the page's Messenger (and linked Instagram) messages to this app's webhook.
+     * Instagram Direct needs the page subscribed too; the webhook URL itself is set in the Meta app.
+     */
+    async subscribeMessages(pageId, pageToken) {
+      return call(`/${pageId}/subscribed_apps`, {
+        method: 'POST',
+        params: { subscribed_fields: 'messages,messaging_postbacks', access_token: pageToken },
+      });
+    },
+
+    /** Customer display name for a Messenger PSID / Instagram-scoped id; null when Meta withholds it. */
+    async customerName(platform, userId, pageToken) {
+      const fields = platform === 'instagram' ? 'name,username' : 'name,first_name,last_name';
+      const r = await call(`/${userId}`, { params: { fields, access_token: pageToken } }).catch(() => null);
+      if (!r) return null;
+      const name = r.name || [r.first_name, r.last_name].filter(Boolean).join(' ');
+      return (name || (r.username ? `@${r.username}` : '')).slice(0, 191) || null;
     },
 
     /* --------------------------------------------------- Facebook Page Reels */

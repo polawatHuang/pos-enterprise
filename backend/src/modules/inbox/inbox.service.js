@@ -21,7 +21,9 @@ async function channelToken(channel) {
   );
   if (row) {
     try {
-      return decryptJson(row.data_encrypted).accessToken;
+      // Inbox saves {accessToken}; a page connected from โพสต์โซเชียล saves {pageToken} under the same key
+      const data = decryptJson(row.data_encrypted);
+      return data.accessToken ?? data.pageToken ?? null;
     } catch (err) {
       logger.error({ err, channelId: channel.id }, 'cannot decrypt channel token (APP_ENCRYPTION_KEY changed?)');
     }
@@ -31,13 +33,14 @@ async function channelToken(channel) {
   return null;
 }
 
-async function saveChannelToken(channel, accessToken) {
+/** Save a channel's token. Meta page tokens are stored under both names so Inbox and social posting share them. */
+async function saveChannelToken(channel, accessToken, extra = {}) {
   if (!process.env.APP_ENCRYPTION_KEY) throw badRequest('ต้องตั้งค่า APP_ENCRYPTION_KEY บนเซิร์ฟเวอร์ก่อนบันทึก token');
   await db.query(
     `INSERT INTO integration_credentials (org_id, provider, account_ref, data_encrypted)
      VALUES (:orgId, :provider, :ref, :data)
      ON DUPLICATE KEY UPDATE data_encrypted = VALUES(data_encrypted)`,
-    { orgId: channel.org_id, provider: channel.platform, ref: channel.external_id ?? 'default', data: encryptJson({ accessToken }) },
+    { orgId: channel.org_id, provider: channel.platform, ref: channel.external_id ?? 'default', data: encryptJson({ accessToken, ...(['facebook', 'instagram'].includes(channel.platform) ? { pageToken: accessToken } : {}), ...extra }) },
   );
 }
 

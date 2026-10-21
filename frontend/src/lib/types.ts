@@ -874,6 +874,14 @@ export interface InboxSummary {
   newReturns: number;
   aiProvider: string;
   aiConfigured: boolean;
+  /** Connected (active) channels and open chats per platform */
+  platforms?: { platform: Platform; channels: number; open: number }[];
+}
+
+export interface InboxChannelsMeta {
+  publicApiUrlConfigured: boolean;
+  metaLogin?: { configured: boolean; missing: string[] };
+  metaWebhook?: { configured: boolean; missing: string[]; callbackUrl: string };
 }
 
 export interface InboxChannelConfig {

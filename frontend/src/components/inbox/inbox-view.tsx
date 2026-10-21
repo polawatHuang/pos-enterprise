@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { Conversation, ConversationDetail, InboxMessage, InboxSummary } from "@/lib/types";
+import type { Conversation, ConversationDetail, InboxMessage, InboxSummary, Platform } from "@/lib/types";
 import { cn, formatDateTime, formatMoney, formatRelativeTime, initials } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,56 @@ import { CONV_STATUS, INTENT_LABEL, OFFER_STATUS, PLATFORM, PROVIDER_LABEL, RETU
 
 type View = "active" | "human" | "ai" | "resolved";
 const POLL_MS = 5000;
+
+/** Channel filter: every platform with a connected channel, plus Facebook / Instagram to connect when missing. */
+function ChannelFilter({
+  platforms,
+  value,
+  onChange,
+}: {
+  platforms: NonNullable<InboxSummary["platforms"]>;
+  value: Platform | "all";
+  onChange: (p: Platform | "all") => void;
+}) {
+  const connected = new Map(platforms.map((p) => [p.platform, p]));
+  const order: Platform[] = ["facebook", "instagram", "line", "tiktok", "shopee", "website", "email"];
+  const shown = order.filter((p) => connected.has(p) || p === "facebook" || p === "instagram");
+  const chip = "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors";
+  return (
+    <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" aria-label="ช่องทาง">
+      <button
+        type="button"
+        onClick={() => onChange("all")}
+        className={cn(chip, value === "all" ? "border-primary bg-primary-soft text-primary" : "border-border text-muted-foreground hover:bg-accent")}
+      >
+        ทุกช่องทาง
+      </button>
+      {shown.map((p) => {
+        const c = connected.get(p);
+        if (!c) {
+          return (
+            <Link key={p} href="/inbox/settings?tab=channels" className={cn(chip, "border-dashed border-border text-muted-foreground hover:bg-accent")}>
+              <PlatformBadge platform={p} className="h-4 px-1 text-[9px]" /> + เชื่อมต่อ
+            </Link>
+          );
+        }
+        return (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onChange(p)}
+            aria-pressed={value === p}
+            className={cn(chip, value === p ? "border-primary bg-primary-soft text-primary" : "border-border text-muted-foreground hover:bg-accent")}
+          >
+            <PlatformBadge platform={p} className="h-4 px-1 text-[9px]" />
+            {PLATFORM[p].label}
+            {c.open > 0 && <span className="tabular-nums">({c.open})</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function PlatformBadge({ platform, className }: { platform: Conversation["platform"]; className?: string }) {
   const p = PLATFORM[platform] ?? PLATFORM.website;
@@ -47,6 +97,7 @@ export function InboxView() {
   const params = useSearchParams();
   const selectedId = Number(params.get("c")) || null;
   const [view, setView] = useState<View>("active");
+  const [platform, setPlatform] = useState<Platform | "all">("all");
   const [q, setQ] = useState("");
   const [showCustomer, setShowCustomer] = useState(false);
 
@@ -58,8 +109,8 @@ export function InboxView() {
     refetchInterval: POLL_MS * 3,
   });
   const list = useQuery({
-    queryKey: ["inbox", "list", view, q],
-    queryFn: () => api.get<Conversation[]>("/inbox/conversations", { view, q: q || undefined }),
+    queryKey: ["inbox", "list", view, q, platform],
+    queryFn: () => api.get<Conversation[]>("/inbox/conversations", { view, q: q || undefined, platform: platform === "all" ? undefined : platform }),
     refetchInterval: POLL_MS,
   });
 
@@ -113,6 +164,7 @@ export function InboxView() {
                 ]}
               />
             </div>
+            <ChannelFilter platforms={s?.platforms ?? []} value={platform} onChange={setPlatform} />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {list.isPending ? (
@@ -125,6 +177,11 @@ export function InboxView() {
               <div className="grid place-items-center gap-2 px-6 py-16 text-center text-sm text-muted-foreground">
                 <MessageSquareDashed className="size-8" />
                 ไม่มีแชตในมุมมองนี้
+                {s && !s.platforms?.some((p) => p.platform === "facebook" || p.platform === "instagram") && (
+                  <Link href="/inbox/settings?tab=channels" className="mt-2 text-primary hover:underline">
+                    เชื่อมต่อ Facebook Page / Instagram เพื่อรับแชตลูกค้า
+                  </Link>
+                )}
               </div>
             ) : (
               <ul>
