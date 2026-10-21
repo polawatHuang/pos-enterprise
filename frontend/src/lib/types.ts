@@ -819,6 +819,40 @@ export interface TrialBalance {
   balanced: boolean;
 }
 
+/** One balance-sheet row; `previous` is null unless a comparison date was requested. Synthetic rows (retained earnings) have no code. */
+export interface BalanceSheetLine {
+  code: string | null;
+  name: string;
+  amount: number;
+  previous: number | null;
+}
+
+export interface BalanceSheetSection {
+  lines: BalanceSheetLine[];
+  total: number;
+  previousTotal: number | null;
+}
+
+export interface BalanceSheetGroup {
+  current: BalanceSheetSection;
+  nonCurrent: BalanceSheetSection;
+  total: number;
+  previousTotal: number | null;
+}
+
+export interface BalanceSheet {
+  asOf: string;
+  compareTo: string | null;
+  fiscalYearStart: string;
+  assets: BalanceSheetGroup;
+  liabilities: BalanceSheetGroup;
+  equity: { lines: BalanceSheetLine[]; retainedEarnings: BalanceSheetLine; currentProfit: BalanceSheetLine; total: number; previousTotal: number | null };
+  totals: { assets: number; liabilities: number; equity: number; liabilitiesAndEquity: number };
+  difference: number;
+  balanced: boolean;
+  comparison: { asOf: string; difference: number; balanced: boolean } | null;
+}
+
 export interface JournalEntry {
   id: number;
   entryNo: string;
@@ -826,6 +860,7 @@ export interface JournalEntry {
   description: string;
   refType: string | null;
   refId: number | null;
+  status?: "draft" | "posted" | "void";
   lines: { code: string; name: string; debit: number; credit: number }[];
 }
 

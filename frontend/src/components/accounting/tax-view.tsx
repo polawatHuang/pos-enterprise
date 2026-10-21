@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Download, FileCheck2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileCheck2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { PP30, WhtReport } from "@/lib/types";
@@ -12,7 +12,9 @@ import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, NativeSelect, Skeleton, TabBar } from "@/components/ui/primitives";
 import { PageHeader } from "@/components/layout/page";
+import { ErrorNote } from "@/components/dashboard/widgets";
 import { THAI_MONTHS } from "./labels";
+import { PrintHeading, ReportActions } from "./report-actions";
 
 const STATUS_LABEL = { draft: "ร่าง", ready: "พร้อมยื่น", filed: "ยื่นแล้ว" } as const;
 
@@ -47,19 +49,21 @@ export function TaxView() {
           </>
         }
       />
-      <div className="mb-4 flex gap-2 rounded-lg bg-warning-soft p-3 text-sm text-warning">
+      <div className="mb-4 flex gap-2 rounded-lg bg-warning-soft p-3 text-sm text-warning print:hidden">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
         ตัวเลขเป็นร่างที่ระบบคำนวณจากข้อมูลที่บันทึกไว้ ควรให้ผู้ทำบัญชีตรวจทานก่อนยื่นจริง
       </div>
-      <TabBar
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { value: "PP30", label: "ภ.พ.30 (VAT)" },
-          { value: "PND53", label: "ภ.ง.ด.53 (นิติบุคคล)" },
-          { value: "PND3", label: "ภ.ง.ด.3 (บุคคลธรรมดา)" },
-        ]}
-      />
+      <div className="print:hidden">
+        <TabBar
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { value: "PP30", label: "ภ.พ.30 (VAT)" },
+            { value: "PND53", label: "ภ.ง.ด.53 (นิติบุคคล)" },
+            { value: "PND3", label: "ภ.ง.ด.3 (บุคคลธรรมดา)" },
+          ]}
+        />
+      </div>
       <div className="mt-4">{tab === "PP30" ? <Pp30Panel year={year} month={month} /> : <WhtPanel form={tab} year={year} month={month} />}</div>
     </>
   );
@@ -105,21 +109,33 @@ function StatusControl({ formType, year, month, saved }: { formType: string; yea
 function Pp30Panel({ year, month }: { year: number; month: number }) {
   const q = useQuery({ queryKey: ["accounting", "tax", "pp30", year, month], queryFn: () => api.get<PP30>("/accounting/tax/pp30", { year, month }) });
   if (q.isPending) return <Skeleton className="h-80 w-full rounded-xl" />;
-  if (q.isError) return <p className="text-muted-foreground">{q.error.message}</p>;
+  if (q.isError) return <ErrorNote onRetry={() => void q.refetch()} />;
   const d = q.data;
   const b = d.sales.breakdown;
+  const period = `${THAI_MONTHS[month - 1]} ${year + 543}`;
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
+    <div className="print-report grid gap-4 lg:grid-cols-3 print:block">
+      <PrintHeading title="ภ.พ.30 — แบบแสดงรายการภาษีมูลค่าเพิ่ม (ร่าง)" subtitle={`เดือนภาษี ${period}`} />
       <Card className="lg:col-span-2">
-        <CardHeader>
+        <CardHeader className="print:hidden">
           <div>
-            <CardTitle>ภ.พ.30 — {THAI_MONTHS[month - 1]} {year + 543}</CardTitle>
+            <CardTitle>ภ.พ.30 — {period}</CardTitle>
             <CardDescription>{d.dueNote}</CardDescription>
           </div>
-          <StatusControl formType="PP30" year={year} month={month} saved={d.saved} />
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusControl formType="PP30" year={year} month={month} saved={d.saved} />
+            <ReportActions csvPath="/accounting/tax/pp30.csv" query={{ year, month }} filename={`PP30-${year}-${String(month).padStart(2, "0")}.csv`} />
+          </div>
         </CardHeader>
         <CardContent>
           <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-muted-foreground">
+                <th className="pb-1 text-left font-medium">รายการ</th>
+                <th className="pb-1 text-right font-medium">มูลค่าก่อนภาษี</th>
+                <th className="w-32 pb-1 text-right font-medium">ภาษีมูลค่าเพิ่ม</th>
+              </tr>
+            </thead>
             <tbody>
               <Section title="ภาษีขาย" />
               <Line label={`ยอดขายหน้าร้านและออนไลน์ (${b.orders.count} ออร์เดอร์)`} base={b.orders.base} vat={b.orders.vat} />
@@ -140,7 +156,7 @@ function Pp30Panel({ year, month }: { year: number; month: number }) {
           </table>
         </CardContent>
       </Card>
-      <Card className="flex flex-col justify-center p-6 text-center">
+      <Card className="flex flex-col justify-center p-6 text-center print:mt-6">
         {d.vatPayable > 0 ? (
           <>
             <p className="text-sm text-muted-foreground">ภาษีที่ต้องชำระ</p>
@@ -184,34 +200,35 @@ function WhtPanel({ form, year, month }: { form: "PND3" | "PND53"; year: number;
     queryFn: () => api.get<WhtReport>("/accounting/tax/wht", { form, year, month }),
   });
   if (q.isPending) return <Skeleton className="h-80 w-full rounded-xl" />;
-  if (q.isError) return <p className="text-muted-foreground">{q.error.message}</p>;
+  if (q.isError) return <ErrorNote onRetry={() => void q.refetch()} />;
   const d = q.data;
-  const csvHref = `/api/accounting/tax/wht.csv?form=${form}&year=${year}&month=${month}`;
+  const title = form === "PND53" ? "ภ.ง.ด.53" : "ภ.ง.ด.3";
   return (
-    <Card>
-      <CardHeader>
+    <Card className="print-report">
+      <CardHeader className="print:hidden">
         <div>
           <CardTitle>
-            {form === "PND53" ? "ภ.ง.ด.53" : "ภ.ง.ด.3"} — {THAI_MONTHS[month - 1]} {year + 543}
+            {title} — {THAI_MONTHS[month - 1]} {year + 543}
           </CardTitle>
           <CardDescription>{d.dueNote}</CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <StatusControl formType={form} year={year} month={month} saved={d.saved} />
-          <a href={csvHref} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium hover:bg-accent" download>
-            <Download className="size-3.5" /> CSV
-          </a>
+          <ReportActions csvPath="/accounting/tax/wht.csv" query={{ form, year, month }} filename={`${form}-${year}-${String(month).padStart(2, "0")}.csv`} />
         </div>
       </CardHeader>
+      <div className="px-5 print:px-0">
+        <PrintHeading title={`${title} — รายการภาษีหัก ณ ที่จ่าย (ร่าง)`} subtitle={`เดือนภาษี ${THAI_MONTHS[month - 1]} ${year + 543}`} />
+      </div>
       {d.warnings.length > 0 && (
-        <div className="mx-5 mb-3 rounded-lg bg-warning-soft p-3 text-sm text-warning">
+        <div className="mx-5 mb-3 rounded-lg bg-warning-soft p-3 text-sm text-warning print:hidden">
           {d.warnings.map((w) => (
             <p key={w}>⚠️ {w}</p>
           ))}
         </div>
       )}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-sm">
+        <table className="w-full min-w-[760px] text-sm print:min-w-0">
           <thead>
             <tr className="border-y border-border text-left text-xs text-muted-foreground">
               <th className="px-5 py-2.5 font-medium">#</th>

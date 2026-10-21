@@ -8,6 +8,7 @@ const { validate } = require('../../core/http');
 const { requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
 const { r2 } = require('./ledger.service');
+const { money, sendCsv } = require('./csv');
 
 const router = express.Router();
 const TZ = env.APP_TZ_OFFSET;
@@ -152,29 +153,33 @@ router.get(
   },
 );
 
-const csvCell = (v) => {
-  const s = v == null ? '' : String(v);
-  // Neutralise spreadsheet formula injection and quote every cell
-  const safe = /^[=+\-@]/.test(s) ? `'${s}` : s;
-  return `"${safe.replace(/"/g, '""')}"`;
-};
-
 /** CSV for the accountant / RD e-Filing preparation (UTF-8 with BOM so Excel shows Thai). */
-router.get(
-  '/wht.csv',
-  requirePermission('accounting:read'),
-  validate({ query: period.extend({ form: z.enum(['PND3', 'PND53']) }) }),
-  async (req, res) => {
-    const { form, ...p } = req.valid.query;
-    const data = await whtReport(req.user.orgId, form, p);
-    const header = ['ลำดับ', 'เลขประจำตัวผู้เสียภาษี', 'ชื่อผู้มีเงินได้', 'วันที่จ่าย', 'ประเภทเงินได้', 'อัตราภาษี(%)', 'จำนวนเงินที่จ่าย', 'ภาษีที่หัก'];
-    const lines = data.items.map((i) => [i.seq, i.taxId, i.payee, i.date, i.incomeType, i.rate, i.amount.toFixed(2), i.wht.toFixed(2)]);
-    const csv = [header, ...lines].map((r) => r.map(csvCell).join(',')).join('\r\n');
-    res.set('Content-Type', 'text/csv; charset=utf-8');
-    res.set('Content-Disposition', `attachment; filename="${form}-${p.year}-${String(p.month).padStart(2, '0')}.csv"`);
-    res.send(`\uFEFF${csv}\r\n`);
-  },
-);
+router.get('/wht.csv', requirePermission('accounting:read'), validate({ query: period.extend({ form: z.enum(['PND3', 'PND53']) }) }), async (req, res) => {
+  const { form, ...p } = req.valid.query;
+  const data = await whtReport(req.user.orgId, form, p);
+  const header = ['ลำดับ', 'เลขประจำตัวผู้เสียภาษี', 'ชื่อผู้มีเงินได้', 'วันที่จ่าย', 'ประเภทเงินได้', 'อัตราภาษี(%)', 'จำนวนเงินที่จ่าย', 'ภาษีที่หัก'];
+  const lines = data.items.map((i) => [i.seq, i.taxId, i.payee, i.date, i.incomeType, i.rate, money(i.amount), money(i.wht)]);
+  sendCsv(res, `${form}-${p.year}-${String(p.month).padStart(2, '0')}.csv`, [header, ...lines]);
+});
+
+/** ภ.พ.30 summary as CSV: output VAT by source, input VAT, and the net payable / credit. */
+router.get('/pp30.csv', requirePermission('accounting:read'), validate({ query: period }), async (req, res) => {
+  const d = await pp30(req.user.orgId, req.valid.query);
+  const b = d.sales.breakdown;
+  const rows = [
+    ['หมวด', 'รายการ', 'จำนวน', 'มูลค่าก่อนภาษี', 'ภาษีมูลค่าเพิ่ม'],
+    ['ภาษีขาย', 'ยอดขายหน้าร้านและออนไลน์ (ออร์เดอร์)', b.orders.count, money(b.orders.base), money(b.orders.vat)],
+    ['ภาษีขาย', 'ใบกำกับภาษีที่ออก', b.taxInvoices.count, money(b.taxInvoices.base), money(b.taxInvoices.vat)],
+    ['ภาษีขาย', 'รายได้อื่นที่มี VAT', b.otherIncome.count, money(b.otherIncome.base), money(b.otherIncome.vat)],
+    ['ภาษีขาย', 'หัก ใบลดหนี้', b.creditNotes.count, money(-b.creditNotes.base), money(-b.creditNotes.vat)],
+    ['ภาษีขาย', 'รวมภาษีขาย', '', money(d.sales.base), money(d.sales.vat)],
+    ['ภาษีซื้อ', 'ค่าใช้จ่ายที่มีใบกำกับภาษี', d.purchases.count, money(d.purchases.base), money(d.purchases.vat)],
+    ['ภาษีซื้อ', 'VAT ที่ขอคืนไม่ได้ (ไม่ใช่ใบกำกับเต็มรูป)', '', '', money(d.purchases.unclaimableVat)],
+    ['สรุป', 'ภาษีที่ต้องชำระ', '', '', money(d.vatPayable)],
+    ['สรุป', 'ภาษีชำระเกิน (เครดิตยกไป)', '', '', money(d.vatCredit)],
+  ];
+  sendCsv(res, `PP30-${d.period.year}-${String(d.period.month).padStart(2, '0')}.csv`, rows);
+});
 
 /** Record the filing status of a form (snapshot of the computed figures is kept for audit). */
 router.post(
