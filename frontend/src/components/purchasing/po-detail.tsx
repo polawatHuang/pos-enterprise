@@ -159,7 +159,7 @@ export function PoDetail({ id }: { id: number }) {
           </p>
         </div>
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="table-cards w-full min-w-[640px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
                 <th className="py-2 pr-2 font-medium">#</th>
@@ -178,22 +178,22 @@ export function PoDetail({ id }: { id: number }) {
                 return (
                   <tr key={i.productId} className="border-b border-border last:border-0">
                     <td className="py-2 pr-2 text-muted-foreground">{idx + 1}</td>
-                    <td className="py-2 pr-2">
+                    <td data-label="สินค้า" className="py-2 pr-2">
                       <p className="font-medium">{i.name}</p>
                       <p className="text-xs text-muted-foreground">{i.barcode ?? i.sku}</p>
                     </td>
-                    <td className="py-2 pr-2 text-right tabular-nums">
+                    <td data-label="จำนวน" className="py-2 pr-2 text-right tabular-nums">
                       {formatNumber(i.quantity)} {i.unit}
                     </td>
-                    <td className="py-2 pr-2 text-right tabular-nums">{formatMoney(i.unitCost)}</td>
-                    <td className="py-2 pr-2 text-right tabular-nums">{formatMoney(i.lineTotal)}</td>
+                    <td data-label="ราคา/หน่วย" className="py-2 pr-2 text-right tabular-nums">{formatMoney(i.unitCost)}</td>
+                    <td data-label="รวม" className="py-2 pr-2 text-right tabular-nums">{formatMoney(i.lineTotal)}</td>
                     {(receiving || p.status === "received" || p.status === "partial") && (
-                      <td className={cn("py-2 pr-2 text-right tabular-nums print:hidden", i.receivedQty >= i.quantity ? "text-success" : "text-muted-foreground")}>
+                      <td data-label="รับแล้ว" className={cn("py-2 pr-2 text-right tabular-nums print:hidden", i.receivedQty >= i.quantity ? "text-success" : "text-muted-foreground")}>
                         {i.receivedQty >= i.quantity ? <CheckCircle2 className="ml-auto size-4" /> : formatNumber(i.receivedQty)}
                       </td>
                     )}
                     {receiving && (
-                      <td className="py-2 text-right print:hidden">
+                      <td data-label="รับรอบนี้" className="py-2 text-right print:hidden">
                         <Input
                           value={recv[i.productId] ?? ""}
                           onChange={(e) => setRecv((r) => ({ ...r, [i.productId]: e.target.value.replace(/[^\d.]/g, "") }))}

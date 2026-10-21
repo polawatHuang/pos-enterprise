@@ -97,7 +97,7 @@ export function DocumentsView() {
           <ErrorNote onRetry={() => list.refetch()} error={list.error} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="table-cards w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground">
                   <th className="px-4 py-3 font-medium">เลขที่</th>
@@ -125,18 +125,18 @@ export function DocumentsView() {
                           {d.isDraft ? "ฉบับร่าง" : d.docNo}
                         </Link>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{DOC_TYPE_LABEL[d.docType]}</td>
-                      <td className="max-w-56 truncate px-4 py-3">{d.partyName ?? "–"}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                      <td data-label="ประเภท" className="px-4 py-3 text-muted-foreground">{DOC_TYPE_LABEL[d.docType]}</td>
+                      <td data-label="คู่ค้า" className="max-w-56 truncate px-4 py-3">{d.partyName ?? "–"}</td>
+                      <td data-label="วันที่" className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                         {formatThaiDate(d.docDate)}
                         {d.dueDate && d.status === "issued" && (
                           <span className={`block text-xs ${overdue ? "text-danger" : ""}`}>ครบกำหนด {formatThaiDate(d.dueDate)}</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right font-medium tabular-nums">
+                      <td data-label="ยอดรวม" className="px-4 py-3 text-right font-medium tabular-nums">
                         {formatMoney(d.docType === "wht_certificate" ? d.whtAmount : d.total)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td data-label="สถานะ" className="px-4 py-3">
                         <Badge tone={overdue ? "danger" : DOC_STATUS[d.status].tone}>{overdue ? "เกินกำหนด" : DOC_STATUS[d.status].label}</Badge>
                       </td>
                     </tr>

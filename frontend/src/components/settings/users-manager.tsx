@@ -82,7 +82,7 @@ export function UsersManager() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="table-cards w-full min-w-[720px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground">
                   <th className="px-4 py-3 font-medium">ผู้ใช้</th>
@@ -109,7 +109,7 @@ export function UsersManager() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="บทบาท" className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {u.roles.map((r) => (
                           <Badge key={r} tone={r === "owner" || r === "admin" ? "primary" : "neutral"}>
@@ -118,11 +118,11 @@ export function UsersManager() {
                         ))}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{u.branchName ?? "ทุกสาขา"}</td>
-                    <td className="px-4 py-3">
+                    <td data-label="สาขา" className="px-4 py-3 text-muted-foreground">{u.branchName ?? "ทุกสาขา"}</td>
+                    <td data-label="สถานะ" className="px-4 py-3">
                       <Badge tone={u.status === "active" ? "success" : "danger"}>{u.status === "active" ? "ใช้งาน" : "ระงับ"}</Badge>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{u.lastLoginAt ? formatRelativeTime(u.lastLoginAt) : "ยังไม่เคย"}</td>
+                    <td data-label="เข้าใช้ล่าสุด" className="px-4 py-3 text-muted-foreground">{u.lastLoginAt ? formatRelativeTime(u.lastLoginAt) : "ยังไม่เคย"}</td>
                     <td className="px-4 py-3">
                       {writable && u.id !== me?.id && (
                         <DropdownMenu>

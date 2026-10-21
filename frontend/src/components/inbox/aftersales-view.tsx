@@ -20,7 +20,7 @@ type Tab = "returns" | "offers" | "disputes";
 
 const chatLink = (id: number | null) =>
   id ? (
-    <Link href={`/inbox?c=${id}`} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+    <Link href={`/inbox?c=${id}`} className="inline-flex min-h-9 items-center gap-1 text-xs font-medium text-primary hover:underline">
       <MessagesSquare className="size-3.5" /> เปิดแชต
     </Link>
   ) : null;
@@ -276,7 +276,7 @@ function Disputes() {
         <Empty text="ไม่มีข้อพิพาท" />
       ) : (
         <Card className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="table-cards w-full min-w-[640px] text-sm">
             <thead className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2.5 font-medium">เรื่อง</th>
@@ -297,11 +297,11 @@ function Disputes() {
                     {d.summary && <p className="mt-1 text-xs">{d.summary}</p>}
                     {d.resolutionNote && <p className="mt-1 text-xs text-success">{d.resolutionNote}</p>}
                   </td>
-                  <td className="px-4 py-3">{d.orderNo ?? "—"}</td>
-                  <td className="px-4 py-3">
+                  <td data-label="ออร์เดอร์" className="px-4 py-3">{d.orderNo ?? "—"}</td>
+                  <td data-label="ความรุนแรง" className="px-4 py-3">
                     <Badge tone={SEVERITY[d.severity]?.tone}>{SEVERITY[d.severity]?.label}</Badge>
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label="สถานะ" className="px-4 py-3">
                     {can("inbox:manage_ai") ? (
                       <NativeSelect value={d.status} onChange={(e) => void setStatus(d, e.target.value)} className="h-8 w-36 text-xs" aria-label="สถานะข้อพิพาท">
                         {Object.entries(DISPUTE_STATUS).map(([v, s]) => (

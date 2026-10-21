@@ -123,11 +123,11 @@ export function TrendsView() {
         ]}
       />
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 flex-1 sm:max-w-xs">
+        <div className="relative w-full sm:w-auto sm:min-w-56 sm:max-w-xs sm:flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={q} onChange={(e) => reset(setQ)(e.target.value)} placeholder="ค้นหาสินค้า/ร้าน" className="pl-9" aria-label="ค้นหา" />
         </div>
-        <NativeSelect value={platform} onChange={(e) => reset(setPlatform)(e.target.value)} className="w-auto" aria-label="แพลตฟอร์ม">
+        <NativeSelect value={platform} onChange={(e) => reset(setPlatform)(e.target.value)} className="min-w-36 flex-1 sm:w-auto sm:min-w-0 sm:flex-none" aria-label="แพลตฟอร์ม">
           <option value="">ทุกแพลตฟอร์ม</option>
           {list.data?.meta.platforms.map((p) => (
             <option key={p.platform} value={p.platform}>
@@ -135,7 +135,7 @@ export function TrendsView() {
             </option>
           ))}
         </NativeSelect>
-        <NativeSelect value={minCommission} onChange={(e) => reset(setMinCommission)(e.target.value)} className="w-auto" aria-label="ค่าคอมขั้นต่ำ">
+        <NativeSelect value={minCommission} onChange={(e) => reset(setMinCommission)(e.target.value)} className="min-w-36 flex-1 sm:w-auto sm:min-w-0 sm:flex-none" aria-label="ค่าคอมขั้นต่ำ">
           <option value="">ค่าคอมทุกระดับ</option>
           {[5, 10, 15, 20].map((v) => (
             <option key={v} value={v}>
@@ -143,18 +143,18 @@ export function TrendsView() {
             </option>
           ))}
         </NativeSelect>
-        <NativeSelect value={phase} onChange={(e) => reset(setPhase)(e.target.value)} className="w-auto" aria-label="Phase">
+        <NativeSelect value={phase} onChange={(e) => reset(setPhase)(e.target.value)} className="min-w-36 flex-1 sm:w-auto sm:min-w-0 sm:flex-none" aria-label="Phase">
           {PHASE_FILTERS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
         </NativeSelect>
-        <label className="flex h-10 items-center gap-2 rounded-lg border border-input bg-card px-3 text-sm">
+        <label className="flex h-10 items-center gap-2 whitespace-nowrap rounded-lg border border-input bg-card px-3 text-sm">
           <input type="checkbox" checked={hideTop10} onChange={(e) => reset(setHideTop10)(e.target.checked)} className="size-4 accent-[var(--primary)]" />
           ซ่อนอันดับ 1–10
         </label>
-        <NativeSelect value={sort} onChange={(e) => reset(setSort)(e.target.value)} className="w-auto" aria-label="เรียงตาม">
+        <NativeSelect value={sort} onChange={(e) => reset(setSort)(e.target.value)} className="min-w-36 flex-1 sm:w-auto sm:min-w-0 sm:flex-none" aria-label="เรียงตาม">
           {SORT_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               เรียง: {o.label}

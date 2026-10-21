@@ -16,7 +16,7 @@ export function DocumentPaper({ doc }: { doc: AccDocument }) {
   const org = doc.org;
   const isTax = doc.docType === "tax_invoice" || doc.docType === "tax_invoice_receipt" || doc.docType === "credit_note";
   return (
-    <article className="print-a4 relative mx-auto w-full max-w-[210mm] bg-white p-8 text-[13px] leading-relaxed text-neutral-900 shadow-sm ring-1 ring-black/5 sm:p-12">
+    <article className="print-a4 relative mx-auto w-full max-w-[210mm] bg-white p-8 text-[13px] leading-relaxed text-neutral-900 shadow-sm ring-1 ring-black/5 max-sm:p-5 sm:p-12">
       {doc.status === "void" && <Stamp text="ยกเลิก" />}
       {doc.isDraft && <Stamp text="ฉบับร่าง" muted />}
       <header className="flex flex-col gap-6 sm:flex-row sm:justify-between">
@@ -61,33 +61,36 @@ export function DocumentPaper({ doc }: { doc: AccDocument }) {
         {doc.partyTaxId && <p>เลขประจำตัวผู้เสียภาษี {doc.partyTaxId}</p>}
       </section>
 
-      <table className="mt-6 w-full border-collapse text-[12.5px]">
-        <thead>
-          <tr className="border-y border-neutral-400 bg-neutral-100 text-left">
-            <th className="w-10 px-2 py-2 font-semibold">#</th>
-            <th className="px-2 py-2 font-semibold">รายการ</th>
-            <th className="w-20 px-2 py-2 text-right font-semibold">จำนวน</th>
-            <th className="w-28 px-2 py-2 text-right font-semibold">ราคา/หน่วย</th>
-            <th className="w-24 px-2 py-2 text-right font-semibold">ส่วนลด</th>
-            <th className="w-32 px-2 py-2 text-right font-semibold">จำนวนเงิน</th>
-          </tr>
-        </thead>
-        <tbody>
-          {doc.items.map((it, i) => (
-            <tr key={it.id ?? i} className="border-b border-neutral-200 align-top">
-              <td className="px-2 py-2">{i + 1}</td>
-              <td className="px-2 py-2">
-                {it.description}
-                {it.vatType !== "vat7" && <span className="ml-1 text-xs text-neutral-500">({it.vatType === "exempt" ? "ยกเว้น VAT" : "VAT 0%"})</span>}
-              </td>
-              <td className="px-2 py-2 text-right">{it.quantity.toLocaleString("th-TH")}</td>
-              <td className="px-2 py-2 text-right">{n2(it.unitPrice)}</td>
-              <td className="px-2 py-2 text-right">{it.discount ? n2(it.discount) : "-"}</td>
-              <td className="px-2 py-2 text-right">{n2(it.lineTotal ?? 0)}</td>
+      {/* phones keep the paper layout: the item table scrolls inside the page */}
+      <div className="-mx-5 mt-6 overflow-x-auto px-5 sm:mx-0 sm:px-0">
+        <table className="w-full min-w-[540px] border-collapse text-[12.5px] sm:min-w-0">
+          <thead>
+            <tr className="border-y border-neutral-400 bg-neutral-100 text-left">
+              <th className="w-10 px-2 py-2 font-semibold">#</th>
+              <th className="px-2 py-2 font-semibold">รายการ</th>
+              <th className="w-20 px-2 py-2 text-right font-semibold">จำนวน</th>
+              <th className="w-28 px-2 py-2 text-right font-semibold">ราคา/หน่วย</th>
+              <th className="w-24 px-2 py-2 text-right font-semibold">ส่วนลด</th>
+              <th className="w-32 px-2 py-2 text-right font-semibold">จำนวนเงิน</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {doc.items.map((it, i) => (
+              <tr key={it.id ?? i} className="border-b border-neutral-200 align-top">
+                <td className="px-2 py-2">{i + 1}</td>
+                <td className="px-2 py-2">
+                  {it.description}
+                  {it.vatType !== "vat7" && <span className="ml-1 text-xs text-neutral-500">({it.vatType === "exempt" ? "ยกเว้น VAT" : "VAT 0%"})</span>}
+                </td>
+                <td className="px-2 py-2 text-right">{it.quantity.toLocaleString("th-TH")}</td>
+                <td className="px-2 py-2 text-right">{n2(it.unitPrice)}</td>
+                <td className="px-2 py-2 text-right">{it.discount ? n2(it.discount) : "-"}</td>
+                <td className="px-2 py-2 text-right">{n2(it.lineTotal ?? 0)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <section className="mt-4 flex flex-col-reverse gap-6 sm:flex-row sm:justify-between">
         <div className="max-w-sm">
@@ -161,7 +164,7 @@ function WhtCertificate({ doc }: { doc: AccDocument }) {
   const org = doc.org;
   const src = doc.whtSource;
   return (
-    <article className="print-a4 relative mx-auto w-full max-w-[210mm] bg-white p-8 text-[13px] leading-relaxed text-neutral-900 shadow-sm ring-1 ring-black/5 sm:p-12">
+    <article className="print-a4 relative mx-auto w-full max-w-[210mm] bg-white p-8 text-[13px] leading-relaxed text-neutral-900 shadow-sm ring-1 ring-black/5 max-sm:p-5 sm:p-12">
       {doc.status === "void" && <Stamp text="ยกเลิก" />}
       <p className="text-center text-lg font-bold">หนังสือรับรองการหักภาษี ณ ที่จ่าย</p>
       <p className="text-center text-xs">ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร</p>

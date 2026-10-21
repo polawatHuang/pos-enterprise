@@ -73,7 +73,7 @@ export function IntegrationsStatus() {
                   ))}
                 </ul>
                 <div className="mt-auto flex items-center justify-between gap-2 pt-4">
-                  <a href={it.applyUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+                  <a href={it.applyUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary hover:underline">
                     ขอ API key <ExternalLink className="size-3.5" />
                   </a>
                   <Button size="sm" variant="outline" onClick={() => setEditing(it.id)}>

@@ -231,7 +231,7 @@ export function CustomersView() {
           <>
             {/* Desktop: table */}
             <div className="hidden overflow-x-auto md:block">
-              <table className="w-full min-w-[820px] text-sm">
+              <table className="table-cards w-full min-w-[820px] text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
                     <th className="px-4 py-3 font-medium">ลูกค้า</th>
@@ -265,17 +265,17 @@ export function CustomersView() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        <td data-label="ติดต่อ" className="px-4 py-3 text-muted-foreground">
                           <p className="tabular-nums">{formatPhone(c.phone) ?? "–"}</p>
                           {c.email && <p className="max-w-[200px] truncate text-xs">{c.email}</p>}
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td data-label="ยอดซื้อรวม" className="px-4 py-3 text-right">
                           <p className="font-medium tabular-nums">{formatMoney(c.totalSpent)}</p>
                           {c.points > 0 && <p className="text-xs text-muted-foreground tabular-nums">{formatNumber(c.points)} แต้ม</p>}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums">{formatNumber(c.orderCount)}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{daysAgoLabel(c.lastOrderAt)}</td>
-                        <td className="px-4 py-3">
+                        <td data-label="บิล" className="px-4 py-3 text-right tabular-nums">{formatNumber(c.orderCount)}</td>
+                        <td data-label="ซื้อล่าสุด" className="px-4 py-3 text-muted-foreground">{daysAgoLabel(c.lastOrderAt)}</td>
+                        <td data-label="ช่องทาง" className="px-4 py-3">
                           <Channels c={c} />
                         </td>
                       </tr>

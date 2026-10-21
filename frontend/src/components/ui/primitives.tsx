@@ -74,7 +74,8 @@ export function NativeSelect({ className, ...props }: React.ComponentProps<"sele
   return (
     <select
       className={cn(
-        "h-9 rounded-lg border border-input bg-card px-3 pr-8 text-sm shadow-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/20",
+        // max-w-full: a long option must not widen the form past its container (phones)
+        "h-9 max-w-full rounded-lg border border-input bg-card px-3 pr-8 text-sm shadow-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/20",
         className,
       )}
       {...props}

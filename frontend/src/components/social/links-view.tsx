@@ -63,7 +63,7 @@ export function LinksView() {
         <Card className="py-16 text-center text-sm text-muted-foreground">ยังไม่มีลิงก์ — สร้างจากหน้านี้ หรือจากรายละเอียดสินค้าเทรนด์</Card>
       ) : (
         <Card className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="table-cards w-full min-w-[720px] text-sm">
             <thead className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2.5 font-medium">ลิงก์</th>
@@ -86,11 +86,11 @@ export function LinksView() {
                       {l.subId && <span>· sub: {l.subId}</span>}
                     </p>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">{l.productName ?? "—"}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{formatNumber(l.clicks)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{formatNumber(l.conversions)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{formatMoney(l.commission)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{l.postCount}</td>
+                  <td data-label="สินค้า" className="px-4 py-3 text-muted-foreground">{l.productName ?? "—"}</td>
+                  <td data-label="คลิก" className="px-4 py-3 text-right tabular-nums">{formatNumber(l.clicks)}</td>
+                  <td data-label="ออร์เดอร์" className="px-4 py-3 text-right tabular-nums">{formatNumber(l.conversions)}</td>
+                  <td data-label="ค่าคอม" className="px-4 py-3 text-right tabular-nums">{formatMoney(l.commission)}</td>
+                  <td data-label="โพสต์" className="px-4 py-3 text-right tabular-nums">{l.postCount}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-right">
                     <Button size="sm" variant="ghost" onClick={() => void copy(l)} aria-label="คัดลอกลิงก์">
                       {copied === l.id ? <Check className="text-success" /> : <Copy />}

@@ -262,7 +262,7 @@ function VarianceTable({
   return (
     <Card>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-sm">
+        <table className="table-cards w-full min-w-[760px] text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
               <th className="px-4 py-3 font-medium">สินค้า</th>
@@ -281,9 +281,9 @@ function VarianceTable({
                   <p className="font-medium">{i.name}</p>
                   <p className="text-xs text-muted-foreground">{i.sku}</p>
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{formatNumber(i.snapshot ?? 0)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{i.movedDuringCount ? (i.movedDuringCount > 0 ? "+" : "") + formatNumber(i.movedDuringCount) : "–"}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums">
+                <td data-label="ในระบบ" className="px-4 py-2.5 text-right tabular-nums">{formatNumber(i.snapshot ?? 0)}</td>
+                <td data-label="ขาย/รับระหว่างนับ" className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{i.movedDuringCount ? (i.movedDuringCount > 0 ? "+" : "") + formatNumber(i.movedDuringCount) : "–"}</td>
+                <td data-label="นับได้" className="px-4 py-2.5 text-right tabular-nums">
                   {editable ? (
                     <button className="underline decoration-dotted" onClick={() => onEdit(i)}>
                       {i.counted === null ? "ยังไม่นับ" : formatNumber(i.counted)}
@@ -294,11 +294,11 @@ function VarianceTable({
                     formatNumber(i.counted)
                   )}
                 </td>
-                <td className={cn("px-4 py-2.5 text-right font-semibold tabular-nums", (i.variance ?? 0) < 0 ? "text-danger" : (i.variance ?? 0) > 0 ? "text-success" : "")}>
+                <td data-label="ส่วนต่าง" className={cn("px-4 py-2.5 text-right font-semibold tabular-nums", (i.variance ?? 0) < 0 ? "text-danger" : (i.variance ?? 0) > 0 ? "text-success" : "")}>
                   {i.variance === null ? "–" : (i.variance > 0 ? "+" : "") + formatNumber(i.variance)}
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{i.value ? formatMoney(i.value) : "–"}</td>
-                <td className="px-4 py-2.5">
+                <td data-label="มูลค่า" className="px-4 py-2.5 text-right tabular-nums">{i.value ? formatMoney(i.value) : "–"}</td>
+                <td data-label="เหตุผล" className="px-4 py-2.5">
                   {editable && i.variance ? (
                     <Input
                       defaultValue={i.reason ?? ""}

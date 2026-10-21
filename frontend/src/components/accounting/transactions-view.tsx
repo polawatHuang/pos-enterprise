@@ -187,7 +187,7 @@ export function TransactionsView() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
+            <table className="table-cards w-full min-w-[900px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground">
                   <th className="px-4 py-3 font-medium">วันที่</th>
@@ -215,7 +215,7 @@ export function TransactionsView() {
                     onClick={t.source === "sale" ? () => setSaleId(t.id) : undefined}
                   >
                     <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{formatThaiDate(t.txnDate)}</td>
-                    <td className="max-w-72 px-4 py-3">
+                    <td data-label="รายการ" className="max-w-72 px-4 py-3">
                       <p className="truncate font-medium">
                         {t.source === "sale" && <ShoppingBag className="mr-1 inline size-3.5 text-success" aria-hidden />}
                         {t.description} {t.aiExtracted && <Sparkles className="inline size-3.5 text-primary" aria-label="กรอกโดย AI" />}
@@ -230,20 +230,20 @@ export function TransactionsView() {
                         t.counterparty && <p className="truncate text-xs text-muted-foreground">{t.counterparty}</p>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="หมวด" className="px-4 py-3">
                       <Badge tone={t.type === "income" ? "success" : "neutral"} className="whitespace-nowrap">
                         {t.category}
                       </Badge>
                     </td>
-                    <td className={`px-4 py-3 text-right font-medium tabular-nums ${t.type === "income" ? "text-success" : ""}`}>
+                    <td data-label="ก่อน VAT" className={`px-4 py-3 text-right font-medium tabular-nums ${t.type === "income" ? "text-success" : ""}`}>
                       {t.type === "expense" ? "-" : ""}
                       {formatMoney(t.amount)}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{t.vatAmount ? formatMoney(t.vatAmount) : "–"}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                    <td data-label="VAT" className="px-4 py-3 text-right tabular-nums text-muted-foreground">{t.vatAmount ? formatMoney(t.vatAmount) : "–"}</td>
+                    <td data-label="หัก ณ ที่จ่าย" className="px-4 py-3 text-right tabular-nums text-muted-foreground">
                       {t.whtAmount ? `${formatMoney(t.whtAmount)} (${t.whtRate}%)` : "–"}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">{formatMoney(t.netAmount)}</td>
+                    <td data-label="สุทธิ" className="px-4 py-3 text-right tabular-nums">{formatMoney(t.netAmount)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
                         {t.type === "expense" && t.whtAmount > 0 && (

@@ -104,7 +104,7 @@ export function AccountsView() {
                   <p className="mb-1 text-xs text-muted-foreground">Redirect / Callback URL ที่ต้องลงทะเบียนในแอปของแพลตฟอร์ม</p>
                   <div className="flex items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5">
                     <code className="min-w-0 flex-1 truncate text-xs">{callback}</code>
-                    <button onClick={() => void copy(callback)} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="คัดลอก URL">
+                    <button onClick={() => void copy(callback)} className="-m-2 shrink-0 p-2 text-muted-foreground hover:text-foreground" aria-label="คัดลอก URL">
                       {copied === callback ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
                     </button>
                   </div>

@@ -175,7 +175,7 @@ function Editor({ v }: { v: VideoDetail }) {
     <div>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <Link href="/videos" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <Link href="/videos" className="mb-1 inline-flex min-h-10 items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="size-4" /> AI Video
           </Link>
           <div className="flex flex-wrap items-center gap-2">
