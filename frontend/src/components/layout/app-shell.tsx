@@ -96,6 +96,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
           {!collapsed && "ย่อเมนู"}
         </button>
+        {!collapsed && <p className="-mt-2 mb-2 text-center text-[10px] text-sidebar-muted/70">เวอร์ชัน {process.env.NEXT_PUBLIC_BUILD_SHA}</p>}
       </aside>
 
       {/* Mobile drawer */}
