@@ -31,6 +31,8 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false,
+  // Shown in the sidebar so "is the new version live yet?" is answerable at a glance
+  env: { NEXT_PUBLIC_BUILD_SHA: (process.env.VERCEL_GIT_COMMIT_SHA ?? "").slice(0, 7) || "local" },
   turbopack: {
     rules: {
       "*.css": {

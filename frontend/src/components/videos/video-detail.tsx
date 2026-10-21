@@ -120,14 +120,21 @@ function Editor({ v }: { v: VideoDetail }) {
       return next;
     });
 
-  // Finished speech can be assembled again without paying for it, as long as the spoken text is unchanged
+  // Finished speech can be assembled again without paying for it, as long as the spoken text is unchanged.
+  // The button always shows once parts exist; when it can't run, it says why instead of disappearing.
   const voicedScenes = new Set(v.assets.filter((a) => a.kind === "voice" && a.status === "ready" && a.url).map((a) => a.sceneIndex));
-  const canCompose =
-    ["parts_ready", "ready", "failed"].includes(v.status) &&
-    scenes.length > 0 &&
-    scenes.length === v.scenes.length &&
-    scenes.every((s, i) => s.voiceover === v.scenes[i].voiceover && voicedScenes.has(i));
-  const composeReady = canCompose && Boolean(caps?.compose.configured);
+  const hasParts = ["parts_ready", "ready", "failed"].includes(v.status) && voicedScenes.size > 0;
+  const textChanged = scenes.length !== v.scenes.length || scenes.some((s, i) => s.voiceover !== v.scenes[i].voiceover);
+  const composeBlock = !hasParts
+    ? null
+    : v.scenes.some((_, i) => !voicedScenes.has(i))
+      ? "เสียงพากย์ยังไม่ครบทุกฉาก ต้องกด \"สร้างวิดีโอใหม่\""
+      : textChanged
+        ? "แก้บทพากย์หลังสร้างเสียงแล้ว ต้องกด \"สร้างวิดีโอใหม่\" (หรือรีโหลดหน้าเพื่อยกเลิกการแก้)"
+        : caps && !caps.compose.configured
+          ? "shotstack"
+          : "";
+  const composeReady = composeBlock === "";
   const compose = () =>
     run(
       "compose",
@@ -436,21 +443,22 @@ function Editor({ v }: { v: VideoDetail }) {
                   needsPublic={visualMode === "my_footage" || coverId !== null}
                 />
               )}
-              {composeReady && (
-                <Button className="w-full" disabled={locked || busy !== null} onClick={() => void compose()}>
+              {composeBlock !== null && (
+                <Button className="w-full" disabled={!composeReady || locked || busy !== null} onClick={() => void compose()}>
                   {busy === "compose" || locked ? <Loader2 className="animate-spin" /> : <Film />}
                   ประกอบเป็นวิดีโอ (ใช้เสียงเดิม)
                 </Button>
               )}
-              {canCompose && caps && !caps.compose.configured && (
+              {composeBlock === "shotstack" ? (
                 <p className="rounded-lg bg-muted px-3 py-2 text-xs">
                   เสียงพากย์พร้อมแล้ว ขาดแค่ Shotstack สำหรับประกอบเป็นไฟล์วิดีโอ ·{" "}
                   <Link href="/settings/integrations" className="font-medium text-primary hover:underline">
                     ตั้งค่า Shotstack
-                  </Link>{" "}
-                  แล้วกลับมากด &quot;ประกอบเป็นวิดีโอ&quot; ได้เลย ไม่ต้องสร้างเสียงใหม่
+                  </Link>
                 </p>
-              )}
+              ) : composeBlock ? (
+                <p className="text-xs text-muted-foreground">{composeBlock}</p>
+              ) : null}
               <Button
                 className="w-full"
                 variant={composeReady ? "outline" : undefined}
