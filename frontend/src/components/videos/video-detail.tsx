@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Input, Label, NativeSelect, Skeleton, Textarea } from "@/components/ui/primitives";
 import { CAPTION_STYLES, IN_PROGRESS, steps, VIDEO_STATUS, VISUAL_MODES } from "./labels";
 import { MediaPanel } from "./media-panel";
+import { MinimaxVoicePicker } from "./voice-picker";
 import { useVideoMeta } from "./videos-view";
 
 export function VideoDetailView({ id }: { id: number }) {
@@ -228,18 +229,28 @@ function Editor({ v }: { v: VideoDetail }) {
               <div className="flex flex-col gap-1.5 sm:col-span-2">
                 <Label htmlFor="vp">เสียงพากย์</Label>
                 <div className="flex gap-2">
-                  <NativeSelect id="vp" value={voiceProvider} onChange={(e) => setVoiceProvider(e.target.value as typeof voiceProvider)} disabled={locked} className="w-auto">
+                  <NativeSelect id="vp" value={voiceProvider} onChange={(e) => setVoiceProvider(e.target.value as typeof voiceProvider)} disabled={locked} className="w-auto self-start">
                     <option value="minimax">MiniMax</option>
                     <option value="elevenlabs">ElevenLabs</option>
                   </NativeSelect>
-                  <Input
-                    value={voiceId}
-                    onChange={(e) => setVoiceId(e.target.value)}
-                    disabled={locked}
-                    placeholder={caps?.voice[voiceProvider].defaultVoiceId ?? "voice id"}
-                    aria-label="Voice ID"
-                    maxLength={100}
-                  />
+                  {voiceProvider === "minimax" ? (
+                    <MinimaxVoicePicker
+                      value={voiceId}
+                      onChange={setVoiceId}
+                      disabled={locked}
+                      configured={caps?.voice.minimax.configured ?? false}
+                      defaultVoiceId={caps?.voice.minimax.defaultVoiceId ?? null}
+                    />
+                  ) : (
+                    <Input
+                      value={voiceId}
+                      onChange={(e) => setVoiceId(e.target.value)}
+                      disabled={locked}
+                      placeholder={caps?.voice[voiceProvider].defaultVoiceId ?? "voice id"}
+                      aria-label="Voice ID"
+                      maxLength={100}
+                    />
+                  )}
                 </div>
               </div>
             </CardContent>

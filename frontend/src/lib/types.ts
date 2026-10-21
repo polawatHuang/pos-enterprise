@@ -1289,6 +1289,13 @@ export interface VideoMeta {
   angles: Record<string, string>;
 }
 
+export interface VoiceOption {
+  id: string;
+  name: string;
+  group: "system" | "cloned" | "generated";
+  description: string;
+}
+
 /* ----------------------------------------------------------------- social */
 
 export type SocialPlatform = "tiktok" | "facebook" | "instagram";

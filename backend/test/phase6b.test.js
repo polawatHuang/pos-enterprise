@@ -97,6 +97,16 @@ before(async () => {
         base_resp: { status_code: 0 },
       });
     }
+    if (u.includes('/v1/get_voice'))
+      return json({
+        system_voice: [
+          { voice_id: 'Thai_female_1', voice_name: 'Thai Female', description: ['ไทย', 'ผู้หญิง'] },
+          { voice_id: 'English_Narrator', voice_name: 'Narrator', description: [] },
+        ],
+        voice_cloning: [{ voice_id: 'my_clone_01', description: ['ร้านเรา'], created_time: '2026-01-01' }],
+        voice_generation: [{ voice_id: 'gen_02', description: 'deep' }, { voice_id: '' }],
+        base_resp: { status_code: 0 },
+      });
     if (u.includes('api.shotstack.io/edit/stage/render/'))
       return json({ success: true, response: { id: 'r1', status: 'done', url: 'https://shotstack.test/out.mp4' } });
     if (u.includes('api.shotstack.io/edit/stage/render')) return json({ success: true, response: { id: 'r1', message: 'queued' } });
@@ -404,5 +414,41 @@ describe('own footage, hooks and variants', () => {
     assert.ok(after1.scenes.every((s) => s.media === null || s.media <= 1));
     assert.equal((await marketer.delete(`/api/videos/${pid}`)).status, 200);
     assert.ok(keys.every((k) => !fs.existsSync(media.filePath(k.storage_key))));
+  });
+});
+
+describe('MiniMax voice list', () => {
+  test('lists system, cloned and generated voices, cached, and needs video:create', async () => {
+    const before = calls.filter((c) => c.url.includes('/v1/get_voice')).length;
+    const res = await marketer.get('/api/videos/voices');
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(
+      res.body.data.map((v) => [v.id, v.group]),
+      [
+        ['Thai_female_1', 'system'],
+        ['English_Narrator', 'system'],
+        ['my_clone_01', 'cloned'],
+        ['gen_02', 'generated'],
+      ],
+    );
+    assert.equal(res.body.data[0].name, 'Thai Female');
+    assert.equal(res.body.data[0].description, 'ไทย ผู้หญิง');
+    assert.equal(res.body.data[2].name, 'my_clone_01');
+    assert.ok(!JSON.stringify(res.body).includes('mm-key'));
+
+    assert.equal((await marketer.get('/api/videos/voices')).status, 200);
+    assert.equal(calls.filter((c) => c.url.includes('/v1/get_voice')).length, before + 1);
+    assert.equal(calls.find((c) => c.url.includes('/v1/get_voice')).init.headers.Authorization, 'Bearer mm-key');
+
+    assert.equal((await viewer.get('/api/videos/voices')).status, 403);
+
+    delete process.env.MINIMAX_API_KEY;
+    try {
+      const off = await marketer.get('/api/videos/voices');
+      assert.equal(off.status, 503);
+      assert.equal(off.body.error.code, 'INTEGRATION_NOT_CONFIGURED');
+    } finally {
+      process.env.MINIMAX_API_KEY = 'mm-key';
+    }
   });
 });
