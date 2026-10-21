@@ -88,6 +88,26 @@ test('the last active branch and a branch with an open shift cannot be disabled'
   assert.match(busy.body.error.message, /กะขายที่เปิดอยู่/);
 });
 
+test('an unused branch can be deleted with its empty warehouse; a used one cannot', async () => {
+  const created = await request(app).post('/api/org/branches').set('Cookie', owner).send({ code: 'TMP', name: 'สาขาชั่วคราว', branchNo: '00003' });
+  const id = created.body.data.id;
+  assert.equal((await request(app).delete(`/api/org/branches/${id}`).set('Cookie', manager)).status, 403);
+  const res = await request(app).delete(`/api/org/branches/${id}`).set('Cookie', owner);
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  const left = await db.one(
+    'SELECT (SELECT COUNT(*) FROM branches WHERE id = :id) AS b, (SELECT COUNT(*) FROM warehouses WHERE org_id = :o AND code = :code) AS w',
+    { id, o: t.orgId, code: 'WH-TMP' },
+  );
+  assert.deepEqual([Number(left.b), Number(left.w)], [0, 0]);
+
+  // SIAM-1 has a shift (from the previous test): history must be kept
+  const siam = await db.one("SELECT id FROM branches WHERE org_id = :o AND code = 'SIAM-1'", { o: t.orgId });
+  const used = await request(app).delete(`/api/org/branches/${siam.id}`).set('Cookie', owner);
+  assert.equal(used.status, 409);
+  assert.match(used.body.error.message, /กะขาย 1 รายการ.*ปิดใช้งาน/);
+  assert.equal((await request(app).delete('/api/org/branches/1').set('Cookie', owner)).status, 404, 'demo org branch');
+});
+
 test('only settings:manage can change branches; other orgs are not reachable', async () => {
   assert.equal((await request(app).post('/api/org/branches').set('Cookie', manager).send({ code: 'M', name: 'M', branchNo: '00009' })).status, 403);
   assert.equal((await request(app).patch(`/api/org/branches/${t.hqId}`).set('Cookie', manager).send({ name: 'x' })).status, 403);
