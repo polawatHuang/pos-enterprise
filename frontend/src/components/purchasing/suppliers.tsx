@@ -9,6 +9,7 @@ import type { Supplier } from "@/lib/types";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Input, Label, Skeleton } from "@/components/ui/primitives";
+import { ErrorNote } from "@/components/dashboard/widgets";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
 
 export function SuppliersList() {
@@ -26,6 +27,10 @@ export function SuppliersList() {
       )}
       {suppliers.isPending ? (
         <Skeleton className="m-4 h-40" />
+      ) : suppliers.isError ? (
+        <ErrorNote onRetry={() => suppliers.refetch()} error={suppliers.error} />
+      ) : !suppliers.data?.length ? (
+        <p className="p-12 text-center text-sm text-muted-foreground">ยังไม่มีผู้ขาย — กด &quot;เพิ่มผู้ขาย&quot; เพื่อเริ่ม แล้วผูกกับสินค้าเพื่อสั่งซื้อได้เร็วขึ้น</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">

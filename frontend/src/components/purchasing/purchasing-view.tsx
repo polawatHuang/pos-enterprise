@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/layout/page";
 import { OrderBoard } from "./order-board";
 import { OrdersList } from "./orders-list";
 import { SuppliersList } from "./suppliers";
+import { ErrorNote } from "@/components/dashboard/widgets";
 import { TransfersList } from "./transfers";
 
 type Tab = "order" | "orders" | "transfers" | "suppliers";
@@ -39,7 +40,13 @@ export function PurchasingView() {
           />
         </div>
         {tab === "order" &&
-          (warehouses.data ? <OrderBoard warehouses={warehouses.data} initialWarehouse={params.get("warehouseId") ?? ""} /> : <Skeleton className="m-4 h-64" />)}
+          (warehouses.data ? (
+            <OrderBoard warehouses={warehouses.data} initialWarehouse={params.get("warehouseId") ?? ""} />
+          ) : warehouses.isError ? (
+            <ErrorNote onRetry={() => warehouses.refetch()} error={warehouses.error} />
+          ) : (
+            <Skeleton className="m-4 h-64" />
+          ))}
         {tab === "orders" && <OrdersList />}
         {tab === "transfers" && <TransfersList />}
         {tab === "suppliers" && <SuppliersList />}

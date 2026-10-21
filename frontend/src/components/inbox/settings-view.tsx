@@ -260,7 +260,8 @@ function Knowledge() {
 
 /* --------------------------------------------------------------- channels */
 
-const NEW_CHANNEL_PLATFORMS: Platform[] = ["line", "facebook", "instagram", "shopee", "tiktok", "website"];
+// Shopee / TikTok Shop chat need partner API access that is not built yet, so they are not offered
+const NEW_CHANNEL_PLATFORMS: Platform[] = ["line", "facebook", "instagram", "website"];
 const ID_HINT: Partial<Record<Platform, string>> = {
   line: "Bot user ID (ขึ้นต้นด้วย U… ดูได้ใน LINE Developers > Basic settings)",
   facebook: "Page ID ของเพจ",

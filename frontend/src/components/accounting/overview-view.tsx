@@ -9,7 +9,7 @@ import { formatMoney, formatThaiDate, todayStr } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Skeleton } from "@/components/ui/primitives";
 import { PageHeader } from "@/components/layout/page";
-import { KpiCard } from "@/components/dashboard/widgets";
+import { KpiCard, ErrorNote } from "@/components/dashboard/widgets";
 import { CashflowChart } from "@/components/dashboard/charts";
 
 export function AccountingOverviewView() {
@@ -76,6 +76,8 @@ export function AccountingOverviewView() {
               <p className="py-10 text-center text-sm text-muted-foreground">ต้องมีสิทธิ์ดู Dashboard</p>
             ) : cashflow.data ? (
               <CashflowChart data={cashflow.data} />
+            ) : cashflow.isError ? (
+              <ErrorNote onRetry={() => cashflow.refetch()} error={cashflow.error} />
             ) : (
               <Skeleton className="h-64 w-full" />
             )}
@@ -92,6 +94,7 @@ export function AccountingOverviewView() {
             </div>
           </CardHeader>
           <CardContent>
+            {unpaid.isError && <ErrorNote onRetry={() => unpaid.refetch()} error={unpaid.error} />}
             {unpaid.data?.data.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">ไม่มียอดค้างชำระ 🎉</p>}
             <ul className="divide-y divide-border">
               {unpaid.data?.data.map((doc) => {

@@ -49,7 +49,7 @@ export function DataResetView() {
 
   return (
     <>
-      <PageHeader title="จัดการข้อมูล" description="ล้างข้อมูลตัวอย่าง (mockup) ก่อนเริ่มใช้งานจริง" />
+      <PageHeader title="จัดการข้อมูล" description="ล้างข้อมูลตัวอย่างก่อนเริ่มใช้งานจริง" />
       {!isOwner ? (
         <Card className="p-6 text-sm text-muted-foreground">เฉพาะเจ้าของกิจการหรือผู้ดูแลระบบเท่านั้น</Card>
       ) : (

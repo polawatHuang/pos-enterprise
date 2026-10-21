@@ -6,12 +6,13 @@ const { notImplemented } = require('../core/errors');
 // Interface is fixed now so modules can be built against it; bodies land in phase 5.
 const planned = (method) => () => {
   adapter.requireConfig();
-  throw notImplemented(`Shopee Open Platform: ${method} จะเปิดใช้งานในเฟสที่ 5`);
+  throw notImplemented(`Shopee Open Platform: ${method} ยังไม่เปิดใช้งาน (รอสิทธิ์ Partner API ของแพลตฟอร์ม)`);
 };
 
 const adapter = defineAdapter(
   {
     id: 'shopee',
+    planned: true,
     name: 'Shopee Open Platform',
     category: 'commerce',
     usedBy: ['scraping','inbox','pos'],

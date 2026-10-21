@@ -391,7 +391,8 @@ router.get('/oauth/meta/start', requirePermission('inbox:manage_ai'), (req, res)
 });
 
 const channelBody = z.object({
-  platform: z.enum(['facebook', 'instagram', 'line', 'tiktok', 'shopee', 'website']),
+  // Shopee / TikTok Shop chat need partner API access that is not built yet
+  platform: z.enum(['facebook', 'instagram', 'line', 'website'], { message: 'รองรับ LINE, Facebook, Instagram และเว็บไซต์' }),
   name: z.string().trim().min(1).max(191),
   externalId: z.string().trim().min(1, 'ระบุ ID ของเพจ/บัญชี').max(191),
   aiEnabled: z.boolean().default(true),

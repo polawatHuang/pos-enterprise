@@ -12,6 +12,7 @@ import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, NativeSelect, Skeleton, TabBar } from "@/components/ui/primitives";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
+import { ErrorNote } from "@/components/dashboard/widgets";
 import { PageHeader } from "@/components/layout/page";
 
 const GROUPS: { key: string; label: string; test: (d: number) => boolean; tone: string }[] = [
@@ -90,6 +91,7 @@ function Board({ warehouseId }: { warehouseId: string }) {
   };
 
   if (lots.isPending) return <Skeleton className="m-4 h-60" />;
+  if (lots.isError) return <ErrorNote onRetry={() => lots.refetch()} error={lots.error} />;
   if (!lots.data?.length)
     return (
       <div className="grid place-items-center gap-2 p-12 text-center">
@@ -229,6 +231,8 @@ function Waste() {
       </div>
       {report.isPending ? (
         <Skeleton className="h-40" />
+      ) : report.isError ? (
+        <ErrorNote onRetry={() => report.refetch()} error={report.error} />
       ) : !d?.items.length ? (
         <p className="py-10 text-center text-sm text-muted-foreground">ไม่มีของเสียในเดือนนี้ 🎉</p>
       ) : (

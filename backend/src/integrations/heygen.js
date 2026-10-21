@@ -7,12 +7,13 @@ const { notImplemented } = require('../core/errors');
 // MiniMax Hailuo clips + product images are the default visuals.
 const planned = (method) => () => {
   adapter.requireConfig();
-  throw notImplemented(`HeyGen API: ${method} ยังไม่เปิดใช้ (ทางเลือกเสริมหลังเฟส 6)`);
+  throw notImplemented(`HeyGen API: ${method} ยังไม่เปิดใช้งาน`);
 };
 
 const adapter = defineAdapter(
   {
     id: 'heygen',
+    planned: true,
     name: 'HeyGen API',
     category: 'video',
     usedBy: ['video'],

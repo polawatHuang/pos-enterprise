@@ -23,7 +23,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, apiUrl } from "@/lib/api";
 import type { CaptionStyle, CoverProject, VideoDetail, VideoScene, VideoVisualMode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -680,12 +680,12 @@ function Outputs({ v }: { v: VideoDetail }) {
       <CardContent className="space-y-3 pt-0 text-sm">
         {!v.outputUrl && v.status === "ready" ? (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Clapperboard className="size-4" /> ข้อมูลเดโม — ไม่มีไฟล์วิดีโอจริง
+            <Clapperboard className="size-4" /> ไม่พบไฟล์วิดีโอ — กด &quot;สร้างวิดีโอใหม่&quot; เพื่อสร้างอีกครั้ง
           </p>
         ) : null}
         {v.hasSubtitles && (
           <Button asChild variant="outline" className="w-full">
-            <a href={`/api/videos/${v.id}/subtitles.srt`} download>
+            <a href={apiUrl(`/videos/${v.id}/subtitles.srt`)} download>
               <Download /> ไฟล์ซับ (.srt)
             </a>
           </Button>

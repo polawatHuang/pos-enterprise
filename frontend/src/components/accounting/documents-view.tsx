@@ -13,6 +13,7 @@ import { Badge, Card, Input, NativeSelect, Pagination, Skeleton } from "@/compon
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/overlays";
 import { buttonVariants } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page";
+import { ErrorNote } from "@/components/dashboard/widgets";
 import { CREATABLE_DOC_TYPES, DOC_STATUS, DOC_TYPE_LABEL } from "./labels";
 
 export function DocumentsView() {
@@ -92,6 +93,8 @@ export function DocumentsView() {
               <Skeleton key={i} className="h-11 w-full" />
             ))}
           </div>
+        ) : list.isError ? (
+          <ErrorNote onRetry={() => list.refetch()} error={list.error} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-sm">

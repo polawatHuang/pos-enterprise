@@ -8,6 +8,7 @@ const { audit } = require('../../core/audit');
 const { badRequest, notFound } = require('../../core/errors');
 const runtime = require('../../config/runtime');
 const { adapters, status, EDITABLE } = require('../../integrations');
+// testable ids are listed in status() so the page only offers the button where it works
 
 const router = express.Router();
 router.use(authenticate, requirePermission('integrations:manage'));
@@ -50,21 +51,62 @@ router.put(
   },
 );
 
-// A one-line request with the current keys, so a pasted key can be checked right away
-const TESTABLE = new Set(['minimax', 'anthropic']);
+/** Graph API: an app access token (id|secret) can read the app itself — proves the id/secret pair. */
+async function checkMetaApp() {
+  const id = runtime.get('META_APP_ID');
+  const secret = runtime.get('META_APP_SECRET');
+  if (!id) throw new Error('ต้องตั้ง META_APP_ID ด้วยจึงจะทดสอบได้');
+  const v = runtime.get('META_GRAPH_VERSION') || 'v23.0';
+  const res = await fetch(`https://graph.facebook.com/${v}/${encodeURIComponent(id)}?fields=id,name&access_token=${encodeURIComponent(`${id}|${secret}`)}`, {
+    signal: AbortSignal.timeout(15_000),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || json?.error) throw Object.assign(new Error(json?.error?.message ?? `HTTP ${res.status}`), { status: res.status });
+  return `แอป ${json.name ?? json.id}`;
+}
+
+/**
+ * A cheap, read-only request per service with the current keys, so a pasted key can be checked
+ * right away. Returns an optional detail shown next to "เชื่อมต่อได้".
+ */
+const ping = (a) => a.createMessage({ messages: [{ role: 'user', content: 'ping' }], maxTokens: 16, timeoutMs: 20_000, maxRetries: 0 }).then(() => null);
+const TESTS = {
+  minimax: ping,
+  anthropic: ping,
+  minimax_media: async (a) => `พบเสียงพากย์ ${(await a.listVoices()).length} เสียง`,
+  shotstack: async (a) => {
+    const r = await a.call('/models');
+    const models = r?.models ?? [];
+    return `${runtime.get('SHOTSTACK_ENV') || 'stage'} · โมเดล AI ที่ใช้ได้ ${models.filter((m) => m.available !== false).length} รายการ`;
+  },
+  line: async (a) => {
+    const info = await a.call('/info', runtime.get('LINE_CHANNEL_ACCESS_TOKEN'), null, 'GET');
+    return info?.displayName ? `LINE OA: ${info.displayName}` : null;
+  },
+  elevenlabs: async () => {
+    const res = await fetch('https://api.elevenlabs.io/v1/user', { headers: { 'xi-api-key': runtime.get('ELEVENLABS_API_KEY') }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
+    return null;
+  },
+  meta: checkMetaApp,
+  meta_social: checkMetaApp,
+};
+
 router.post('/:id/test', validate({ params: z.object({ id: z.string().max(40) }) }), async (req, res) => {
   const adapter = adapters.find((a) => a.meta.id === req.valid.params.id);
   if (!adapter) throw notFound();
-  if (!TESTABLE.has(adapter.meta.id)) throw badRequest('บริการนี้ยังไม่รองรับการทดสอบจากหน้าเว็บ');
+  const test = TESTS[adapter.meta.id];
+  if (!test) throw badRequest('บริการนี้ยังไม่รองรับการทดสอบจากหน้าเว็บ');
   adapter.requireConfig();
   const started = Date.now();
+  let detail;
   try {
-    await adapter.createMessage({ messages: [{ role: 'user', content: 'ping' }], maxTokens: 16, timeoutMs: 20_000, maxRetries: 0 });
+    detail = await test(adapter);
   } catch (err) {
     const msg = err?.error?.error?.message || err?.message || 'unknown error';
     throw badRequest(`เชื่อมต่อไม่สำเร็จ (${err?.status ?? 'network'}): ${String(msg).slice(0, 200)}`);
   }
-  res.json({ data: { ok: true, ms: Date.now() - started } });
+  res.json({ data: { ok: true, ms: Date.now() - started, detail: detail ?? null } });
 });
 
 module.exports = { router };
