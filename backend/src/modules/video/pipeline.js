@@ -127,7 +127,9 @@ const images = step(async ({ projectId, polls = 0 }) => {
     id: p.id,
     d: `กำลังสร้างภาพฉาก ${i + 1} (เหลือ ${missing.length} ภาพ)`,
   });
-  const pending = (await assets(p.id, 'thumbnail')).find((a) => a.scene_index === i && a.status === 'processing');
+  const thumbs = (await assets(p.id, 'thumbnail')).filter((a) => a.scene_index === i);
+  const pending = thumbs.find((a) => a.status === 'processing');
+  const lastFailed = thumbs.find((a) => a.status === 'failed');
   let file = !pending && scene.showProduct ? await downloadImage(p.product_image) : null;
   let label = `รูปสินค้า · ฉาก ${i + 1}`;
   if (!file && sceneAi() === 'minimax') {
@@ -138,19 +140,29 @@ const images = step(async ({ projectId, polls = 0 }) => {
     const later = (n) =>
       enqueue('video.images', { projectId: p.id, polls: n }, { orgId: p.org_id, runAt: new Date(Date.now() + IMAGE_POLL_MS), maxAttempts: 1 });
     if (!pending) {
-      const { jobId } = await shotstack.generate(await shotstack.imageAsset(scenePrompt(scene)));
+      // After a failed attempt use a fresh Idempotency-Key, else Shotstack returns the cached failure
+      const attempt = lastFailed ? (parseJson(lastFailed.meta)?.attempt ?? 0) + 1 : 0;
+      if (lastFailed) await db.query('DELETE FROM video_assets WHERE id = :id', { id: lastFailed.id });
+      const { jobId } = await shotstack.generate(await shotstack.imageAsset(scenePrompt(scene)), undefined, {
+        key: attempt ? `image-${p.id}-scene-${i}-${attempt}` : undefined,
+      });
       await db.query(
-        `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status)
-         VALUES (:id, 'thumbnail', :i, 'shotstack', :jobId, 'processing')`,
-        { id: p.id, i, jobId },
+        `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status, meta)
+         VALUES (:id, 'thumbnail', :i, 'shotstack', :jobId, 'processing', :meta)`,
+        { id: p.id, i, jobId, meta: JSON.stringify({ attempt }) },
       );
       await later(1);
       return { status: 'waiting', scene: i };
     }
     const r = await shotstack.getGeneration(pending.external_id);
-    if (r.status === 'failed') throw new Error(`Shotstack สร้างภาพฉาก ${i + 1} ไม่สำเร็จ: ${r.error}`);
+    // Keep the failed job on record so the next run tries again with a fresh key
+    const stop = async (why) => {
+      await db.query("UPDATE video_assets SET status = 'failed', error = :e WHERE id = :id", { id: pending.id, e: why });
+      throw new Error(why);
+    };
+    if (r.status === 'failed') await stop(`Shotstack สร้างภาพฉาก ${i + 1} ไม่สำเร็จ: ${r.error}`);
     if (r.status === 'processing') {
-      if (polls >= MAX_IMAGE_POLLS) throw new Error(`Shotstack สร้างภาพฉาก ${i + 1} นานเกินไป`);
+      if (polls >= MAX_IMAGE_POLLS) await stop(`Shotstack สร้างภาพฉาก ${i + 1} นานเกินไป`);
       await later(polls + 1);
       return { status: 'waiting', scene: i };
     }
@@ -230,8 +242,10 @@ const clipsStart = step(async ({ projectId }) => {
   const voiceMs = new Map((await assets(p.id, 'voice')).map((a) => [a.scene_index, a.duration_ms]));
   const existing = await assets(p.id, 'broll');
   const keep = new Set();
+  const attempts = new Map(); // scene → attempt number for scenes whose clip failed before
   for (const a of existing) {
     const source = parseJson(a.meta)?.source ?? null;
+    if (a.status === 'failed') attempts.set(a.scene_index, (parseJson(a.meta)?.attempt ?? 0) + 1);
     const current = fromImages ? (pictureOf[a.scene_index]?.storage_key ?? null) : null;
     if (a.status !== 'failed' && a.scene_index < p.scenes.length && source === current) keep.add(a.scene_index);
     else await db.query('DELETE FROM video_assets WHERE id = :id', { id: a.id });
@@ -251,11 +265,14 @@ const clipsStart = step(async ({ projectId }) => {
         `${scene.visual || scene.caption}. Animate this exact scene with natural, subtle motion; keep the same person, product and framing. No text.`,
         src,
       );
-      const { jobId } = await shotstack.generate(asset, length);
+      // A scene that failed before gets a fresh Idempotency-Key, else Shotstack returns the cached failure
+      const attempt = attempts.get(i) ?? 0;
+      const key = attempt ? `video-${p.id}-scene-${i}-${attempt}-${picture.storage_key}` : undefined;
+      const { jobId } = await shotstack.generate(asset, length, { key });
       await db.query(
         `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status, meta)
          VALUES (:id, 'broll', :i, 'shotstack', :jobId, 'processing', :meta)`,
-        { id: p.id, i, jobId, meta: JSON.stringify({ ...meta, length }) },
+        { id: p.id, i, jobId, meta: JSON.stringify({ ...meta, length, attempt }) },
       );
       started += 1;
       continue;
@@ -298,7 +315,11 @@ const sceneSeconds = (voiceMs, scene) => Math.round(((voiceMs ?? (scene?.duratio
 async function pollShotstackClip(p, a, polls) {
   const giveUp = (why) => db.query("UPDATE video_assets SET status = 'failed', error = :e WHERE id = :id", { id: a.id, e: String(why).slice(0, 500) });
   const r = await shotstack.getGeneration(a.external_id);
-  if (r.status === 'failed') return giveUp(`Shotstack สร้างคลิปไม่สำเร็จ: ${r.error}`);
+  const again = (parseJson(a.meta)?.attempt ?? 0) > 0;
+  if (r.status === 'failed') {
+    // Failing again on a fresh attempt points at the picture or the model rather than a passing glitch
+    return giveUp(`Shotstack สร้างคลิปไม่สำเร็จ: ${r.error}${again ? ' — ล้มซ้ำ: ลองเปลี่ยนภาพฉากนี้ หรือเปลี่ยน SHOTSTACK_VIDEO_MODEL' : ''}`);
+  }
   if (r.status === 'processing') return polls >= MAX_CLIP_POLLS ? giveUp('รอนานเกินไป') : null;
   const url = (await persist(r.url, keyFor(p, `clip-${a.scene_index}.mp4`), 'video/mp4')).url;
   return db.query("UPDATE video_assets SET status = 'ready', external_url = :url WHERE id = :id", { id: a.id, url });

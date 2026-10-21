@@ -623,6 +623,36 @@ describe('scene pictures → AI video with Shotstack (VIDEO_SCENE_AI=shotstack)'
     }
   });
 
+  test('retry makes only the failed scene again (fresh Idempotency-Key, no new speech) and re-assembles', async () => {
+    const id = await project();
+    assert.equal((await marketer.post(`/api/videos/${id}/clips/retry`)).status, 409); // nothing generated yet
+    shotstackGen.fail = (job) => job.asset.type === 'video' && job === [...shotstackGen.jobs.values()].filter((j) => j.asset.type === 'video')[1];
+    let v = await run(id);
+    assert.equal(v.status, 'ready', v.error);
+    shotstackGen.fail = null;
+
+    assert.equal((await viewer.post(`/api/videos/${id}/clips/retry`)).status, 403);
+    calls.length = 0;
+    const r = await marketer.post(`/api/videos/${id}/clips/retry`);
+    assert.equal(r.status, 202, JSON.stringify(r.body));
+    assert.equal(r.body.data.scenes, 1);
+    for (let i = 0; i < 15 && !['ready', 'failed'].includes((await statusOf(id)).status); i += 1) await drain();
+    v = await statusOf(id);
+    assert.equal(v.status, 'ready', v.error);
+    assert.ok(!/ใช้ภาพนิ่ง/.test(v.stage_detail ?? ''), v.stage_detail);
+
+    const gens = calls.filter((c) => c.url.endsWith('/edit/stage/generate'));
+    assert.equal(gens.length, 1, 'only the failed scene');
+    assert.match(gens[0].init.headers['Idempotency-Key'], new RegExp(`^video-${id}-scene-1-1-`));
+    assert.equal(calls.filter((c) => c.url.includes('/v1/t2a_v2')).length, 0, 'no new speech');
+    const clips = await db.query("SELECT scene_index, status FROM video_assets WHERE video_project_id = :id AND kind = 'broll' ORDER BY scene_index", { id });
+    assert.deepEqual(
+      clips.map((c) => c.status),
+      ['ready', 'ready', 'ready'],
+    );
+    assert.equal((await marketer.post(`/api/videos/${id}/clips/retry`)).status, 409); // nothing left to retry
+  });
+
   test('everything fails: the project fails with the reason', async () => {
     shotstackGen.fail = (job) => job.asset.type === 'video';
     try {

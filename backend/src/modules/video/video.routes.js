@@ -421,6 +421,42 @@ router.post('/:id/compose', validate({ params: idParam }), async (req, res) => {
   res.status(202).json({ data: { status: 'compositing' } });
 });
 
+/**
+ * Make the AI clips of the scenes that failed again, then re-assemble, without new speech or
+ * touching the clips that worked. Shotstack gets a fresh Idempotency-Key for those scenes.
+ */
+router.post('/:id/clips/retry', validate({ params: idParam }), async (req, res) => {
+  const v = await getProject(req.user.orgId, req.valid.params.id);
+  if (!['parts_ready', 'ready', 'failed'].includes(v.status)) throw conflict('ทำได้เมื่อวิดีโอสร้างเสร็จหรือไม่สำเร็จแล้วเท่านั้น');
+  if (v.visual_mode === 'product_images') throw badRequest('โปรเจกต์นี้ไม่ได้ใช้คลิป AI');
+  if (v.visual_mode === 'my_footage' && sceneAi() === 'shotstack') shotstack.requireConfig();
+  else minimaxMedia.requireConfig();
+  const scenes = parseJson(v.script_json)?.scenes ?? [];
+  const rows = await db.query(
+    `SELECT kind, scene_index, status, external_url, created_at < UTC_TIMESTAMP() - INTERVAL ${DURABLE_FOR_HOURS} HOUR AS old
+       FROM video_assets WHERE video_project_id = :id AND kind IN ('voice', 'broll')`,
+    { id: v.id },
+  );
+  const voices = rows.filter((a) => a.kind === 'voice' && a.status === 'ready' && a.external_url);
+  if (!scenes.length || scenes.some((_, i) => !voices.some((a) => a.scene_index === i))) {
+    throw conflict('เสียงพากย์ยังไม่ครบทุกฉาก — กด "สร้างวิดีโอใหม่" แทน');
+  }
+  const failed = rows.filter((a) => a.kind === 'broll' && a.status === 'failed');
+  if (!failed.length) throw conflict('ไม่มีฉากที่สร้างคลิปไม่สำเร็จ');
+  const r2Base = r2.isConfigured() ? runtime.get('R2_PUBLIC_BASE_URL').replace(/\/+$/, '') : null;
+  if (rows.some((a) => a.status === 'ready' && Number(a.old) && !(r2Base && a.external_url?.startsWith(`${r2Base}/`)))) {
+    throw conflict('ไฟล์เสียง/คลิปเดิมหมดอายุแล้ว (เกิน 24 ชม.) — กด "สร้างวิดีโอใหม่" แทน');
+  }
+  if (v.visual_mode === 'my_footage' && !env.PUBLIC_API_URL) throw badRequest('ต้องตั้ง PUBLIC_API_URL (โดเมน HTTPS ของ backend) ก่อน เพื่อให้ระบบตัดต่อดึงภาพฉากได้');
+  await db.query("UPDATE video_projects SET status = 'generating_clips', stage_detail = :d, error = NULL, output_url = NULL WHERE id = :id", {
+    id: v.id,
+    d: `เข้าคิวสร้างคลิป AI ใหม่ ${failed.length} ฉาก`,
+  });
+  await enqueue('video.clips_start', { projectId: v.id }, { orgId: req.user.orgId, maxAttempts: 1 });
+  audit(req, 'video.clips_retry', 'video_project', v.id, { scenes: failed.map((a) => a.scene_index + 1) });
+  res.status(202).json({ data: { status: 'generating_clips', scenes: failed.length } });
+});
+
 router.get('/:id/subtitles.srt', validate({ params: idParam }), async (req, res) => {
   const v = await getProject(req.user.orgId, req.valid.params.id);
   if (!v.subtitle_srt) throw notFound('ยังไม่มีไฟล์ซับ (สร้างวิดีโอก่อน)');

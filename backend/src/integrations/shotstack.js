@@ -35,11 +35,11 @@ const adapter = defineAdapter(
     ],
   },
   {
-    async call(path, { method = 'GET', body, api = 'edit' } = {}) {
+    async call(path, { method = 'GET', body, api = 'edit', headers = {} } = {}) {
       const env = adapter.requireConfig();
       const res = await fetch(`https://api.shotstack.io/${api}/${env.SHOTSTACK_ENV || 'stage'}${path}`, {
         method,
-        headers: { 'x-api-key': env.SHOTSTACK_API_KEY, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        headers: { 'x-api-key': env.SHOTSTACK_API_KEY, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
         body: body ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(30_000),
       });
@@ -79,10 +79,16 @@ const adapter = defineAdapter(
      * AI generation (Edit API /generate): an image from a prompt, or a video from a prompt and a
      * starting image. `length` sets the clip duration for models that generate to a duration.
      * Docs: @shotstack/schemas GenerationRequest — https://shotstack.io/docs/api/
+     * @param {{key?:string}} opts Idempotency-Key: a new key generates afresh instead of returning the cached result
      * @returns {{jobId:string}} poll with getGeneration
      */
-    async generate(asset, length) {
-      const r = await adapter.call('/generate', { method: 'POST', body: { asset, ...(length ? { length: Math.round(length * 10) / 10 } : {}) } });
+    async generate(asset, length, { key } = {}) {
+      // Without a key identical requests share one cached result (a failed one too): a retry needs a new key
+      const r = await adapter.call('/generate', {
+        method: 'POST',
+        body: { asset, ...(length ? { length: Math.round(length * 10) / 10 } : {}) },
+        headers: key ? { 'Idempotency-Key': key } : {},
+      });
       if (!r?.id) throw new AppError(502, 'SHOTSTACK_ERROR', 'Shotstack ไม่ส่งรหัสงานสร้างกลับมา');
       return { jobId: String(r.id) };
     },
