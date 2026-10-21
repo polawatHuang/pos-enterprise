@@ -138,16 +138,16 @@ const images = step(async ({ projectId, polls = 0 }) => {
     const later = (n) =>
       enqueue('video.images', { projectId: p.id, polls: n }, { orgId: p.org_id, runAt: new Date(Date.now() + IMAGE_POLL_MS), maxAttempts: 1 });
     if (!pending) {
-      const { assetId } = await shotstack.createImage(scenePrompt(scene));
+      const { jobId } = await shotstack.generate(await shotstack.imageAsset(scenePrompt(scene)));
       await db.query(
         `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status)
-         VALUES (:id, 'thumbnail', :i, 'shotstack', :assetId, 'processing')`,
-        { id: p.id, i, assetId },
+         VALUES (:id, 'thumbnail', :i, 'shotstack', :jobId, 'processing')`,
+        { id: p.id, i, jobId },
       );
       await later(1);
       return { status: 'waiting', scene: i };
     }
-    const r = await shotstack.getAsset(pending.external_id);
+    const r = await shotstack.getGeneration(pending.external_id);
     if (r.status === 'failed') throw new Error(`Shotstack สร้างภาพฉาก ${i + 1} ไม่สำเร็จ: ${r.error}`);
     if (r.status === 'processing') {
       if (polls >= MAX_IMAGE_POLLS) throw new Error(`Shotstack สร้างภาพฉาก ${i + 1} นานเกินไป`);
@@ -243,14 +243,19 @@ const clipsStart = step(async ({ projectId }) => {
     if (fromImages && picture?.kind !== 'image') continue; // the user's own video plays as is
     const meta = { source: picture?.storage_key ?? null };
     if (fromImages && sceneAi() === 'shotstack') {
-      // Shotstack image-to-video needs an exact 576x1024 frame: render the picture to that size first
+      // Shotstack /generate: the picture is the starting frame, the clip as long as the scene's voice-over
       const src = media.publicUrl('m', picture.id, media.extOf(picture.storage_key));
       if (!src) continue;
-      const { renderId } = await shotstack.resizeImage(src);
+      const length = sceneSeconds(voiceMs.get(i), scene);
+      const asset = await shotstack.videoAsset(
+        `${scene.visual || scene.caption}. Animate this exact scene with natural, subtle motion; keep the same person, product and framing. No text.`,
+        src,
+      );
+      const { jobId } = await shotstack.generate(asset, length);
       await db.query(
         `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status, meta)
-         VALUES (:id, 'broll', :i, 'shotstack', :renderId, 'processing', :meta)`,
-        { id: p.id, i, renderId, meta: JSON.stringify({ ...meta, step: 'resize' }) },
+         VALUES (:id, 'broll', :i, 'shotstack', :jobId, 'processing', :meta)`,
+        { id: p.id, i, jobId, meta: JSON.stringify({ ...meta, length }) },
       );
       started += 1;
       continue;
@@ -286,38 +291,25 @@ const clipsStart = step(async ({ projectId }) => {
 
 /** Shotstack clips are quick (seconds to a minute); MiniMax Hailuo takes minutes. */
 const clipPollMs = () => (sceneAi() === 'shotstack' ? 15_000 : POLL_MS);
-/** Shotstack image-to-video output runs about 4-6s; use the first 4s and hold the picture after. */
-const SHOTSTACK_CLIP_SEC = 4;
+/** Seconds a scene lasts on screen: its voice-over plus a short breath (as sceneTimings). */
+const sceneSeconds = (voiceMs, scene) => Math.round(((voiceMs ?? (scene?.durationSec ?? 4) * 1000) / 1000 + 0.3) * 10) / 10;
 
-/**
- * One Shotstack scene clip: resize render → image-to-video asset → ready. A scene that gives up
- * shows its still picture; the reason is recorded on the asset and shown in the stage detail.
- */
+/** One Shotstack scene clip job. A scene that fails records why (shown on the page and in the stage detail). */
 async function pollShotstackClip(p, a, polls) {
-  const meta = parseJson(a.meta) ?? {};
-  const giveUp = async (why) => {
-    await db.query("UPDATE video_assets SET status = 'failed', error = :e WHERE id = :id", { id: a.id, e: String(why).slice(0, 500) });
-    return why;
-  };
-  if (meta.step === 'resize') {
-    const r = await shotstack.getRender(a.external_id);
-    if (r.status === 'failed') return giveUp(`ย่อภาพไม่สำเร็จ: ${r.error}`);
-    if (r.status === 'processing') return polls >= MAX_CLIP_POLLS ? giveUp('รอนานเกินไป') : null;
-    const { assetId } = await shotstack.createImageToVideo(r.url);
-    await db.query('UPDATE video_assets SET external_id = :assetId, meta = :meta WHERE id = :id', {
-      id: a.id,
-      assetId,
-      meta: JSON.stringify({ ...meta, step: 'animate' }),
-    });
-    return null;
-  }
-  const r = await shotstack.getAsset(a.external_id);
-  if (r.status === 'failed') return giveUp(`สร้างคลิปไม่สำเร็จ: ${r.error}`);
+  const giveUp = (why) => db.query("UPDATE video_assets SET status = 'failed', error = :e WHERE id = :id", { id: a.id, e: String(why).slice(0, 500) });
+  const r = await shotstack.getGeneration(a.external_id);
+  if (r.status === 'failed') return giveUp(`Shotstack สร้างคลิปไม่สำเร็จ: ${r.error}`);
   if (r.status === 'processing') return polls >= MAX_CLIP_POLLS ? giveUp('รอนานเกินไป') : null;
   const url = (await persist(r.url, keyFor(p, `clip-${a.scene_index}.mp4`), 'video/mp4')).url;
-  await db.query("UPDATE video_assets SET status = 'ready', external_url = :url WHERE id = :id", { id: a.id, url });
-  return null;
+  return db.query("UPDATE video_assets SET status = 'ready', external_url = :url WHERE id = :id", { id: a.id, url });
 }
+
+/** "ฉาก 2 ใช้ภาพนิ่ง: <why>" for every scene whose AI clip failed. */
+const clipFailureNote = (rows) =>
+  rows
+    .filter((a) => a.status === 'failed')
+    .map((a) => `ฉาก ${a.scene_index + 1} ใช้ภาพนิ่ง: ${a.error}`)
+    .join(' · ');
 
 const clipsPoll = step(async ({ projectId, polls = 1 }) => {
   const p = await loadProject(projectId);
@@ -351,13 +343,11 @@ const clipsPoll = step(async ({ projectId, polls = 1 }) => {
     return { status: 'waiting', pending };
   }
   const failed = after.filter((a) => a.status === 'failed');
-  await setStage(
-    p.id,
-    'compositing',
-    failed.length
-      ? `กำลังประกอบคลิป — ${failed.length} ฉากใช้ภาพนิ่งแทน (${failed.map((a) => `ฉาก ${a.scene_index + 1}: ${a.error}`).join('; ')})`.slice(0, 500)
-      : 'กำลังเตรียมประกอบคลิป',
-  );
+  // Every AI clip failed: stop with the provider's reason rather than render a slideshow of stills
+  if (after.length && failed.length === after.length) {
+    throw new Error(`สร้างคลิป AI ไม่สำเร็จทุกฉาก — ${failed[0].error}`);
+  }
+  await setStage(p.id, 'compositing', failed.length ? `กำลังประกอบคลิป · ${clipFailureNote(after)}`.slice(0, 250) : 'กำลังเตรียมประกอบคลิป');
   await enqueue('video.compose', { projectId: p.id }, { orgId: p.org_id, maxAttempts: 1 });
   return { status: 'ok' };
 });
@@ -394,7 +384,7 @@ const compose = step(async ({ projectId }) => {
       const pic = k === null ? productImage : own[k];
       if (!clips[i]) return pic;
       // A scene longer than its AI clip holds the picture for the rest
-      const durationSec = clips[i].provider === 'shotstack' ? SHOTSTACK_CLIP_SEC : clipSeconds(voiceRows[i]?.duration_ms);
+      const durationSec = clips[i].provider === 'shotstack' ? (parseJson(clips[i].meta)?.length ?? null) : clipSeconds(voiceRows[i]?.duration_ms);
       return { type: 'video', url: clips[i].external_url, durationSec, hold: pic?.type === 'image' ? pic.url : null };
     });
     pool = [];
@@ -457,7 +447,12 @@ const composePoll = step(async ({ projectId, polls = 1 }) => {
   await db.query("UPDATE video_projects SET status = 'ready', output_url = :url, stage_detail = :d, error = NULL WHERE id = :id", {
     id: p.id,
     url: stored.url,
-    d: stored.stored ? null : 'ลิงก์จาก Shotstack หมดอายุใน 24 ชม. — ตั้งค่า R2 เพื่อเก็บไฟล์ถาวร',
+    // Keep scenes that fell back to a still visible after the render, with the reason
+    d:
+      [clipFailureNote(await assets(p.id, 'broll')), stored.stored ? null : 'ลิงก์จาก Shotstack หมดอายุใน 24 ชม. — ตั้งค่า R2 เพื่อเก็บไฟล์ถาวร']
+        .filter(Boolean)
+        .join(' · ')
+        .slice(0, 250) || null,
   });
   return { status: 'ready', url: stored.url };
 });

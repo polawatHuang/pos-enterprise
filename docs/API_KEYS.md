@@ -64,7 +64,7 @@
   - ทุกขั้นทำงานบนคลาวด์ จึงไม่ต้องใช้ ffmpeg หรือ GPU บน Plesk
   - ถ้ายังไม่ได้ตั้ง Shotstack ระบบจะให้ชิ้นส่วน (เสียงแต่ละฉาก, คลิป, ไฟล์ซับ .srt) ไปตัดต่อใน CapCut แทน
 - **Shotstack** — `SHOTSTACK_ENV=stage` ใช้ฟรีแต่มีลายน้ำ ใช้งานจริงให้ตั้งเป็น `v1` และใช้ key แบบ production
-  - `VIDEO_SCENE_AI` (ค่าเริ่มต้น `shotstack`) — โหมด "AI วิดีโอจากภาพฉาก" ใช้ Shotstack text-to-image สร้างภาพฉากที่ขาด และ image-to-video ทำภาพเป็นคลิประหว่างเรนเดอร์ (ใช้เครดิต Shotstack) ตั้งเป็น `minimax` เพื่อใช้ image-01 + Hailuo แทน (ต้องใช้แพ็กเกจ MiniMax ที่รองรับโมเดลเหล่านั้น)
+  - `VIDEO_SCENE_AI` (ค่าเริ่มต้น `shotstack`) — โหมด "AI วิดีโอจากภาพฉาก" ใช้ Shotstack Edit API `/generate`: สร้างภาพฉากที่ขาดด้วย `SHOTSTACK_IMAGE_MODEL` (ค่าเริ่มต้น `nano-banana-2`) และทำภาพเป็นคลิปด้วย `SHOTSTACK_VIDEO_MODEL` (ค่าเริ่มต้น `seedance-2.0-image-to-video`) ใช้เครดิต Shotstack และแพ็กเกจต้องรวม AI generation · ตั้งเป็น `minimax` เพื่อใช้ image-01 + Hailuo แทน
 - **Cloudflare R2** — ลิงก์ไฟล์จาก MiniMax และ Shotstack หมดอายุภายในประมาณ 24 ชั่วโมง ระบบจึงคัดลอกไฟล์ไปเก็บใน R2 (อัปโหลดด้วย S3 SigV4 โดยไม่ต้องติดตั้ง SDK) ไม่มีค่า egress เหมาะกับวิดีโอที่ต้องให้ TikTok/Meta ดึงไฟล์ไป (`PULL_FROM_URL`) และอัปโหลดตรงจาก browser ได้โดยไม่ผ่านโฮสต์
 - **Shopee/TikTok official API ก่อน scraping** — เสถียรกว่า ไม่ผิดข้อตกลง และไม่โดนบล็อก
 

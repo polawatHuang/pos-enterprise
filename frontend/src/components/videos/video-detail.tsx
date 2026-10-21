@@ -638,6 +638,18 @@ function FinishedClip({ v, durable }: { v: VideoDetail; durable: boolean }) {
             <Send /> ตั้งเวลาโพสต์คลิปนี้
           </Link>
         </Button>
+        {v.assets.some((x) => x.kind === "broll" && x.status === "failed") && (
+          <p className="flex gap-1.5 rounded-lg bg-warning-soft px-2.5 py-2 text-xs text-warning">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              บางฉากสร้างคลิป AI ไม่สำเร็จ จึงใช้ภาพนิ่งแทน:{" "}
+              {v.assets
+                .filter((x) => x.kind === "broll" && x.status === "failed")
+                .map((x) => `ฉาก ${(x.sceneIndex ?? 0) + 1}${x.error ? ` (${x.error})` : ""}`)
+                .join(", ")}
+            </span>
+          </p>
+        )}
         {!durable && (
           <p className="flex gap-1.5 rounded-lg bg-warning-soft px-2.5 py-2 text-xs text-warning">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
@@ -699,7 +711,7 @@ function Outputs({ v }: { v: VideoDetail }) {
                     เปิดคลิป
                   </a>
                 ) : a.status === "failed" ? (
-                  <span className="text-warning">ไม่สำเร็จ (ใช้รูปสินค้าแทน)</span>
+                  <span className="text-warning">ไม่สำเร็จ — ใช้ภาพนิ่งแทน{a.error ? ` (${a.error})` : ""}</span>
                 ) : (
                   <span className="text-muted-foreground">กำลังสร้าง…</span>
                 )}
