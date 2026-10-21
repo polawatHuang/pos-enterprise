@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, NativeSelect, Segmented } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
 import { useTaxSettings } from "@/lib/tax";
+import { isUnreadable, readFileNow, UNREADABLE_HELP } from "@/lib/files";
 
 export const TXN_META_KEY = ["accounting", "txn-meta"] as const;
 export const useTxnMeta = () =>
@@ -289,7 +290,10 @@ function Amount({ label, value, strong }: { label: string; value: number; strong
  * Prepares a receipt for upload: photos are downscaled to ≤2000px JPEG so phone pictures stay
  * well under the 4 MB API limit; PDFs are sent as-is.
  */
-export async function fileToPayload(file: File): Promise<{ mediaType: string; data: string }> {
+export async function fileToPayload(picked: File): Promise<{ mediaType: string; data: string }> {
+  const file = await readFileNow(picked).catch((err) => {
+    throw isUnreadable(err) ? new Error(UNREADABLE_HELP) : err;
+  });
   if (file.type === "application/pdf") {
     if (file.size > 4 * 1024 * 1024) throw new Error("ไฟล์ PDF ใหญ่เกิน 4 MB");
     const buf = new Uint8Array(await file.arrayBuffer());

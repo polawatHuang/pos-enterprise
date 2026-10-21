@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
 import { r2 } from "./cart";
+import { isUnreadable, readFileNow, UNREADABLE_HELP } from "@/lib/files";
 
 const METHODS: { value: PaymentMethod; label: string; icon: typeof Banknote; key: string }[] = [
   { value: "cash", label: "เงินสด", icon: Banknote, key: "F8" },
@@ -37,7 +38,10 @@ export interface PaymentResult {
 }
 
 /** Slip photos are re-encoded to a 1600px JPEG: phone photos are often 5–10 MB. */
-async function slipToBase64(file: File): Promise<string> {
+async function slipToBase64(picked: File): Promise<string> {
+  const file = await readFileNow(picked).catch((err) => {
+    throw isUnreadable(err) ? new Error(UNREADABLE_HELP) : err;
+  });
   return base64Of(await downscaleToDataUrl(file, { maxSide: 1600, quality: 0.85 }));
 }
 
