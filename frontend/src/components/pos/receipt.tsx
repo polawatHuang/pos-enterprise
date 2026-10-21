@@ -2,6 +2,7 @@
 
 import type { PosOrder, PosSettings } from "@/lib/types";
 import { formatMoney } from "@/lib/utils";
+import { useTaxSettings } from "@/lib/tax";
 
 export const METHOD_LABEL: Record<string, string> = {
   cash: "เงินสด",
@@ -19,6 +20,7 @@ export const METHOD_LABEL: Record<string, string> = {
  */
 export function Receipt({ order, settings }: { order: PosOrder; settings?: PosSettings }) {
   const org = settings?.org;
+  const { tax } = useTaxSettings();
   const paid = order.payments.filter((p) => p.amount > 0);
   const voided = order.status === "cancelled";
   return (
@@ -67,7 +69,7 @@ export function Receipt({ order, settings }: { order: PosOrder; settings?: PosSe
       {org?.vatRegistered && (
         <>
           <Row label="มูลค่าก่อน VAT" value={order.total - order.vatAmount} />
-          <Row label="VAT 7%" value={order.vatAmount} />
+          <Row label={`VAT ${tax.vatRate}%`} value={order.vatAmount} />
         </>
       )}
       <div className="my-2 border-t border-dashed border-black" />

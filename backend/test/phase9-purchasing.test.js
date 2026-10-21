@@ -120,6 +120,12 @@ describe('ordering', () => {
     assert.equal(row.spark.length, 14);
     assert.equal(row.spark[13], 2);
     assert.match(row.reason, /ขายเฉลี่ย 1\.6/);
+    // the same product's stock in the org's other warehouses, so a transfer can be chosen instead
+    const other = await db.one(
+      'SELECT COALESCE(SUM(quantity), 0) AS q FROM stock_levels sl JOIN warehouses w ON w.id = sl.warehouse_id WHERE sl.product_id = :p AND w.org_id = 1 AND w.id <> 2',
+      { p: state.productId },
+    );
+    assert.equal(row.otherStock, Math.max(Number(other.q), 0));
   });
 
   test('AI adjusts by season within limits and keeps the pack size', async () => {

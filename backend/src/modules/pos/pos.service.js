@@ -6,8 +6,8 @@ const { applyMovement } = require('../inventory/inventory.service');
 const { consumeFefo, restoreLots, parseAlloc } = require('../inventory/lots');
 const { postJournal, reverseJournalsFor, saleLines } = require('../accounting/ledger.service');
 const { localDate, localTime } = require('../../utils/dates');
+const { getTaxSettings, lineRate } = require('../org/tax');
 
-const VAT_RATE = 7;
 const r2 = (n) => Math.round(n * 100) / 100;
 
 /* ---------------------------------------------------------------- settings */
@@ -224,16 +224,21 @@ async function warehouseForBranch(conn, orgId, branchId) {
 }
 
 /**
- * Prices include VAT (Thai retail convention). VAT is extracted per line after
- * spreading the bill discount proportionally, so exempt items never carry VAT.
+ * Prices include VAT (Thai retail convention). VAT is extracted per line at the shop's rate after
+ * spreading the bill discount proportionally, so exempt items never carry VAT and a shop that is
+ * not VAT registered records none.
  */
-function computeTotals(lines, billDiscount) {
+function computeTotals(lines, billDiscount, tax = { vatRegistered: true, vatRate: 7 }) {
   const subtotal = r2(lines.reduce((s, l) => s + l.lineTotal, 0));
   if (billDiscount > subtotal) throw badRequest('ส่วนลดมากกว่ายอดขาย');
   const total = r2(subtotal - billDiscount);
   const ratio = subtotal ? total / subtotal : 0;
-  const vatable = lines.filter((l) => l.vatType === 'vat7').reduce((s, l) => s + l.lineTotal, 0);
-  const vat = r2(((vatable * ratio) * VAT_RATE) / (100 + VAT_RATE));
+  const vat = r2(
+    lines.reduce((s, l) => {
+      const rate = lineRate(tax, l.vatType);
+      return s + (l.lineTotal * ratio * rate) / (100 + rate);
+    }, 0),
+  );
   const cost = r2(lines.reduce((s, l) => s + l.unitCost * l.quantity, 0));
   return { subtotal, discount: r2(billDiscount), total, vat, cost };
 }
@@ -276,6 +281,7 @@ async function checkout(user, input) {
   const shift = await currentShift(user.id);
   if (!shift) throw conflict('กรุณาเปิดกะก่อนขาย');
   const settings = await getSettings(user.orgId);
+  const tax = await getTaxSettings(user.orgId);
   const canOverride = user.permissions.includes('pos:manage');
   const now = localTime();
 
@@ -338,7 +344,7 @@ async function checkout(user, input) {
     if (needsAge && !input.ageConfirmed) throw badRequest('มีสินค้าจำกัดอายุ กรุณายืนยันว่าลูกค้าอายุ 20 ปีขึ้นไป');
 
     // Cashier discount limit is checked before points: redeeming points is the customer's right.
-    const beforePoints = computeTotals(lines, input.discount ?? 0);
+    const beforePoints = computeTotals(lines, input.discount ?? 0, tax);
     const listGross = lines.reduce((s, l) => s + l.listPrice * l.quantity, 0);
     // Near-expiry markdowns are the shop's own price cut, not the cashier's discount
     const markdownTotal = lines.reduce((s, l) => s + l.markdown, 0);
@@ -360,7 +366,7 @@ async function checkout(user, input) {
     if (pointsUsed > Number(customer?.points ?? 0)) throw badRequest(`แต้มไม่พอ (มี ${customer?.points ?? 0} แต้ม)`);
     const pointsDiscount = r2(pointsUsed * settings.pointValue);
     if (pointsDiscount > beforePoints.total) throw badRequest('ใช้แต้มเกินยอดบิล');
-    const totals = computeTotals(lines, r2((input.discount ?? 0) + pointsDiscount));
+    const totals = computeTotals(lines, r2((input.discount ?? 0) + pointsDiscount), tax);
     const pointsEarned = customer && settings.pointsEarnBaht > 0 ? Math.floor(totals.total / settings.pointsEarnBaht) : 0;
 
     const { rows: payRows, change } = settlePayments(normalizePayments(input, totals.total), totals.total);

@@ -8,6 +8,7 @@ const { audit } = require('../../core/audit');
 const { badRequest } = require('../../core/errors');
 const ai = require('../../integrations/ai');
 const { CATEGORIES, WHT_TYPES } = require('./transactions.routes');
+const { getTaxSettings } = require('../org/tax');
 
 const router = express.Router();
 
@@ -48,10 +49,10 @@ const RECEIPT_SCHEMA = {
   },
 };
 
-const SYSTEM = `คุณเป็นผู้ช่วยนักบัญชีไทย อ่านรูปใบเสร็จ/ใบกำกับภาษี/บิลค่าใช้จ่าย แล้วดึงข้อมูลเพื่อบันทึกรายจ่าย
+const system = (vatRate) => `คุณเป็นผู้ช่วยนักบัญชีไทย อ่านรูปใบเสร็จ/ใบกำกับภาษี/บิลค่าใช้จ่าย แล้วดึงข้อมูลเพื่อบันทึกรายจ่าย
 - อ่านเฉพาะสิ่งที่ปรากฏในเอกสาร ถ้าอ่านไม่ออกหรือไม่มี ให้ใส่ null ห้ามเดา
 - ปี พ.ศ. ให้แปลงเป็น ค.ศ. (ลบ 543)
-- ถ้ามีแค่ยอดรวมที่รวม VAT แล้ว ให้คำนวณ subtotal = total * 100/107 และ vatAmount = total - subtotal เฉพาะเมื่อเอกสารระบุว่ามี VAT
+- ถ้ามีแค่ยอดรวมที่รวม VAT แล้ว ให้คำนวณ subtotal = total * 100/${100 + vatRate} และ vatAmount = total - subtotal เฉพาะเมื่อเอกสารระบุว่ามี VAT
 - isFullTaxInvoice = true เฉพาะใบกำกับภาษีเต็มรูปที่มีเลขผู้เสียภาษีผู้ขายและชื่อผู้ซื้อ (ใบกำกับอย่างย่อ/บิลเงินสด = false)
 - เลือก category ที่ใกล้เคียงที่สุดจากรายการที่กำหนด
 - confidence = low ถ้ารูปไม่ชัดหรือไม่ใช่เอกสารการเงิน`;
@@ -73,7 +74,7 @@ router.post('/extract-receipt', requirePermission('accounting:write'), validate(
   const source = { type: 'base64', media_type: mediaType, data };
   const fileBlock = mediaType === 'application/pdf' ? { type: 'document', source } : { type: 'image', source };
   const { data: parsed, model, provider } = await ai.extractStructured({
-    system: SYSTEM,
+    system: system((await getTaxSettings(req.user.orgId)).vatRate),
     schema: RECEIPT_SCHEMA,
     toolName: 'submit_receipt',
     toolDescription: 'ส่งข้อมูลที่อ่านได้จากใบเสร็จ',

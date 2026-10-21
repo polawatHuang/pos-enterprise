@@ -1,4 +1,5 @@
 import type { CatalogItem, SaleBlock } from "@/lib/types";
+import { DEFAULT_TAX, lineVatRate, type TaxSettings } from "@/lib/tax";
 
 export interface CartLine {
   /** product id + unit id: the same product sold by piece and by pack are separate lines */
@@ -33,19 +34,22 @@ export function lineMarkdown(line: Pick<CartLine, "item" | "unitId" | "quantity"
 }
 export const lineTotal = (line: CartLine) => r2(unitPrice(line) * line.quantity - line.discount - lineMarkdown(line));
 
-/** Mirrors the server: VAT is extracted from VAT-inclusive prices after spreading bill-level discounts. */
-export function totalsOf(lines: CartLine[], billDiscount: number, pointsDiscount = 0) {
+/** Mirrors the server: VAT is extracted from VAT-inclusive prices at the shop's rate after spreading bill-level discounts. */
+export function totalsOf(lines: CartLine[], billDiscount: number, pointsDiscount = 0, tax: TaxSettings = DEFAULT_TAX) {
   const gross = r2(lines.reduce((s, l) => s + unitPrice(l) * l.quantity, 0));
   const subtotal = r2(lines.reduce((s, l) => s + lineTotal(l), 0));
   const total = r2(Math.max(subtotal - billDiscount - pointsDiscount, 0));
   const ratio = subtotal ? total / subtotal : 0;
-  const vatable = lines.filter((l) => l.item.vatType === "vat7").reduce((s, l) => s + lineTotal(l), 0);
+  const vat = lines.reduce((s, l) => {
+    const rate = lineVatRate(tax, l.item.vatType);
+    return s + (lineTotal(l) * ratio * rate) / (100 + rate);
+  }, 0);
   return {
     gross,
     subtotal,
     total,
     lineDiscounts: r2(gross - subtotal),
-    vat: r2((vatable * ratio * 7) / 107),
+    vat: r2(vat),
     units: lines.reduce((s, l) => s + l.quantity, 0),
   };
 }

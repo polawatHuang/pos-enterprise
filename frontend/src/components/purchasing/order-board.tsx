@@ -24,10 +24,12 @@ interface AiNote {
  * purchase order per supplier.
  */
 export function OrderBoard({ warehouses, initialWarehouse }: { warehouses: Warehouse[]; initialWarehouse: string }) {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const router = useRouter();
   const qc = useQueryClient();
-  const [warehouseId, setWarehouseId] = useState(initialWarehouse || String(warehouses[1]?.id ?? warehouses[0]?.id ?? ""));
+  // Default to the warehouse of the user's own branch (the same stock the POS sells from)
+  const ownWarehouse = warehouses.find((w) => w.branchId != null && w.branchId === user?.branchId) ?? warehouses[0];
+  const [warehouseId, setWarehouseId] = useState(initialWarehouse || String(ownWarehouse?.id ?? ""));
   const [supplierId, setSupplierId] = useState("");
   const [all, setAll] = useState(false);
   const [qty, setQty] = useState<Record<number, number>>({});
@@ -182,6 +184,7 @@ export function OrderBoard({ warehouses, initialWarehouse }: { warehouses: Wareh
                   <div>
                     <Sparkline values={r.spark} className="h-8 w-[112px]" label={`ยอดขาย 14 วันของ ${r.name}`} />
                     <p className="mt-1 text-[11px] text-muted-foreground">ขาย 14 วัน · เฉลี่ย {r.avgDaily.toFixed(1)}/วัน</p>
+                    {r.otherStock > 0 && <p className="text-[11px] font-medium text-primary">คลังอื่นมี {formatNumber(r.otherStock)}</p>}
                   </div>
                   <dl className="grid grid-cols-3 gap-2 text-center text-xs">
                     <Mini label="มี" value={formatNumber(r.onHand)} danger={r.onHand <= 0} />

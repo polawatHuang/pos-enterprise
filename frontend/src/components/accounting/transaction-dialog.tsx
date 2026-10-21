@@ -11,6 +11,7 @@ import { cn, formatMoney, todayStr } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, NativeSelect, Segmented } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
+import { useTaxSettings } from "@/lib/tax";
 
 export const TXN_META_KEY = ["accounting", "txn-meta"] as const;
 export const useTxnMeta = () =>
@@ -18,10 +19,10 @@ export const useTxnMeta = () =>
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Mirrors the server: VAT on top / included, WHT on the pre-VAT base. */
-export function previewAmounts(amount: number, vatMode: VatMode, whtRate: number) {
-  const base = vatMode === "inclusive" ? r2((amount * 100) / 107) : r2(amount);
-  const vat = vatMode === "none" ? 0 : vatMode === "inclusive" ? r2(amount - base) : r2(base * 0.07);
+/** Mirrors the server: VAT on top / included at the shop's rate, WHT on the pre-VAT base. */
+export function previewAmounts(amount: number, vatMode: VatMode, whtRate: number, vatRate = 7) {
+  const base = vatMode === "inclusive" ? r2((amount * 100) / (100 + vatRate)) : r2(amount);
+  const vat = vatMode === "none" ? 0 : vatMode === "inclusive" ? r2(amount - base) : r2((base * vatRate) / 100);
   const wht = whtRate ? r2((base * whtRate) / 100) : 0;
   return { base, vat, wht, net: r2(base + vat - wht) };
 }
@@ -85,7 +86,8 @@ export function TransactionDialog({ prefill, onDone }: { prefill?: TxnPrefill; o
   const categories = meta.data?.categories[type] ?? [];
   const whtType = meta.data?.whtTypes.find((w) => w.code === whtCode);
   const effectiveRate = type === "expense" ? (whtRate !== "" ? Number(whtRate) : whtType?.rate ?? 0) : Number(whtRate || 0);
-  const preview = useMemo(() => previewAmounts(Number(amount) || 0, vatMode, effectiveRate), [amount, vatMode, effectiveRate]);
+  const { tax } = useTaxSettings();
+  const preview = useMemo(() => previewAmounts(Number(amount) || 0, vatMode, effectiveRate, tax.vatRate), [amount, vatMode, effectiveRate, tax.vatRate]);
 
   const save = async () => {
     const errs: Record<string, string> = {};
@@ -185,8 +187,8 @@ export function TransactionDialog({ prefill, onDone }: { prefill?: TxnPrefill; o
             <Label htmlFor="vat">ภาษีมูลค่าเพิ่ม</Label>
             <NativeSelect id="vat" className="h-10 w-full" value={vatMode} onChange={(e) => setVatMode(e.target.value as VatMode)}>
               <option value="none">ไม่มี VAT</option>
-              <option value="inclusive">ยอดนี้รวม VAT 7% แล้ว</option>
-              <option value="exclusive">บวก VAT 7% เพิ่ม</option>
+              <option value="inclusive">ยอดนี้รวม VAT {tax.vatRate}% แล้ว</option>
+              <option value="exclusive">บวก VAT {tax.vatRate}% เพิ่ม</option>
             </NativeSelect>
             {type === "expense" && vatMode !== "none" && (
               <label className="flex items-center gap-2 text-xs text-muted-foreground">

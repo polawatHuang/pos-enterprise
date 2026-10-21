@@ -46,6 +46,7 @@ import { POS_SETTINGS_KEY, PosSettingsDialog } from "./settings-dialog";
 import { CashDialog, CloseShiftDialog, OpenShiftCard, SHIFT_KEY, ShiftReportView } from "./shift";
 import { ShortcutsDialog } from "./shortcuts";
 import { beep } from "./sound";
+import { useTaxSettings } from "@/lib/tax";
 
 type Modal = "pay" | "bills" | "close" | "settings" | "receipt" | "member" | "held" | "line" | "cash" | "report" | "keys" | null;
 type Filter = number | "all" | "fav";
@@ -58,6 +59,7 @@ export function PosView() {
   const held = useQuery({ queryKey: HELD_KEY, queryFn: () => api.get<HeldBill[]>("/pos/held"), enabled: !!shift.data });
   const categories = useCategories();
   const favorites = useFavorites();
+  const { tax } = useTaxSettings();
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -94,10 +96,10 @@ export function PosView() {
 
   const pointValue = settings.data?.pointValue ?? 0;
   const discountNum = Math.max(Number(discount) || 0, 0);
-  const base = useMemo(() => totalsOf(cart, discountNum), [cart, discountNum]);
+  const base = useMemo(() => totalsOf(cart, discountNum, 0, tax), [cart, discountNum, tax]);
   const maxPoints = member && pointValue > 0 ? Math.min(member.points, Math.floor(base.total / pointValue)) : 0;
   const points = Math.min(pointsUse, maxPoints);
-  const totals = useMemo(() => totalsOf(cart, discountNum, r2(points * pointValue)), [cart, discountNum, points, pointValue]);
+  const totals = useMemo(() => totalsOf(cart, discountNum, r2(points * pointValue), tax), [cart, discountNum, points, pointValue, tax]);
   const needsAge = cart.some((l) => l.item.ageRestricted);
   const selectedLine = cart.find((l) => l.key === selected) ?? null;
 
@@ -588,7 +590,7 @@ export function PosView() {
               )}
               {points > 0 && <Row label={`แต้ม ${formatNumber(points)}`} value={`−${formatMoney(r2(points * pointValue))}`} danger />}
               {settings.data && !can("pos:manage") && <p className="text-right text-[11px] text-muted-foreground">ให้ส่วนลดได้สูงสุด {settings.data.maxDiscountPct}%</p>}
-              <Row label="VAT 7% (รวมในราคาแล้ว)" value={formatMoney(totals.vat)} muted />
+              {tax.vatRegistered && <Row label={`VAT ${tax.vatRate}% (รวมในราคาแล้ว)`} value={formatMoney(totals.vat)} muted />}
               <div className="flex items-baseline justify-between pt-1">
                 <span className="font-medium">ยอดสุทธิ</span>
                 <span className="text-3xl font-bold tracking-tight tabular-nums" data-testid="cart-total">

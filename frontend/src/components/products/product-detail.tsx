@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Bot, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { KnowledgeEntry, ProductDetail as ProductDetailT, StockMovement } from "@/lib/types";
 import { formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
+import { lineVatRate, netOfInclusive, useTaxSettings } from "@/lib/tax";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Skeleton, Textarea } from "@/components/ui/primitives";
@@ -19,7 +21,12 @@ import { STATUS_LABEL } from "./products-view";
 
 export function ProductDetail({ id }: { id: number }) {
   const { can } = useAuth();
+  const { tax } = useTaxSettings();
+  const router = useRouter();
+  const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const product = useQuery({ queryKey: ["products", "detail", id], queryFn: () => api.get<ProductDetailT>(`/products/${id}`) });
   const movements = useQuery({
     queryKey: ["inventory", "movements", { productId: id }],
@@ -30,7 +37,24 @@ export function ProductDetail({ id }: { id: number }) {
   if (product.isPending) return <Skeleton className="h-96 w-full rounded-xl" />;
   if (product.isError) return <p className="py-16 text-center text-muted-foreground">{product.error.message}</p>;
   const p = product.data;
-  const net = p.vatType === "vat7" ? p.price / 1.07 : p.price;
+  const rate = lineVatRate(tax, p.vatType);
+  const net = netOfInclusive(p.price, rate);
+
+  const remove = async () => {
+    if (!confirmDelete) return setConfirmDelete(true);
+    setDeleting(true);
+    try {
+      await api.del(`/products/${p.id}`);
+      toast.success(`ลบ ${p.name} แล้ว`);
+      await qc.invalidateQueries({ queryKey: ["products"] });
+      router.push("/products");
+    } catch (err) {
+      // A product with sales or stock history is refused with the reason and "เลิกขาย" as the alternative
+      toast.error(err instanceof Error ? err.message : "ลบไม่สำเร็จ", { duration: 10_000 });
+      setConfirmDelete(false);
+      setDeleting(false);
+    }
+  };
   const margin = net > 0 ? ((net - p.cost) / net) * 100 : 0;
 
   return (
@@ -51,14 +75,19 @@ export function ProductDetail({ id }: { id: number }) {
           </p>
         </div>
         {can("products:write") && (
-          <Button variant="outline" onClick={() => setEditing(true)}>
-            <Pencil /> แก้ไขสินค้า
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant={confirmDelete ? "danger" : "ghost"} onClick={remove} disabled={deleting} className={confirmDelete ? "" : "text-danger"}>
+              <Trash2 /> {confirmDelete ? "ยืนยันลบสินค้านี้" : "ลบสินค้า"}
+            </Button>
+            <Button variant="outline" onClick={() => setEditing(true)}>
+              <Pencil /> แก้ไขสินค้า
+            </Button>
+          </div>
         )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="ราคาขาย (รวม VAT)" value={formatMoney(p.price)} hint={p.vatType === "vat7" ? `ก่อน VAT ${formatMoney(net)}` : "ไม่มี VAT"} />
+        <Stat label="ราคาขาย (รวม VAT)" value={formatMoney(p.price)} hint={rate ? `ก่อน VAT ${formatMoney(net)}` : "ไม่มี VAT"} />
         <Stat label="ต้นทุนเฉลี่ย" value={formatMoney(p.cost)} hint="คำนวณแบบถัวเฉลี่ยเมื่อรับสินค้า" />
         <Stat label="มาร์จิ้น" value={`${margin.toFixed(1)}%`} hint={`กำไร ${formatMoney(net - p.cost)} / ${p.unit}`} />
         <Stat

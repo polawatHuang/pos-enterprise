@@ -9,7 +9,7 @@ import { apiFetch } from "@/lib/api";
 import type { Paged, Product } from "@/lib/types";
 import { formatMoney, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge, Card, Input, NativeSelect, Pagination, Skeleton } from "@/components/ui/primitives";
 import { Dialog } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
@@ -56,6 +56,9 @@ export function ProductsView() {
         actions={
           can("products:write") && (
             <>
+              <Link href="/products/categories" className={buttonVariants({ variant: "outline" })}>
+                หมวดหมู่
+              </Link>
               <Button variant="outline" onClick={() => setRules(true)} disabled={!categories.data?.length}>
                 กฎการขายตามหมวด
               </Button>
