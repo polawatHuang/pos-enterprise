@@ -153,7 +153,8 @@ describe('helpers (unit)', () => {
     const [body, sig] = s.split('.');
     const forged = Buffer.from(JSON.stringify({ o: 99, u: 2, p: 'tiktok', exp: Date.now() + 1e6 })).toString('base64url');
     assert.equal(verifyState(`${forged}.${sig}`), null);
-    assert.equal(verifyState(`${body}.x${sig.slice(1)}`), null);
+    // Flip the first character to a different one (a fixed 'x' would be a no-op when the signature starts with 'x')
+    assert.equal(verifyState(`${body}.${sig[0] === 'x' ? 'y' : 'x'}${sig.slice(1)}`), null);
     assert.equal(verifyState('garbage'), null);
   });
 

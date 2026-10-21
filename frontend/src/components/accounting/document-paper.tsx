@@ -1,6 +1,7 @@
 import type { AccDocument } from "@/lib/types";
 import { formatThaiDate } from "@/lib/utils";
 import { DOC_TYPE_LABEL } from "./labels";
+import { useTaxSettings } from "@/lib/tax";
 
 const n2 = (v: number) => v.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const branchLabel = (no?: string) => (!no || no === "00000" ? "สำนักงานใหญ่" : `สาขาที่ ${no}`);
@@ -10,6 +11,7 @@ const branchLabel = (no?: string) => (!no || no === "00000" ? "สำนัก�
  * theme, because this is what the customer receives.
  */
 export function DocumentPaper({ doc }: { doc: AccDocument }) {
+  const { tax } = useTaxSettings();
   if (doc.docType === "wht_certificate") return <WhtCertificate doc={doc} />;
   const org = doc.org;
   const isTax = doc.docType === "tax_invoice" || doc.docType === "tax_invoice_receipt" || doc.docType === "credit_note";
@@ -110,10 +112,14 @@ export function DocumentPaper({ doc }: { doc: AccDocument }) {
               <dd className="text-right">-{n2(doc.discount)}</dd>
             </>
           )}
-          <dt>ยอดก่อนภาษีมูลค่าเพิ่ม</dt>
-          <dd className="text-right">{n2(doc.total - doc.vatAmount)}</dd>
-          <dt>ภาษีมูลค่าเพิ่ม 7%</dt>
-          <dd className="text-right">{n2(doc.vatAmount)}</dd>
+          {(org?.vatRegistered ?? true) && (
+            <>
+              <dt>ยอดก่อนภาษีมูลค่าเพิ่ม</dt>
+              <dd className="text-right">{n2(doc.total - doc.vatAmount)}</dd>
+              <dt>ภาษีมูลค่าเพิ่ม {tax.vatRate}%</dt>
+              <dd className="text-right">{n2(doc.vatAmount)}</dd>
+            </>
+          )}
           <dt className="border-t border-neutral-400 pt-1 font-bold">จำนวนเงินรวมทั้งสิ้น</dt>
           <dd className="border-t border-neutral-400 pt-1 text-right font-bold">{n2(doc.total)}</dd>
         </dl>

@@ -10,6 +10,7 @@ const { badRequest, conflict, notFound } = require('../../core/errors');
 const { localDate } = require('../../utils/dates');
 const { thaiBahtText } = require('../../utils/thai-baht-text');
 const { ACC, r2, nextNumber, paymentAccount, postJournal, reverseJournalsFor } = require('./ledger.service');
+const { getTaxSettings, lineRate } = require('../org/tax');
 
 const router = express.Router();
 
@@ -18,7 +19,6 @@ const SALES_TYPES = ['quotation', 'invoice', 'tax_invoice', 'receipt', 'tax_invo
 const CREDIT_TYPES = ['invoice', 'tax_invoice'];
 /** Issued and paid at once (cash sale). */
 const PAID_ON_ISSUE = ['receipt', 'tax_invoice_receipt'];
-const VAT_RATE = 7;
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 const money = z.coerce.number().min(0).max(999_999_999);
@@ -51,17 +51,17 @@ const docBody = z.object({
 
 /**
  * B2B documents are priced EXCLUSIVE of VAT (Thai invoice convention), unlike POS retail prices.
- * VAT applies to vat7 lines after spreading the bill discount proportionally.
+ * VAT applies to vat7 lines at the shop's rate after spreading the bill discount proportionally;
+ * a shop that is not VAT registered adds none.
  */
-function computeDocTotals(items, billDiscount) {
+function computeDocTotals(items, billDiscount, tax) {
   const lines = items.map((i) => ({ ...i, lineTotal: r2(i.quantity * i.unitPrice - (i.discount ?? 0)) }));
   if (lines.some((l) => l.lineTotal < 0)) throw badRequest('ส่วนลดรายการมากกว่าราคา');
   const subtotal = r2(lines.reduce((s, l) => s + l.lineTotal, 0));
   if (billDiscount > subtotal) throw badRequest('ส่วนลดมากกว่ายอดรวม');
   const net = r2(subtotal - billDiscount);
   const ratio = subtotal ? net / subtotal : 0;
-  const vatable = lines.filter((l) => l.vatType === 'vat7').reduce((s, l) => s + l.lineTotal, 0);
-  const vat = r2((vatable * ratio * VAT_RATE) / 100);
+  const vat = r2(lines.reduce((s, l) => s + (l.lineTotal * ratio * lineRate(tax, l.vatType)) / 100, 0));
   return { lines, subtotal, discount: r2(billDiscount), net, vat, total: r2(net + vat) };
 }
 
@@ -262,7 +262,7 @@ async function insertDocument(conn, user, b, totals, extra = {}) {
 router.post('/', requirePermission('accounting:write'), validate({ body: docBody }), async (req, res) => {
   const b = req.valid.body;
   if (b.docType === 'credit_note' && !b.refDocId) throw badRequest('ใบลดหนี้ต้องอ้างอิงใบกำกับภาษีเดิม');
-  const totals = computeDocTotals(b.items, b.discount);
+  const totals = computeDocTotals(b.items, b.discount, await getTaxSettings(req.user.orgId));
   const id = await db.tx((conn) => insertDocument(conn, req.user, b, totals));
   audit(req, 'document.create', 'document', id, { docType: b.docType, total: totals.total });
   const { d, items } = await loadDocument(req.user.orgId, id);
@@ -272,7 +272,7 @@ router.post('/', requirePermission('accounting:write'), validate({ body: docBody
 router.patch('/:id', requirePermission('accounting:write'), validate({ params: idParam, body: docBody }), async (req, res) => {
   const { id } = req.valid.params;
   const b = req.valid.body;
-  const totals = computeDocTotals(b.items, b.discount);
+  const totals = computeDocTotals(b.items, b.discount, await getTaxSettings(req.user.orgId));
   await db.tx(async (conn) => {
     const [[d]] = await conn.query('SELECT status FROM documents WHERE id = :id AND org_id = :orgId FOR UPDATE', { id, orgId: req.user.orgId });
     if (!d) throw notFound('ไม่พบเอกสาร');
@@ -462,7 +462,8 @@ router.post(
         vatType: i.vat_type,
       })),
     };
-    const id = await db.tx((conn) => insertDocument(conn, req.user, b, computeDocTotals(b.items, b.discount)));
+    const totals = computeDocTotals(b.items, b.discount, await getTaxSettings(req.user.orgId));
+    const id = await db.tx((conn) => insertDocument(conn, req.user, b, totals));
     const out = await loadDocument(req.user.orgId, id);
     res.status(201).json({ data: mapDocument(out.d, out.items) });
   },

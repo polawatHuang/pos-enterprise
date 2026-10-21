@@ -8,6 +8,7 @@ const { validate } = require('../../core/http');
 const { audit } = require('../../core/audit');
 const { badRequest, conflict, forbidden, notFound } = require('../../core/errors');
 const { resetOrgData, CONFIRM_PHRASE } = require('./reset');
+const { getTaxSettings, saveTaxSettings, VAT_TYPES } = require('./tax');
 
 const router = express.Router();
 router.use(authenticate);
@@ -171,6 +172,30 @@ router.delete('/branches/:id', requirePermission('settings:manage'), validate({ 
   audit(req, 'branch.delete', 'branch', id, { name: branch.name });
   res.json({ data: { id } });
 });
+
+/* --------------------------------------------------------------------- VAT */
+
+// Everyone signed in reads it: POS, product and document screens compute VAT with it
+router.get('/tax', async (req, res) => {
+  res.json({ data: await getTaxSettings(req.user.orgId) });
+});
+
+router.put(
+  '/tax',
+  requirePermission('settings:manage'),
+  validate({
+    body: z.object({
+      vatRegistered: z.boolean().optional(),
+      vatRate: z.coerce.number().min(0).max(30).optional(),
+      defaultVatType: z.enum(VAT_TYPES).optional(),
+    }),
+  }),
+  async (req, res) => {
+    const data = await saveTaxSettings(req.user.orgId, req.valid.body);
+    audit(req, 'org.tax_update', 'organization', req.user.orgId, req.valid.body);
+    res.json({ data });
+  },
+);
 
 /* ------------------------------------------------------- demo data reset */
 

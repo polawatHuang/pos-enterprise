@@ -2,6 +2,7 @@
 
 const db = require('../../db/pool');
 const env = require('../../config/env');
+const { getTaxSettings } = require('../org/tax');
 
 // All timestamps are UTC; shift into the business timezone for day/month buckets.
 // CONVERT_TZ with numeric offsets works without MySQL timezone tables (shared hosting).
@@ -140,10 +141,13 @@ async function channelMix({ orgId, branchId, days }) {
 }
 
 async function topProducts({ orgId, branchId, days, limit }) {
+  // Profit before VAT: take VAT out of standard-rate products only, at the shop's rate
+  const tax = await getTaxSettings(orgId);
+  const vatRate = tax.vatRegistered ? tax.vatRate : 0;
   const rows = await db.query(
     `SELECT p.id, p.sku, p.name, p.image_url,
             SUM(i.quantity) AS qty, SUM(i.line_total) AS revenue,
-            SUM(i.line_total * 100 / 107 - i.unit_cost * i.quantity) AS profit
+            SUM(CASE WHEN p.vat_type = 'vat7' THEN i.line_total * 100 / (100 + :vatRate) ELSE i.line_total END - i.unit_cost * i.quantity) AS profit
        FROM sales_order_items i
        JOIN sales_orders so ON so.id = i.order_id
        JOIN products p ON p.id = i.product_id
@@ -152,7 +156,7 @@ async function topProducts({ orgId, branchId, days, limit }) {
       GROUP BY p.id, p.sku, p.name, p.image_url
       ORDER BY revenue DESC
       LIMIT :limit`,
-    { orgId, branchId, span: days - 1, limit },
+    { orgId, branchId, span: days - 1, limit, vatRate },
   );
   return rows.map((r) => ({
     id: r.id,

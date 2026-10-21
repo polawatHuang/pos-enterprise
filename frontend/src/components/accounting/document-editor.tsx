@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, FieldError, Input, Label, NativeSelect, Textarea } from "@/components/ui/primitives";
 import { ProductPicker } from "@/components/common/product-picker";
 import { CREATABLE_DOC_TYPES, DOC_TYPE_LABEL } from "./labels";
+import { lineVatRate, netOfInclusive, type TaxSettings, useTaxSettings } from "@/lib/tax";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -20,14 +21,13 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 type EditLine = Omit<DocItem, "quantity" | "unitPrice"> & { quantity: string; unitPrice: string };
 const num = (v: string) => Number(v) || 0;
 
-/** Same math as the server: prices exclude VAT; VAT 7% on vat7 lines after the bill discount. */
-function totalsOf(items: EditLine[], discount: number) {
+/** Same math as the server: prices exclude VAT; the shop's VAT rate on vat7 lines after the bill discount. */
+function totalsOf(items: EditLine[], discount: number, tax: TaxSettings) {
   const lines = items.map((i) => r2(num(i.quantity) * num(i.unitPrice) - (i.discount || 0)));
   const subtotal = r2(lines.reduce((s, v) => s + v, 0));
   const net = r2(subtotal - discount);
   const ratio = subtotal ? net / subtotal : 0;
-  const vatable = items.reduce((s, it, idx) => s + (it.vatType === "vat7" ? lines[idx] : 0), 0);
-  const vat = r2(vatable * ratio * 0.07);
+  const vat = r2(items.reduce((s, it, idx) => s + (lines[idx] * ratio * lineVatRate(tax, it.vatType)) / 100, 0));
   return { lines, subtotal, net, vat, total: r2(net + vat) };
 }
 
@@ -50,7 +50,8 @@ export function DocumentEditor({ initial, defaultType }: { initial?: AccDocument
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const t = useMemo(() => totalsOf(items, Number(discount) || 0), [items, discount]);
+  const { tax } = useTaxSettings();
+  const t = useMemo(() => totalsOf(items, Number(discount) || 0, tax), [items, discount, tax]);
   const reset = () => {
     setDocDate(todayStr());
     setDueDate("");
@@ -172,7 +173,7 @@ export function DocumentEditor({ initial, defaultType }: { initial?: AccDocument
               <Input id="disc" inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} className="h-8 w-28 text-right" placeholder="0.00" />
             </div>
             <Row label="ยอดก่อนภาษี" value={t.net} />
-            <Row label="ภาษีมูลค่าเพิ่ม 7%" value={t.vat} />
+            {tax.vatRegistered && <Row label={`ภาษีมูลค่าเพิ่ม ${tax.vatRate}%`} value={t.vat} />}
             <div className="flex items-baseline justify-between border-t border-border pt-2">
               <span className="font-medium">จำนวนเงินรวมทั้งสิ้น</span>
               <span className="text-xl font-semibold tabular-nums">{formatMoney(t.total)}</span>
@@ -204,7 +205,7 @@ export function DocumentEditor({ initial, defaultType }: { initial?: AccDocument
                     productId: p.id,
                     description: p.name,
                     quantity: "1",
-                    unitPrice: String(p.vatType === "vat7" ? r2(p.price / 1.07) : p.price),
+                    unitPrice: String(r2(netOfInclusive(p.price, lineVatRate(tax, p.vatType)))),
                     discount: 0,
                     vatType: p.vatType,
                   },
@@ -229,7 +230,7 @@ export function DocumentEditor({ initial, defaultType }: { initial?: AccDocument
                   <div className="col-span-5 space-y-1 sm:col-span-2">
                     <Label className="text-xs text-muted-foreground">VAT</Label>
                     <NativeSelect value={it.vatType} onChange={(e) => update(i, { vatType: e.target.value as VatType })} className="h-9 w-full">
-                      <option value="vat7">7%</option>
+                      <option value="vat7">{tax.vatRate}%</option>
                       <option value="exempt">ยกเว้น</option>
                       <option value="zero">0%</option>
                     </NativeSelect>

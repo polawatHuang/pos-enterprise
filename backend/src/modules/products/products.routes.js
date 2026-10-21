@@ -6,7 +6,10 @@ const db = require('../../db/pool');
 const { validate } = require('../../core/http');
 const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
-const { badRequest, notFound, conflict } = require('../../core/errors');
+const { badRequest, notFound, conflict, forbidden } = require('../../core/errors');
+const { getTaxSettings } = require('../org/tax');
+const { applyMovement } = require('../inventory/inventory.service');
+const { receiveLot } = require('../inventory/lots');
 
 const router = express.Router();
 router.use(authenticate);
@@ -24,7 +27,8 @@ const productBody = z.object({
   unit: z.string().trim().min(1).max(30).default('ชิ้น'),
   price: money,
   cost: money.default(0),
-  vatType: z.enum(['vat7', 'exempt', 'zero']).default('vat7'),
+  // Not sent -> the shop's default VAT type (Settings > ภาษีมูลค่าเพิ่ม)
+  vatType: z.enum(['vat7', 'exempt', 'zero']).optional(),
   reorderPoint: z.coerce.number().int().min(0).max(1_000_000).default(0),
   supplierId: z.number().int().positive().nullable().optional(),
   packSize: z.coerce.number().positive().max(100_000).default(1),
@@ -118,6 +122,11 @@ router.get('/categories', requirePermission('products:read'), async (req, res) =
   });
 });
 
+async function assertCategoryName(orgId, name, exceptId = 0) {
+  const dup = await db.one('SELECT id FROM product_categories WHERE org_id = :orgId AND name = :name AND id <> :exceptId', { orgId, name, exceptId });
+  if (dup) throw conflict(`มีหมวด "${name}" อยู่แล้ว`);
+}
+
 /** Category rules applied at the till: no-sale hours (e.g. alcohol) and the age-20+ check. */
 router.patch(
   '/categories/:id',
@@ -132,6 +141,7 @@ router.patch(
   }),
   async (req, res) => {
     const b = req.valid.body;
+    if (b.name) await assertCategoryName(req.user.orgId, b.name, req.valid.params.id);
     const r = await db.query(
       `UPDATE product_categories SET name = COALESCE(:name, name),
               age_restricted = COALESCE(:age, age_restricted),
@@ -157,6 +167,7 @@ router.post(
   requirePermission('products:write'),
   validate({ body: z.object({ name: z.string().trim().min(1).max(191) }) }),
   async (req, res) => {
+    await assertCategoryName(req.user.orgId, req.valid.body.name);
     const r = await db.query(
       `INSERT INTO product_categories (org_id, name, sort_order)
        SELECT :orgId, :name, COALESCE(MAX(sort_order), 0) + 1 FROM product_categories WHERE org_id = :orgId`,
@@ -166,6 +177,17 @@ router.post(
     res.status(201).json({ data: { id: r.insertId, name: req.valid.body.name } });
   },
 );
+
+/** Products in a deleted category become uncategorised (FK ON DELETE SET NULL). */
+router.delete('/categories/:id', requirePermission('products:write'), validate({ params: idParam }), async (req, res) => {
+  const { id } = req.valid.params;
+  const c = await db.one('SELECT id, name FROM product_categories WHERE id = :id AND org_id = :orgId', { id, orgId: req.user.orgId });
+  if (!c) throw notFound('ไม่พบหมวดสินค้า');
+  const n = await db.one('SELECT COUNT(*) AS n FROM products WHERE category_id = :id', { id });
+  await db.query('DELETE FROM product_categories WHERE id = :id AND org_id = :orgId', { id, orgId: req.user.orgId });
+  audit(req, 'category.delete', 'category', id, { name: c.name, products: Number(n.n) });
+  res.json({ data: { id, uncategorised: Number(n.n) } });
+});
 
 /* -------------------------------------------------------------------- products */
 
@@ -219,37 +241,95 @@ router.get('/:id', requirePermission('products:read'), validate({ params: idPara
   res.json({ data: { ...product, stock: stock.map((s) => ({ ...s, quantity: Number(s.quantity) })) } });
 });
 
-router.post('/', requirePermission('products:write'), validate({ body: productBody }), async (req, res) => {
+const createBody = productBody.extend({
+  // Stock on hand when the product is added (recorded as an "opening" movement)
+  openingStock: z
+    .object({ warehouseId: z.number().int().positive(), quantity: z.coerce.number().positive().max(10_000_000) })
+    .nullable()
+    .optional(),
+});
+
+router.post('/', requirePermission('products:write'), validate({ body: createBody }), async (req, res) => {
   const b = req.valid.body;
-  await assertUnique(req.user.orgId, b);
-  const r = await db.query(
-    `INSERT INTO products (org_id, category_id, supplier_id, sku, barcode, name, description, selling_points, unit, price, cost, vat_type, reorder_point,
-                           pack_size, track_expiry, shelf_life_days, image_url, status)
-     VALUES (:orgId, :categoryId, :supplierId, :sku, :barcode, :name, :description, :sellingPoints, :unit, :price, :cost, :vatType, :reorderPoint,
-             :packSize, :trackExpiry, :shelfLifeDays, :imageUrl, :status)`,
-    {
-      orgId: req.user.orgId,
-      categoryId: b.categoryId ?? null,
-      sku: b.sku,
-      barcode: b.barcode || null,
-      name: b.name,
-      description: b.description ?? null,
-      sellingPoints: b.sellingPoints ?? null,
-      unit: b.unit,
-      price: b.price,
-      cost: b.cost,
-      vatType: b.vatType,
-      reorderPoint: b.reorderPoint,
-      supplierId: b.supplierId ?? null,
-      packSize: b.packSize,
-      trackExpiry: b.trackExpiry ? 1 : 0,
-      shelfLifeDays: b.shelfLifeDays ?? null,
-      imageUrl: b.imageUrl ?? null,
-      status: b.status,
-    },
+  const { orgId, id: userId } = req.user;
+  if (b.openingStock && !req.user.permissions.includes('inventory:write')) throw forbidden('ต้องมีสิทธิ์ inventory:write เพื่อใส่จำนวนสต๊อกเริ่มต้น');
+  await assertUnique(orgId, b);
+  const vatType = b.vatType ?? (await getTaxSettings(orgId)).defaultVatType;
+  const id = await db.tx(async (conn) => {
+    const [r] = await conn.query(
+      `INSERT INTO products (org_id, category_id, supplier_id, sku, barcode, name, description, selling_points, unit, price, cost, vat_type, reorder_point,
+                             pack_size, track_expiry, shelf_life_days, image_url, status)
+       VALUES (:orgId, :categoryId, :supplierId, :sku, :barcode, :name, :description, :sellingPoints, :unit, :price, :cost, :vatType, :reorderPoint,
+               :packSize, :trackExpiry, :shelfLifeDays, :imageUrl, :status)`,
+      {
+        orgId,
+        categoryId: b.categoryId ?? null,
+        sku: b.sku,
+        barcode: b.barcode || null,
+        name: b.name,
+        description: b.description ?? null,
+        sellingPoints: b.sellingPoints ?? null,
+        unit: b.unit,
+        price: b.price,
+        cost: b.cost,
+        vatType,
+        reorderPoint: b.reorderPoint,
+        supplierId: b.supplierId ?? null,
+        packSize: b.packSize,
+        trackExpiry: b.trackExpiry ? 1 : 0,
+        shelfLifeDays: b.shelfLifeDays ?? null,
+        imageUrl: b.imageUrl ?? null,
+        status: b.status,
+      },
+    );
+    if (b.openingStock) {
+      const { warehouseId, quantity } = b.openingStock;
+      const [[wh]] = await conn.query('SELECT id FROM warehouses WHERE id = :warehouseId AND org_id = :orgId', { warehouseId, orgId });
+      if (!wh) throw badRequest('ไม่พบคลังสินค้า');
+      await applyMovement(conn, {
+        orgId,
+        warehouseId,
+        productId: r.insertId,
+        quantity,
+        type: 'opening',
+        unitCost: b.cost,
+        note: 'ยอดยกมาตอนสร้างสินค้า',
+        userId,
+      });
+      await receiveLot(conn, { orgId, warehouseId, productId: r.insertId, qty: quantity, unitCost: b.cost });
+    }
+    return r.insertId;
+  });
+  audit(req, 'product.create', 'product', id, { sku: b.sku, openingStock: b.openingStock ?? undefined });
+  res.status(201).json({ data: await getProduct(orgId, id) });
+});
+
+/**
+ * Delete a product that was never sold, bought, moved or counted. With any history the product
+ * should be set to "เลิกขาย" (archived) instead, so sales, tax and stock records stay intact.
+ */
+router.delete('/:id', requirePermission('products:write'), validate({ params: idParam }), async (req, res) => {
+  const { id } = req.valid.params;
+  const p = await getProduct(req.user.orgId, id);
+  if (!p) throw notFound('ไม่พบสินค้า');
+  const u = await db.one(
+    `SELECT (SELECT COUNT(*) FROM sales_order_items WHERE product_id = :id) AS sales,
+            (SELECT COUNT(*) FROM document_items WHERE product_id = :id) AS documents,
+            (SELECT COUNT(*) FROM purchase_order_items WHERE product_id = :id) AS purchases,
+            (SELECT COUNT(*) FROM stock_transfer_items WHERE product_id = :id) AS transfers,
+            (SELECT COUNT(*) FROM stock_movements WHERE product_id = :id AND type <> 'opening') AS movements,
+            (SELECT COALESCE(SUM(quantity), 0) FROM stock_levels WHERE product_id = :id) AS onHand`,
+    { id },
   );
-  audit(req, 'product.create', 'product', r.insertId, { sku: b.sku });
-  res.status(201).json({ data: await getProduct(req.user.orgId, r.insertId) });
+  const LABEL = { sales: 'ประวัติการขาย', documents: 'เอกสารบัญชี', purchases: 'ใบสั่งซื้อ', transfers: 'ใบโอนสินค้า', movements: 'ความเคลื่อนไหวสต๊อก' };
+  const used = Object.keys(LABEL).filter((k) => Number(u[k]));
+  if (used.length) {
+    throw conflict(`ลบ "${p.name}" ไม่ได้ เพราะมี${used.map((k) => `${LABEL[k]} ${Number(u[k]).toLocaleString('th-TH')} รายการ`).join(', ')} — ตั้งสถานะเป็น "เลิกขาย" แทนเพื่อเก็บประวัติไว้`);
+  }
+  // Only the opening balance remains: stock levels, lots, units and knowledge go with the product (cascade)
+  await db.query('DELETE FROM products WHERE id = :id AND org_id = :orgId', { id, orgId: req.user.orgId });
+  audit(req, 'product.delete', 'product', id, { sku: p.sku, name: p.name, onHand: Number(u.onHand) });
+  res.json({ data: { id } });
 });
 
 router.patch(

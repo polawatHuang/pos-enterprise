@@ -8,6 +8,7 @@ const { requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
 const { notFound, conflict, badRequest } = require('../../core/errors');
 const { r2, postJournal, reverseJournalsFor, transactionLines } = require('./ledger.service');
+const { getTaxSettings } = require('../org/tax');
 
 const router = express.Router();
 
@@ -51,10 +52,11 @@ router.get('/meta', requirePermission('accounting:read'), (req, res) => {
  * Splits an entered amount into base/VAT/WHT.
  * vatMode: none | exclusive (VAT added on top) | inclusive (entered amount already contains VAT)
  * WHT is always computed on the pre-VAT base, as required by the Revenue Department.
+ * vatRate is the shop's VAT rate (Settings > ภาษีมูลค่าเพิ่ม).
  */
-function computeAmounts({ amount, vatMode, whtRate }) {
-  const base = vatMode === 'inclusive' ? r2((amount * 100) / 107) : r2(amount);
-  const vat = vatMode === 'none' ? 0 : vatMode === 'inclusive' ? r2(amount - base) : r2(base * 0.07);
+function computeAmounts({ amount, vatMode, whtRate }, vatRate = 7) {
+  const base = vatMode === 'inclusive' ? r2((amount * 100) / (100 + vatRate)) : r2(amount);
+  const vat = vatMode === 'none' ? 0 : vatMode === 'inclusive' ? r2(amount - base) : r2((base * vatRate) / 100);
   const wht = whtRate ? r2((base * whtRate) / 100) : 0;
   return { base, vat, wht, net: r2(base + vat - wht) };
 }
@@ -168,7 +170,7 @@ router.get(
 
 router.post('/', requirePermission('accounting:write'), validate({ body: txnBody }), async (req, res) => {
   const b = req.valid.body;
-  const { base, vat, wht } = computeAmounts(b);
+  const { base, vat, wht } = computeAmounts(b, (await getTaxSettings(req.user.orgId)).vatRate);
   const id = await db.tx(async (conn) => {
     const [ins] = await conn.query(
       `INSERT INTO transactions (org_id, branch_id, type, category, amount, vat_amount, vat_claimable, wht_amount, wht_rate, wht_income_type,
