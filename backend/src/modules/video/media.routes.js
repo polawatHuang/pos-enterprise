@@ -3,16 +3,16 @@
 const express = require('express');
 const fs = require('node:fs');
 const db = require('../../db/pool');
-const { verifyToken, filePath } = require('./media');
+const { verifyToken, filePath, tokenFromParam } = require('./media');
 
 /**
  * Public, signed, expiring media URLs for the video renderer (no login — the token is the auth).
- * GET /api/media/:token  → the file (Range requests supported for video).
+ * GET /api/media/:token[.ext]  → the file (Range requests supported for video).
  */
 const router = express.Router();
 
 router.get('/:token', async (req, res) => {
-  const t = verifyToken(req.params.token);
+  const t = verifyToken(tokenFromParam(req.params.token));
   if (!t) return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'ลิงก์หมดอายุหรือไม่ถูกต้อง' } });
   res.set('Cache-Control', 'private, max-age=3600');
   res.set('X-Content-Type-Options', 'nosniff');

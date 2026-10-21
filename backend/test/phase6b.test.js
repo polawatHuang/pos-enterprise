@@ -228,6 +228,11 @@ describe('signed media URLs (unit)', () => {
     assert.equal(media.verifyToken(`${forged}.${sig}`), null);
     assert.equal(media.verifyToken(`${p}.x`), null);
     assert.equal(media.filePath('../../etc/passwd'), null);
+    // publicUrl's extension is stripped before verifying; a signature tail is never mistaken for one
+    assert.equal(media.tokenFromParam(`${t}.jpg`), t);
+    assert.equal(media.tokenFromParam(t), t);
+    assert.equal(media.tokenFromParam('abc.ik'), 'abc.ik');
+    assert.equal(media.extOf('lx-0123456789abcdef01.webp'), 'webp');
     assert.equal(media.filePath('abc-0123456789abcdef01.mp4').startsWith(process.env.MEDIA_DIR), true);
   });
 });
@@ -421,10 +426,17 @@ describe('own footage, hooks and variants', () => {
     assert.match(visual[1].asset.src, /^https:\/\/cdn\.minimax\.test\/t1-6\.mp4$/);
     assert.ok(clips.some((x) => x.asset.css?.includes('Kanit')));
 
-    // The renderer can fetch the signed URLs without logging in
+    // Shotstack reads the file type from the URL: every media src ends in the real extension
+    const SHOTSTACK_EXT = /\.(jpg|jpeg|png|gif|webp|bmp|tiff|avif|svg|mp4|mov|webm|mp3)$/;
+    const srcs = clips.map((x) => x.asset.src).filter(Boolean);
+    assert.ok(srcs.every((u) => SHOTSTACK_EXT.test(new URL(u).pathname)), srcs.join(' '));
+    assert.ok(signed.some((x) => x.asset.src.endsWith('.mp4')) && intro.asset.src.endsWith('.png'));
+
+    // The renderer can fetch the signed URLs without logging in (with or without the extension)
     const pathOf = (u) => new URL(u).pathname;
     const vid = await request(app).get(pathOf(signed.find((x) => x.asset.type === 'video').asset.src));
     assert.equal(vid.status, 200);
+    assert.equal((await request(app).get(pathOf(signed.find((x) => x.asset.type === 'video').asset.src).replace(/\.mp4$/, ''))).status, 200);
     assert.equal(vid.headers['content-type'], 'video/mp4');
     const cov = await request(app).get(pathOf(intro.asset.src));
     assert.equal(cov.status, 200);
@@ -535,7 +547,7 @@ describe('scene pictures → AI video with Shotstack (VIDEO_SCENE_AI=shotstack)'
       assert.equal(resizes.length, 3);
       const rz = JSON.parse(resizes[0].init.body);
       assert.deepEqual(rz.output.size, { width: 576, height: 1024 });
-      assert.match(rz.timeline.tracks[0].clips[0].asset.src, /^https:\/\/api\.example\.com\/api\/media\//);
+      assert.match(rz.timeline.tracks[0].clips[0].asset.src, /^https:\/\/api\.example\.com\/api\/media\/[^/]+\.png$/);
       const i2v = calls.filter((x) => x.url.endsWith('/create/stage/assets') && JSON.parse(x.init.body).options.type === 'image-to-video');
       assert.equal(i2v.length, 3);
       assert.deepEqual(JSON.parse(i2v[0].init.body), { provider: 'shotstack', options: { type: 'image-to-video', imageUrl: 'https://shotstack.test/out.mp4' } });

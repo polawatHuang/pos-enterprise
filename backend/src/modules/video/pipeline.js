@@ -244,7 +244,7 @@ const clipsStart = step(async ({ projectId }) => {
     const meta = { source: picture?.storage_key ?? null };
     if (fromImages && sceneAi() === 'shotstack') {
       // Shotstack image-to-video needs an exact 576x1024 frame: render the picture to that size first
-      const src = media.publicUrl('m', picture.id);
+      const src = media.publicUrl('m', picture.id, media.extOf(picture.storage_key));
       if (!src) continue;
       const { renderId } = await shotstack.resizeImage(src);
       await db.query(
@@ -382,7 +382,7 @@ const compose = step(async ({ projectId }) => {
   const clips = byScene(p.visual_mode !== 'product_images' ? await assets(p.id, 'broll') : []);
   // Own footage / extra photos, served to the renderer through signed URLs
   const own = (await db.query('SELECT * FROM video_media WHERE video_project_id = :id ORDER BY sort_order, id', { id: p.id }))
-    .map((m) => ({ type: m.kind, url: media.publicUrl('m', m.id), durationSec: m.duration_ms ? m.duration_ms / 1000 : null }))
+    .map((m) => ({ type: m.kind, url: media.publicUrl('m', m.id, media.extOf(m.storage_key)), durationSec: m.duration_ms ? m.duration_ms / 1000 : null }))
     .filter((m) => m.url);
   const productImage = p.product_image ? { type: 'image', url: p.product_image } : null;
   let visuals;
@@ -409,7 +409,7 @@ const compose = step(async ({ projectId }) => {
       id: p.cover_id,
       orgId: p.org_id,
     });
-    if (cover?.orientation === 'portrait') introUrl = media.publicUrl('c', p.cover_id);
+    if (cover?.orientation === 'portrait') introUrl = media.publicUrl('c', p.cover_id, 'png');
   }
 
   if (!shotstack.isConfigured()) {
