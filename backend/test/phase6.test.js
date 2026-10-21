@@ -353,6 +353,38 @@ describe('generation pipeline', () => {
     assert.equal(calls.filter((c) => c.url.includes('/v1/video_generation')).length, 1);
   });
 
+  test('parts ready → compose reuses the existing voice (no new speech), refused once provider links expire', async () => {
+    mockScript();
+    mockProviders();
+    const p = await newProject();
+    assert.equal((await marketer.post(`/api/videos/${p.id}/compose`)).status, 409); // nothing generated yet
+    await marketer.post(`/api/videos/${p.id}/generate`);
+    await drain();
+    assert.equal((await project(p.id)).status, 'parts_ready');
+    assert.equal((await marketer.post(`/api/videos/${p.id}/compose`)).status, 503); // no Shotstack yet
+
+    process.env.SHOTSTACK_API_KEY = 'ss-key';
+    try {
+      assert.equal((await accountant.post(`/api/videos/${p.id}/compose`)).status, 403);
+      calls.length = 0;
+      const res = await marketer.post(`/api/videos/${p.id}/compose`);
+      assert.equal(res.status, 202, JSON.stringify(res.body));
+      for (let i = 0; i < 3 && (await project(p.id)).status !== 'ready'; i += 1) await drain();
+      const v = await project(p.id);
+      assert.equal(v.status, 'ready', v.error);
+      assert.equal(calls.filter((c) => c.url.includes('/v1/t2a_v2')).length, 0);
+      assert.ok(calls.some((c) => c.url.endsWith('/edit/stage/render')));
+
+      // Without R2 the MiniMax audio links die after ~24h: ask for a full regenerate instead
+      await db.query('UPDATE video_assets SET created_at = UTC_TIMESTAMP() - INTERVAL 21 HOUR WHERE video_project_id = :id', { id: p.id });
+      const old = await marketer.post(`/api/videos/${p.id}/compose`);
+      assert.equal(old.status, 409);
+      assert.match(old.body.error.message, /หมดอายุ/);
+    } finally {
+      delete process.env.SHOTSTACK_API_KEY;
+    }
+  });
+
   test('provider errors mark the project failed with the message', async () => {
     mockScript();
     mockProviders();
