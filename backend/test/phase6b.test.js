@@ -500,7 +500,7 @@ describe('scene pictures → AI video', () => {
 });
 
 describe('scene pictures → AI video with Shotstack (VIDEO_SCENE_AI=shotstack)', () => {
-  test('missing pictures drawn by Shotstack text-to-image; the render animates each picture with image-to-video; no MiniMax media models', async () => {
+  test('missing pictures drawn by Shotstack text-to-image; each picture resized and animated by image-to-video; no MiniMax media models', async () => {
     mockScript();
     env.PUBLIC_API_URL = 'https://api.example.com';
     process.env.SHOTSTACK_API_KEY = 'ss-key';
@@ -512,16 +512,16 @@ describe('scene pictures → AI video with Shotstack (VIDEO_SCENE_AI=shotstack)'
       created.push(id);
       calls.length = 0;
       assert.equal((await marketer.post(`/api/videos/${id}/generate`)).status, 202);
-      for (let i = 0; i < 15 && (await db.one('SELECT status FROM video_projects WHERE id = :id', { id })).status !== 'ready'; i += 1) await drain();
+      for (let i = 0; i < 25 && (await db.one('SELECT status FROM video_projects WHERE id = :id', { id })).status !== 'ready'; i += 1) await drain();
       const v = await db.one('SELECT status, error FROM video_projects WHERE id = :id', { id });
       assert.equal(v.status, 'ready', v.error);
 
       assert.equal(calls.filter((c) => c.url.includes('/v1/image_generation') || c.url.includes('/v1/video_generation')).length, 0);
-      const created3 = calls.filter((c) => c.url.endsWith('/create/stage/assets'));
+      const created3 = calls.filter((c) => c.url.endsWith('/create/stage/assets') && JSON.parse(c.init.body).options.type === 'text-to-image');
       assert.equal(created3.length, 3);
       const opt = JSON.parse(created3[0].init.body);
       assert.equal(opt.provider, 'shotstack');
-      assert.deepEqual([opt.options.type, opt.options.width, opt.options.height], ['text-to-image', 768, 1280]);
+      assert.deepEqual([opt.options.type, opt.options.width, opt.options.height], ['text-to-image', 576, 1024]);
       assert.equal(created3[0].init.headers['x-api-key'], 'ss-key');
       const files = await db.query('SELECT label FROM video_media WHERE video_project_id = :id ORDER BY sort_order, id', { id });
       assert.deepEqual(
@@ -530,16 +530,47 @@ describe('scene pictures → AI video with Shotstack (VIDEO_SCENE_AI=shotstack)'
       );
       assert.equal(await db.one("SELECT COUNT(*) AS n FROM video_assets WHERE video_project_id = :id AND kind = 'thumbnail'", { id }).then((r) => Number(r.n)), 0);
 
-      // One image-to-video per scene, in scene order, from the signed picture URLs
-      const edit = JSON.parse(calls.find((x) => x.url.endsWith('/edit/stage/render')).init.body);
-      const ai = edit.timeline.tracks
+      // Each picture is rendered to an exact 576x1024 jpg, then animated by Create API image-to-video
+      const resizes = calls.filter((x) => x.url.endsWith('/edit/stage/render') && JSON.parse(x.init.body).output.format === 'jpg');
+      assert.equal(resizes.length, 3);
+      const rz = JSON.parse(resizes[0].init.body);
+      assert.deepEqual(rz.output.size, { width: 576, height: 1024 });
+      assert.match(rz.timeline.tracks[0].clips[0].asset.src, /^https:\/\/api\.example\.com\/api\/media\//);
+      const i2v = calls.filter((x) => x.url.endsWith('/create/stage/assets') && JSON.parse(x.init.body).options.type === 'image-to-video');
+      assert.equal(i2v.length, 3);
+      assert.deepEqual(JSON.parse(i2v[0].init.body), { provider: 'shotstack', options: { type: 'image-to-video', imageUrl: 'https://shotstack.test/out.mp4' } });
+      // The final render plays the three AI clips in scene order (4s each, then the picture held)
+      const final = calls.filter((x) => x.url.endsWith('/edit/stage/render') && JSON.parse(x.init.body).output.format === 'mp4');
+      const edit = JSON.parse(final.at(-1).init.body);
+      const vids = edit.timeline.tracks
         .flatMap((t) => t.clips)
-        .filter((x) => x.asset.type === 'image-to-video')
+        .filter((x) => x.asset.type === 'video')
         .sort((a, b) => a.start - b.start);
-      assert.equal(ai.length, 3);
-      assert.ok(ai.every((x) => x.asset.src.startsWith('https://api.example.com/api/media/') && x.asset.prompt && x.length <= 5));
+      assert.deepEqual(
+        vids.map((x) => x.asset.src),
+        ['https://shotstack.test/img4.png', 'https://shotstack.test/img5.png', 'https://shotstack.test/img6.png'],
+      );
+      assert.ok(vids.every((x) => x.length <= 4));
     } finally {
       process.env.VIDEO_SCENE_AI = 'minimax';
+      delete process.env.SHOTSTACK_API_KEY;
+    }
+  });
+});
+
+describe('Shotstack errors', () => {
+  test('a Bad Request carries the validation details', async () => {
+    const shotstack = require('../src/integrations/shotstack');
+    const saved = global.fetch;
+    process.env.SHOTSTACK_API_KEY = 'ss-key';
+    try {
+      global.fetch = async () =>
+        json({ success: false, message: 'Bad Request', response: { error: { details: [{ message: '"output.size.width" must be a number' }] } } }, 400);
+      await assert.rejects(shotstack.render({}), /Bad Request — "output\.size\.width" must be a number/);
+      global.fetch = async () => json({ errors: [{ status: '400', title: 'Bad Request', detail: 'imageUrl dimensions must be 576x1024' }] }, 400);
+      await assert.rejects(shotstack.createImageToVideo('https://x.test/a.jpg'), /HTTP 400 — imageUrl dimensions must be 576x1024/);
+    } finally {
+      global.fetch = saved;
       delete process.env.SHOTSTACK_API_KEY;
     }
   });
