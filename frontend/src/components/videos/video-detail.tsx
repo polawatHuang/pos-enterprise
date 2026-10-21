@@ -23,7 +23,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, ApiError, apiUrl } from "@/lib/api";
+import { api, ApiError, apiDownload } from "@/lib/api";
 import type { CaptionStyle, CoverProject, VideoDetail, VideoScene, VideoVisualMode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -684,10 +684,12 @@ function Outputs({ v }: { v: VideoDetail }) {
           </p>
         ) : null}
         {v.hasSubtitles && (
-          <Button asChild variant="outline" className="w-full">
-            <a href={apiUrl(`/videos/${v.id}/subtitles.srt`)} download>
-              <Download /> ไฟล์ซับ (.srt)
-            </a>
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => void apiDownload(`/videos/${v.id}/subtitles.srt`, undefined, `video-${v.id}.srt`).catch((e) => toast.error(e instanceof Error ? e.message : "ดาวน์โหลดไม่สำเร็จ"))}
+          >
+            <Download /> ไฟล์ซับ (.srt)
           </Button>
         )}
         {voices.length > 0 && (
