@@ -6,7 +6,7 @@ const db = require('../../db/pool');
 const { validate } = require('../../core/http');
 const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
-const { notFound, badRequest, conflict } = require('../../core/errors');
+const { AppError, notFound, badRequest, conflict } = require('../../core/errors');
 const { enqueue, queueHealth } = require('../../jobs/queue');
 const ai = require('../../integrations/ai');
 const minimaxMedia = require('../../integrations/minimax-media');
@@ -392,9 +392,57 @@ const mediaParam = idParam.extend({ mediaId: z.coerce.number().int().positive() 
 const rawUpload = express.raw({ type: Object.keys(media.TYPES), limit: media.MAX_VIDEO_BYTES });
 const formUpload = singleFile('file', media.MAX_VIDEO_BYTES);
 
+const durationMs = z.coerce
+  .number()
+  .int()
+  .min(0)
+  .max(30 * 60 * 1000)
+  .optional();
+
+/** Checks shared by every upload path: project editable, type supported, size and file count limits. */
+async function checkUpload(req, projectId, mime, size) {
+  const v = await getProject(req.user.orgId, projectId);
+  if (IN_PROGRESS.includes(v.status)) throw conflict('โปรเจกต์นี้กำลังประมวลผลอยู่');
+  const type = media.TYPES[mime];
+  if (!type || !size) throw badRequest('รองรับคลิป MP4/MOV/WebM และรูป JPEG/PNG/WebP');
+  if (type.kind === 'image' && size > media.MAX_IMAGE_BYTES) throw badRequest('รูปใหญ่เกิน 10 MB');
+  if (size > media.MAX_VIDEO_BYTES) throw badRequest(`ไฟล์ใหญ่เกิน ${media.MAX_VIDEO_BYTES / 1024 / 1024} MB`);
+  const count = await db.one('SELECT COUNT(*) AS n, COALESCE(MAX(sort_order), 0) AS maxSort FROM video_media WHERE video_project_id = :id', { id: v.id });
+  if (Number(count.n) >= media.MAX_FILES) throw badRequest(`อัปโหลดได้สูงสุด ${media.MAX_FILES} ไฟล์ต่อโปรเจกต์`);
+  return { v, type, maxSort: Number(count.maxSort) };
+}
+
+/** Store a complete file as project footage. */
+async function addMedia(req, projectId, file, mime, { label, durationMs: duration }) {
+  const { v, type, maxSort } = await checkUpload(req, projectId, mime, file.length);
+  const key = media.saveFile(file, mime);
+  const r = await db.query(
+    `INSERT INTO video_media (video_project_id, kind, mime, storage_key, size_bytes, duration_ms, label, sort_order)
+     VALUES (:id, :kind, :mime, :key, :size, :duration, :label, :sort)`,
+    {
+      id: v.id,
+      kind: type.kind,
+      mime,
+      key,
+      size: file.length,
+      duration: type.kind === 'video' ? (duration ?? null) : null,
+      label: label || null,
+      sort: maxSort + 1,
+    },
+  );
+  // New footage changes what the renderer will use
+  await db.query(
+    "UPDATE video_projects SET output_url = NULL, status = IF(status IN ('ready','parts_ready','failed'), 'script_ready', status) WHERE id = :id AND script_json IS NOT NULL",
+    { id: v.id },
+  );
+  audit(req, 'video.media.upload', 'video_project', v.id, { kind: type.kind, size: file.length });
+  return mapMedia(await db.one('SELECT * FROM video_media WHERE id = :id', { id: r.insertId }));
+}
+
 /**
- * Upload one clip/photo as multipart/form-data (field "file"); ?label=…&durationMs=…
- * A raw body with Content-Type = file type is still accepted from older clients.
+ * Upload one clip/photo in a single request: multipart/form-data (field "file") or a raw body
+ * with Content-Type = file type. ?label=…&durationMs=… The web app uses the chunked upload below,
+ * which works where the hosting stack drops large request bodies.
  */
 router.post(
   '/:id/media',
@@ -402,20 +450,9 @@ router.post(
   rawUpload,
   validate({
     params: idParam,
-    query: z.object({
-      label: z.string().trim().max(100).optional(),
-      size: z.coerce.number().int().min(0).optional(),
-      durationMs: z.coerce
-        .number()
-        .int()
-        .min(0)
-        .max(30 * 60 * 1000)
-        .optional(),
-    }),
+    query: z.object({ label: z.string().trim().max(100).optional(), size: z.coerce.number().int().min(0).optional(), durationMs }),
   }),
   async (req, res) => {
-    const v = await getProject(req.user.orgId, req.valid.params.id);
-    if (IN_PROGRESS.includes(v.status)) throw conflict('โปรเจกต์นี้กำลังประมวลผลอยู่');
     const mime =
       req.upload?.mime ??
       String(req.headers['content-type'] ?? '')
@@ -423,36 +460,85 @@ router.post(
         .trim()
         .toLowerCase();
     const file = req.upload?.buffer ?? req.body;
-    const type = media.TYPES[mime];
-    if (!type || !Buffer.isBuffer(file) || !file.length) throw badRequest('รองรับคลิป MP4/MOV/WebM และรูป JPEG/PNG/WebP');
-    if (type.kind === 'image' && file.length > media.MAX_IMAGE_BYTES) throw badRequest('รูปใหญ่เกิน 10 MB');
-    const count = await db.one('SELECT COUNT(*) AS n, COALESCE(MAX(sort_order), 0) AS maxSort FROM video_media WHERE video_project_id = :id', { id: v.id });
-    if (Number(count.n) >= media.MAX_FILES) throw badRequest(`อัปโหลดได้สูงสุด ${media.MAX_FILES} ไฟล์ต่อโปรเจกต์`);
-    const key = media.saveFile(file, mime);
-    const r = await db.query(
-      `INSERT INTO video_media (video_project_id, kind, mime, storage_key, size_bytes, duration_ms, label, sort_order)
-       VALUES (:id, :kind, :mime, :key, :size, :duration, :label, :sort)`,
-      {
-        id: v.id,
-        kind: type.kind,
-        mime,
-        key,
-        size: file.length,
-        duration: type.kind === 'video' ? (req.valid.query.durationMs ?? null) : null,
-        label: req.valid.query.label || null,
-        sort: Number(count.maxSort) + 1,
-      },
-    );
-    // New footage changes what the renderer will use
-    await db.query(
-      "UPDATE video_projects SET output_url = NULL, status = IF(status IN ('ready','parts_ready','failed'), 'script_ready', status) WHERE id = :id AND script_json IS NOT NULL",
-      { id: v.id },
-    );
-    audit(req, 'video.media.upload', 'video_project', v.id, { kind: type.kind, size: file.length });
-    const row = await db.one('SELECT * FROM video_media WHERE id = :id', { id: r.insertId });
-    res.status(201).json({ data: mapMedia(row) });
+    if (!Buffer.isBuffer(file)) throw badRequest('รองรับคลิป MP4/MOV/WebM และรูป JPEG/PNG/WebP');
+    res.status(201).json({ data: await addMedia(req, req.valid.params.id, file, mime, req.valid.query) });
   },
 );
+
+/* -------------------------------------------------------- chunked upload */
+
+const uploadParam = idParam.extend({ uploadId: z.string().regex(/^[0-9a-f]{32}$/) });
+
+/** The upload must belong to this user's org and this project. */
+async function getUpload(req) {
+  await getProject(req.user.orgId, req.valid.params.id);
+  const u = media.readUpload(req.valid.params.uploadId);
+  if (!u || u.orgId !== req.user.orgId || u.projectId !== req.valid.params.id) throw notFound('ไม่พบการอัปโหลดนี้ (อาจหมดอายุ) กรุณาอัปโหลดใหม่');
+  return u;
+}
+
+/** Start: declare the file; returns uploadId and the chunk size to send. */
+router.post(
+  '/:id/media/uploads',
+  validate({
+    params: idParam,
+    body: z.object({
+      mime: z.string().max(50),
+      size: z.number().int().positive(),
+      label: z.string().trim().max(100).optional(),
+      durationMs,
+    }),
+  }),
+  async (req, res) => {
+    const b = req.valid.body;
+    const mime = b.mime.toLowerCase();
+    await checkUpload(req, req.valid.params.id, mime, b.size);
+    const uploadId = media.startUpload({
+      orgId: req.user.orgId,
+      projectId: req.valid.params.id,
+      userId: req.user.id,
+      mime,
+      size: b.size,
+      label: b.label ?? null,
+      durationMs: b.durationMs ?? null,
+    });
+    res.status(201).json({ data: { uploadId, chunkSize: media.CHUNK_BYTES } });
+  },
+);
+
+/** Append one base64 chunk at `offset`; resending a stored chunk is harmless. */
+router.put(
+  '/:id/media/uploads/:uploadId',
+  validate({
+    params: uploadParam,
+    body: z.object({ offset: z.number().int().min(0), data: z.string().max(Math.ceil((media.MAX_CHUNK_BYTES * 4) / 3) + 4) }),
+  }),
+  async (req, res) => {
+    const u = await getUpload(req);
+    const bytes = Buffer.from(req.valid.body.data, 'base64');
+    if (!bytes.length) throw badRequest('ข้อมูลว่าง');
+    try {
+      const received = media.appendChunk(u, req.valid.body.offset, bytes);
+      res.json({ data: { received, size: u.size } });
+    } catch (err) {
+      if (err.code === 'BAD_OFFSET') throw new AppError(409, 'BAD_OFFSET', `ลำดับข้อมูลไม่ตรง (เซิร์ฟเวอร์มี ${err.received} ไบต์)`, { received: err.received });
+      if (err.code === 'TOO_LARGE') throw badRequest('ข้อมูลเกินขนาดไฟล์ที่แจ้งไว้');
+      throw err;
+    }
+  },
+);
+
+/** Finish: all bytes received -> saved as footage like a single-request upload. */
+router.post('/:id/media/uploads/:uploadId/complete', validate({ params: uploadParam }), async (req, res) => {
+  const u = await getUpload(req);
+  if (u.received !== u.size) throw badRequest(`ไฟล์ยังมาไม่ครบ (${u.received.toLocaleString('en-US')} จาก ${u.size.toLocaleString('en-US')} ไบต์)`);
+  const file = media.readUploadedFile(u);
+  try {
+    res.status(201).json({ data: await addMedia(req, u.projectId, file, u.mime, { label: u.label, durationMs: u.durationMs ?? undefined }) });
+  } finally {
+    media.dropUpload(u);
+  }
+});
 
 router.get('/:id/media/:mediaId/file', validate({ params: mediaParam }), async (req, res) => {
   const v = await getProject(req.user.orgId, req.valid.params.id);

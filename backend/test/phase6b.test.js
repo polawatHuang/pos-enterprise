@@ -274,6 +274,39 @@ describe('own footage, hooks and variants', () => {
     assert.equal((await marketer.delete(`/api/videos/${pid}/media/${ok.body.data.id}`)).status, 200);
   });
 
+  test('chunked JSON upload: resumable, ordered, size-checked, then saved like a normal upload', async () => {
+    const file = require('node:crypto').randomBytes(900 * 1024); // 3 chunks of 384 KB
+    const base = `/api/videos/${pid}/media/uploads`;
+    assert.equal((await marketer.post(base, { mime: 'application/pdf', size: 10 })).status, 400);
+    assert.equal((await marketer.post(base, { mime: 'image/png', size: media.MAX_IMAGE_BYTES + 1 })).status, 400);
+
+    const start = await marketer.post(base, { mime: 'image/png', size: file.length, label: 'ทีละชิ้น' });
+    assert.equal(start.status, 201, JSON.stringify(start.body));
+    const { uploadId, chunkSize } = start.body.data;
+    const put = (offset, buf) => marketer.put(`${base}/${uploadId}`, { offset, data: buf.toString('base64') });
+
+    assert.equal((await put(0, file.subarray(0, chunkSize))).body.data.received, chunkSize);
+    assert.equal((await put(0, file.subarray(0, chunkSize))).status, 200, 'a resent chunk is accepted');
+    const gap = await put(chunkSize * 2, file.subarray(chunkSize * 2));
+    assert.equal(gap.status, 409);
+    assert.equal(gap.body.error.details.received, chunkSize);
+    assert.equal((await marketer.post(`${base}/${uploadId}/complete`, {})).status, 400, 'not all bytes yet');
+
+    await put(chunkSize, file.subarray(chunkSize, chunkSize * 2));
+    const last = await put(chunkSize * 2, file.subarray(chunkSize * 2));
+    assert.equal(last.body.data.received, file.length);
+    assert.equal((await put(file.length, Buffer.from('x'))).status, 400, 'beyond the declared size');
+
+    const done = await marketer.post(`${base}/${uploadId}/complete`, {});
+    assert.equal(done.status, 201, JSON.stringify(done.body));
+    assert.equal(done.body.data.label, 'ทีละชิ้น');
+    const saved = await marketer.get(done.body.data.url);
+    assert.ok(Buffer.from(saved.body).equals(file), 'reassembled byte for byte');
+    assert.equal((await marketer.post(`${base}/${uploadId}/complete`, {})).status, 404, 'temporary files are gone');
+    assert.equal((await marketer.put(`/api/videos/999999/media/uploads/${uploadId}`, { offset: 0, data: 'eA==' })).status, 404);
+    assert.equal((await marketer.delete(`/api/videos/${pid}/media/${done.body.data.id}`)).status, 200);
+  });
+
   test('AI rewrite sees footage labels and maps scenes to footage numbers', async () => {
     scriptCalls = [];
     mockScript();
