@@ -87,6 +87,7 @@ function createApp() {
 
   app.use('/api/auth', require('./modules/auth/auth.routes').router);
   app.use('/api/users', require('./modules/users/users.routes').router);
+  app.use('/api/audit', require('./modules/audit/audit.routes').router);
   app.use('/api/org', require('./modules/org/org.routes').router);
   app.use('/api/dashboard', require('./modules/dashboard/dashboard.routes').router);
   app.use('/api/integrations', require('./modules/integrations/integrations.routes').router);
