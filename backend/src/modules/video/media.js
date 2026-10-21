@@ -77,4 +77,92 @@ function publicUrl(kind, id) {
   return `${base}/api/media/${signToken(kind, id)}`;
 }
 
-module.exports = { MEDIA_DIR, MAX_FILES, MAX_VIDEO_BYTES, MAX_IMAGE_BYTES, TYPES, saveFile, filePath, removeFile, signToken, verifyToken, publicUrl };
+/* ----------------------------------------------------- chunked uploads */
+
+/**
+ * Uploads arrive as small JSON chunks: on shared hosting (Apache + ModSecurity + Passenger) a
+ * large raw or multipart request body may never reach Node, while small JSON requests always do.
+ * Parts are appended to MEDIA_DIR/tmp/<id>.part; <id>.json holds who is uploading what.
+ */
+const TMP_DIR = path.join(MEDIA_DIR, 'tmp');
+const CHUNK_BYTES = 384 * 1024;
+const MAX_CHUNK_BYTES = 768 * 1024;
+const STALE_MS = 24 * 3600 * 1000;
+const uploadFiles = (id) => {
+  if (!/^[0-9a-f]{32}$/.test(id)) return null;
+  return { part: path.join(TMP_DIR, `${id}.part`), meta: path.join(TMP_DIR, `${id}.json`) };
+};
+
+function removeStaleUploads() {
+  try {
+    for (const name of fs.readdirSync(TMP_DIR)) {
+      const f = path.join(TMP_DIR, name);
+      if (Date.now() - fs.statSync(f).mtimeMs > STALE_MS) fs.rmSync(f, { force: true });
+    }
+  } catch {
+    /* nothing to clean yet */
+  }
+}
+
+function startUpload(meta) {
+  fs.mkdirSync(TMP_DIR, { recursive: true });
+  removeStaleUploads();
+  const id = crypto.randomBytes(16).toString('hex');
+  const f = uploadFiles(id);
+  fs.writeFileSync(f.part, Buffer.alloc(0));
+  fs.writeFileSync(f.meta, JSON.stringify({ ...meta, received: 0, startedAt: Date.now() }));
+  return id;
+}
+
+function readUpload(id) {
+  const f = uploadFiles(String(id));
+  if (!f || !fs.existsSync(f.meta)) return null;
+  return { ...JSON.parse(fs.readFileSync(f.meta, 'utf8')), files: f };
+}
+
+/**
+ * Append bytes at `offset`. A retried chunk that is already stored (offset + length <= received)
+ * is accepted as-is, so the client can safely resend after a dropped connection.
+ * Returns the new received count, or throws { code } for the route to map to an HTTP error.
+ */
+function appendChunk(upload, offset, bytes) {
+  const { received, size } = upload;
+  if (offset + bytes.length <= received) return received;
+  if (offset !== received) throw Object.assign(new Error('offset'), { code: 'BAD_OFFSET', received });
+  if (received + bytes.length > size) throw Object.assign(new Error('size'), { code: 'TOO_LARGE' });
+  fs.appendFileSync(upload.files.part, bytes);
+  const next = received + bytes.length;
+  const { files, ...meta } = upload;
+  fs.writeFileSync(files.meta, JSON.stringify({ ...meta, received: next }));
+  return next;
+}
+
+function readUploadedFile(upload) {
+  return fs.readFileSync(upload.files.part);
+}
+
+function dropUpload(upload) {
+  fs.rmSync(upload.files.part, { force: true });
+  fs.rmSync(upload.files.meta, { force: true });
+}
+
+module.exports = {
+  CHUNK_BYTES,
+  MAX_CHUNK_BYTES,
+  startUpload,
+  readUpload,
+  appendChunk,
+  readUploadedFile,
+  dropUpload,
+  MEDIA_DIR,
+  MAX_FILES,
+  MAX_VIDEO_BYTES,
+  MAX_IMAGE_BYTES,
+  TYPES,
+  saveFile,
+  filePath,
+  removeFile,
+  signToken,
+  verifyToken,
+  publicUrl,
+};

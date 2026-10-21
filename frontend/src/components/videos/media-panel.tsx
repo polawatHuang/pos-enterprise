@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Film, ImageIcon, Loader2, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { api, apiBlob, apiFetch, ApiError } from "@/lib/api";
+import { api, apiBlob, ApiError } from "@/lib/api";
 import type { VideoMedia } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,56 @@ function Preview({ m }: { m: VideoMedia }) {
   );
 }
 
+const MIN_CHUNK = 64 * 1024;
+const toBase64 = async (blob: Blob) => {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+
+/**
+ * Send a file as small JSON requests and let the server put it back together. Shared hosting
+ * (Apache + ModSecurity + Passenger) can drop a large upload body before it reaches the app, while
+ * small JSON requests always get through. A failed chunk is retried, then resent in smaller pieces.
+ */
+async function uploadInChunks(projectId: number, file: File, meta: { label: string; durationMs: number | null }, onProgress: (pct: number) => void) {
+  const base = `/videos/${projectId}/media/uploads`;
+  const start = await api.post<{ uploadId: string; chunkSize: number }>(base, {
+    mime: file.type,
+    size: file.size,
+    label: meta.label,
+    durationMs: meta.durationMs ?? undefined,
+  });
+  let chunk = start.chunkSize;
+  let offset = 0;
+  let failures = 0;
+  while (offset < file.size) {
+    const end = Math.min(offset + chunk, file.size);
+    try {
+      const r = await api.put<{ received: number }>(`${base}/${start.uploadId}`, { offset, data: await toBase64(file.slice(offset, end)) });
+      offset = r.received;
+      failures = 0;
+      onProgress(Math.floor((offset / file.size) * 100));
+    } catch (err) {
+      // The server already holds more or fewer bytes than we thought: continue from its count
+      if (err instanceof ApiError && err.status === 409 && typeof (err.details as { received?: number })?.received === "number") {
+        offset = (err.details as { received: number }).received;
+        continue;
+      }
+      const retriable = !(err instanceof ApiError) || err.status === 0 || err.status >= 500;
+      if (!retriable) throw err;
+      failures += 1;
+      if (failures > 2 && chunk > MIN_CHUNK) {
+        chunk = Math.max(MIN_CHUNK, Math.floor(chunk / 2));
+        failures = 0;
+      } else if (failures > 2) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 500 * failures));
+    }
+  }
+  await api.post(`${base}/${start.uploadId}/complete`);
+}
+
 export function MediaPanel({ projectId, media, locked, highlight }: { projectId: number; media: VideoMedia[]; locked: boolean; highlight: boolean }) {
   const qc = useQueryClient();
   const [uploading, setUploading] = useState<string | null>(null);
@@ -77,17 +127,13 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
         toast.error(`${file.name}: คลิปใหญ่เกิน ${MAX_VIDEO_MB} MB — ตัดให้สั้นลง (แนะนำ 3–15 วินาทีต่อคลิป)`);
         continue;
       }
-      setUploading(`กำลังอัปโหลด ${i + 1}/${list.length}`);
+      const prefix = `กำลังอัปโหลด ${i + 1}/${list.length}`;
+      setUploading(prefix);
       try {
         const durationMs = file.type.startsWith("video/") ? await videoDurationMs(file) : null;
-        // multipart/form-data: hosting firewalls (ModSecurity) drop large raw request bodies but allow file uploads
-        const form = new FormData();
-        form.append("file", file);
-        await apiFetch(`/videos/${projectId}/media`, {
-          method: "POST",
-          body: form,
-          query: { label: file.name.replace(/\.[^.]+$/, "").slice(0, 100), durationMs: durationMs ?? undefined, size: file.size },
-        });
+        await uploadInChunks(projectId, file, { label: file.name.replace(/\.[^.]+$/, "").slice(0, 100), durationMs }, (pct) =>
+          setUploading(`${prefix} · ${pct}%`),
+        );
       } catch (err) {
         // status 0: the request never got an answer from the app (connection dropped or a firewall refused the file)
         const message =
