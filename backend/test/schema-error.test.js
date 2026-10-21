@@ -27,3 +27,25 @@ test('missing table or column names the gap and points to the migrations', async
   assert.match(run(col).body.error.message, /คอลัมน์ no_such_column/);
   assert.equal(run(new Error('boom')).body.error.code, 'INTERNAL');
 });
+
+test('a delete blocked by a foreign key names the referencing table', async () => {
+  // Sold products are referenced by sales_order_items (no ON DELETE): the delete must be refused.
+  // Runs in a transaction that is always rolled back, so the demo data is never touched.
+  const conn = await db.pool.getConnection();
+  let err;
+  try {
+    await conn.beginTransaction();
+    err = await conn.query('DELETE FROM products WHERE id IN (SELECT product_id FROM sales_order_items)').then(
+      () => null,
+      (e) => e,
+    );
+  } finally {
+    await conn.rollback();
+    conn.release();
+  }
+  assert.ok(err, 'the delete must have been refused');
+  const r = run(err);
+  assert.equal(r.status, 409, err.code);
+  assert.equal(r.body.error.code, 'IN_USE');
+  assert.match(r.body.error.message, /ตาราง sales_order_items/);
+});

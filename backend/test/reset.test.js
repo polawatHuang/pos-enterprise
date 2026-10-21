@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const request = require('supertest');
 const { createApp } = require('../src/app');
 const db = require('../src/db/pool');
-const { STEPS } = require('../src/modules/org/reset');
+const { STEPS, tablesOf, stepsToRun } = require('../src/modules/org/reset');
 
 const app = createApp();
 const RUN = Date.now().toString(36);
@@ -80,6 +80,7 @@ test('reset clears the org, keeps its structure and the caller, and never touche
   assert.equal(res.status, 200, JSON.stringify(res.body));
   assert.equal(res.body.data.deleted.products, 1);
   assert.equal(res.body.data.deleted.users, 1);
+  assert.deepEqual(res.body.data.skipped, [], 'every table exists in a fully migrated database');
 
   const left = await db.one(
     `SELECT (SELECT COUNT(*) FROM products WHERE org_id = :o) AS products, (SELECT COUNT(*) FROM customers WHERE org_id = :o) AS customers,
@@ -111,4 +112,22 @@ test('reset clears the org, keeps its structure and the caller, and never touche
 
 test('every statement is scoped to an organization', () => {
   for (const [table, sql] of STEPS) assert.match(sql, /org_id = :orgId/, `${table} must be limited to one org`);
+});
+
+test('tables of a not-yet-imported migration are skipped, not fatal', () => {
+  assert.deepEqual(tablesOf('DELETE a FROM cover_assets a JOIN cover_projects c ON c.id = a.cover_id WHERE c.org_id = :orgId'), ['cover_assets', 'cover_projects']);
+  assert.deepEqual(tablesOf('DELETE FROM products WHERE org_id = :orgId'), ['products']);
+
+  const all = new Set(STEPS.flatMap(([, sql]) => tablesOf(sql)));
+  const missing = new Set(['cover_projects', 'cover_assets', 'stock_lots']);
+  const { run, skipped } = stepsToRun(new Set([...all].filter((t) => !missing.has(t))));
+  assert.deepEqual(skipped.sort(), ['cover_assets', 'cover_projects', 'stock_lots']);
+  assert.equal(run.length, STEPS.length - 3);
+});
+
+test('every table named in the steps exists (a typo would be skipped silently)', async () => {
+  const rows = await db.query('SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()');
+  const existing = new Set(rows.map((r) => r.name));
+  const unknown = [...new Set(STEPS.flatMap(([, sql]) => tablesOf(sql)))].filter((t) => !existing.has(t));
+  assert.deepEqual(unknown, []);
 });

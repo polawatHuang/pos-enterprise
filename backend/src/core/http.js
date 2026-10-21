@@ -35,6 +35,14 @@ function errorHandler(err, req, res, next) {
       },
     });
   }
+  // A row still referenced by another table's foreign key
+  if (err && err.code === 'ER_ROW_IS_REFERENCED_2') {
+    logger.warn({ err: err.sqlMessage, path: req.path }, 'Delete blocked by a foreign key');
+    const child = /a foreign key constraint fails \(`[^`]*`\.`([^`]+)`/.exec(err.sqlMessage ?? '')?.[1] ?? '';
+    return res.status(409).json({
+      error: { code: 'IN_USE', message: `ลบไม่ได้ เพราะยังมีข้อมูลในตาราง ${child} อ้างถึงอยู่` },
+    });
+  }
   logger.error({ err, path: req.path }, 'Unhandled error');
   return res.status(500).json({ error: { code: 'INTERNAL', message: 'เกิดข้อผิดพลาดภายในระบบ' } });
 }

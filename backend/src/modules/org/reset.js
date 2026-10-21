@@ -10,6 +10,10 @@ const db = require('../../db/pool');
  *
  * Scoped to one org_id, run in one transaction (all or nothing), children before parents so it
  * does not depend on cascade rules. Returns the number of rows removed per table.
+ *
+ * A database that has not imported every migration yet simply lacks some feature tables; there is
+ * nothing to delete in them, so steps touching a missing table are skipped instead of failing
+ * the whole reset.
  */
 const STEPS = [
   ['notification_reads', 'DELETE r FROM notification_reads r JOIN notifications n ON n.id = r.notification_id WHERE n.org_id = :orgId'],
@@ -78,15 +82,33 @@ const STEPS = [
 /** The phrase the user types in the confirmation dialog. */
 const CONFIRM_PHRASE = 'ลบข้อมูลทั้งหมด';
 
-async function resetOrgData({ orgId, keepUserId }) {
-  return db.tx(async (conn) => {
-    const deleted = {};
-    for (const [table, sql] of STEPS) {
-      const [r] = await conn.query(sql, { orgId, keepUserId });
-      if (r.affectedRows) deleted[table] = r.affectedRows;
-    }
-    return deleted;
-  });
+/** Every table a statement reads or deletes from. */
+const tablesOf = (sql) => [...new Set([...sql.matchAll(/\b(?:FROM|JOIN)\s+(\w+)/g)].map((m) => m[1]))];
+
+/** Steps whose tables all exist; the rest are reported as skipped. */
+function stepsToRun(existing) {
+  const run = [];
+  const skipped = [];
+  for (const step of STEPS) (tablesOf(step[1]).every((t) => existing.has(t)) ? run : skipped).push(step);
+  return { run, skipped: skipped.map(([table]) => table) };
 }
 
-module.exports = { resetOrgData, STEPS, CONFIRM_PHRASE };
+async function existingTables() {
+  const rows = await db.query('SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()');
+  return new Set(rows.map((r) => r.name));
+}
+
+async function resetOrgData({ orgId, keepUserId }) {
+  const { run, skipped } = stepsToRun(await existingTables());
+  const deleted = await db.tx(async (conn) => {
+    const out = {};
+    for (const [table, sql] of run) {
+      const [r] = await conn.query(sql, { orgId, keepUserId });
+      if (r.affectedRows) out[table] = r.affectedRows;
+    }
+    return out;
+  });
+  return { deleted, skipped };
+}
+
+module.exports = { resetOrgData, STEPS, CONFIRM_PHRASE, tablesOf, stepsToRun };
