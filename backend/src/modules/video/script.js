@@ -38,7 +38,6 @@ const SCRIPT_SCHEMA = {
             description: 'English prompt for a 6-second vertical video shot (subject, action, setting, lighting, camera). No text, no logos.',
           },
           showProduct: { type: 'boolean', description: 'true เมื่อฉากนี้ควรเห็นตัวสินค้าจริง (ใช้รูปสินค้าเป็นเฟรมแรก)' },
-          media: { type: ['integer', 'null'], description: 'เลขฟุตเทจของผู้ใช้ที่เหมาะกับฉากนี้ (ถ้ามีรายการฟุตเทจ) ไม่งั้น null' },
           durationSec: { type: 'integer', minimum: 2, maximum: 10 },
         },
       },
@@ -47,6 +46,8 @@ const SCRIPT_SCHEMA = {
     hashtags: { type: 'array', items: { type: 'string' }, description: '3-6 แฮชแท็กภาษาไทย/อังกฤษ ขึ้นต้นด้วย #' },
   },
 };
+
+const MAX_SCENES = 8;
 
 const TONES = {
   friendly: 'เป็นกันเอง เหมือนเพื่อนแนะนำ',
@@ -72,7 +73,7 @@ const SYSTEM = `คุณเป็นครีเอเตอร์คลิป�
 - 3 วินาทีแรกต้องหยุดนิ้วคนดู (hook ด้วยปัญหาหรือผลลัพธ์ที่เห็นภาพ) และต้องเห็น/พูดถึงสินค้าภายในวินาทีที่ 6
 - เขียน hooks 3 แบบคนละมุม โดยฉากแรกของ scenes ใช้ hook แบบแรก
 - ประโยคสั้น กระชับ ฉากละ 2-5 วินาที จังหวะเร็วแบบคลิปสั้น
-- ถ้ามีรายการฟุตเทจของผู้ใช้ ให้เลือกเลขฟุตเทจ (media) ที่ตรงกับเนื้อหาแต่ละฉาก
+- ถ้าผู้ใช้ให้ภาพฉากมา ให้เขียนฉากละภาพตามลำดับพอดี (ฉากที่ 1 = ภาพที่ 1 …) บทพากย์และข้อความบนจอต้องเข้ากับสิ่งที่เห็นในภาพนั้น
 - บทพากย์เป็นภาษาพูดธรรมชาติ ประโยคสั้น อ่านออกเสียงได้ลื่น ไม่ใช้อีโมจิในบทพากย์
 - ห้ามเคลมเกินจริงหรือผิดกฎหมายโฆษณาไทย (เช่น รักษาหาย ขาวถาวร ลดน้ำหนักได้ X กิโล) ห้ามอ้างรีวิว/ตัวเลขที่ไม่มีในข้อมูล
 - ปิดท้ายด้วย CTA ให้กดลิงก์/ตะกร้า
@@ -127,6 +128,19 @@ async function productFacts(orgId, { productId, trendId }) {
  * @returns {Promise<{title:string, scenes:object[], postCaption:string, hashtags:string[], model:string, provider:string}>}
  */
 async function generateScript({ facts, brief, footage = [] }) {
+  // Scene images: one scene per image, in order. The model sees the pictures when it can.
+  const sceneCount = Math.min(footage.length, MAX_SCENES);
+  const seesImages = Boolean(ai.active().capabilities?.images);
+  const pictures = seesImages
+    ? footage.slice(0, sceneCount).flatMap((f, i) =>
+        f.image
+          ? [
+              { type: 'text', text: `ภาพที่ ${i + 1}${f.label ? ` (${f.label})` : ''}:` },
+              { type: 'image', source: { type: 'base64', media_type: f.image.mime, data: f.image.data } },
+            ]
+          : [],
+      )
+    : [];
   const { data, model, provider } = await ai.extractStructured({
     system: SYSTEM,
     schema: SCRIPT_SCHEMA,
@@ -140,8 +154,11 @@ async function generateScript({ facts, brief, footage = [] }) {
           `ความยาวคลิป: ประมาณ ${brief.lengthSec} วินาที`,
           `โทน: ${TONES[brief.tone] ?? brief.tone}`,
           `โครงเรื่อง: ${ANGLES[brief.angle] ?? ANGLES.auto}`,
-          footage?.length
-            ? `ฟุตเทจของผู้ใช้:\n${footage.map((f, i) => `${i + 1}) ${f.kind === 'video' ? 'คลิป' : 'รูป'}: ${f.label || 'ไม่ระบุ'}`).join('\n')}`
+          sceneCount
+            ? `ภาพฉากของผู้ใช้ ${sceneCount} ภาพ — เขียน scenes ${sceneCount} ฉากพอดี เรียงตามลำดับภาพ:\n${footage
+                .slice(0, sceneCount)
+                .map((f, i) => `${i + 1}) ${f.kind === 'video' ? 'คลิป' : 'รูป'}: ${f.label || 'ไม่ระบุ'}`)
+                .join('\n')}`
             : null,
           brief.audience ? `กลุ่มเป้าหมาย: ${brief.audience}` : null,
           brief.notes ? `สิ่งที่ต้องการเพิ่มเติม: ${brief.notes}` : null,
@@ -151,11 +168,13 @@ async function generateScript({ facts, brief, footage = [] }) {
           .filter((l) => l !== null)
           .join('\n'),
       },
+      ...pictures,
     ],
   });
   const scenes = (Array.isArray(data.scenes) ? data.scenes : [])
-    .slice(0, 8)
-    .map((sc) => normalizeScene(sc, footage.length))
+    .slice(0, sceneCount || MAX_SCENES)
+    // Scene i shows image i (media null = follow the image order)
+    .map((sc) => normalizeScene({ ...sc, media: null }, footage.length))
     .filter((sc) => sc.voiceover);
   const hooks = (Array.isArray(data.hooks) ? data.hooks : [])
     .map((h) => ({

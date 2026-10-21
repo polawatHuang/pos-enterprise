@@ -21,6 +21,7 @@ const { wordChunks, captionCues, planShots, buildShotstackEdit, MAX_SHOT_SEC } =
 const media = require('../src/modules/video/media');
 
 const app = createApp();
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const RUN = Date.now().toString(36);
 const originalFetch = global.fetch;
 const originalCreate = minimax.createMessage;
@@ -48,7 +49,7 @@ const as = (c) => ({
   upload: (url, buf, type) => request(app).post(url).set('Cookie', c).set('Content-Type', type).send(buf),
 });
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-const JOBS = "('video.voice','video.compose','video.compose_poll')";
+const JOBS = "('video.images','video.voice','video.clips_start','video.clips_poll','video.compose','video.compose_poll')";
 async function drain() {
   await db.query(`UPDATE jobs SET run_at = UTC_TIMESTAMP() WHERE status = 'queued' AND type IN ${JOBS}`);
   await db.query(`UPDATE jobs SET run_at = UTC_TIMESTAMP() + INTERVAL 1 DAY WHERE status = 'queued' AND type NOT IN ${JOBS}`);
@@ -97,6 +98,14 @@ before(async () => {
         base_resp: { status_code: 0 },
       });
     }
+    if (u.includes('/v1/image_generation')) return json({ data: { image_base64: [PNG_B64] }, base_resp: { status_code: 0 } });
+    if (u.includes('/v1/video_generation')) {
+      const body = JSON.parse(init.body);
+      return json({ task_id: `t${calls.filter((c) => c.url.includes('/v1/video_generation')).length}-${body.duration}`, base_resp: { status_code: 0 } });
+    }
+    if (u.includes('/v1/query/video_generation')) return json({ status: 'Success', file_id: new URL(u).searchParams.get('task_id'), base_resp: { status_code: 0 } });
+    if (u.includes('/v1/files/retrieve')) return json({ file: { download_url: `https://cdn.minimax.test/${new URL(u).searchParams.get('file_id')}.mp4` }, base_resp: { status_code: 0 } });
+    if (u === 'https://img.example.com/p16.jpg') return new Response(Buffer.from(PNG_B64, 'base64'), { headers: { 'content-type': 'image/png' } });
     if (u.includes('/v1/get_voice'))
       return json({
         system_voice: [
@@ -317,16 +326,23 @@ describe('own footage, hooks and variants', () => {
     assert.equal((await marketer.delete(`/api/videos/${pid}/media/${done.body.data.id}`)).status, 200);
   });
 
-  test('AI rewrite sees footage labels and maps scenes to footage numbers', async () => {
+  test('AI rewrite writes one scene per scene picture, in order, and sees the images', async () => {
     scriptCalls = [];
     mockScript();
     const r = await marketer.post(`/api/videos/${pid}/script`, {});
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.match(scriptCalls[0].messages[0].content[0].text, /1\) คลิป: แกะกล่อง\n2\) รูป: ใช้งานกลางแดด/);
+    const content = scriptCalls[0].messages[0].content;
+    assert.match(content[0].text, /ภาพฉากของผู้ใช้ 2 ภาพ — เขียน scenes 2 ฉากพอดี[^]*1\) คลิป: แกะกล่อง\n2\) รูป: ใช้งานกลางแดด/);
+    // the photo goes to the model as an image; the video is described by its label
+    const imgs = content.filter((b) => b.type === 'image');
+    assert.equal(imgs.length, 1);
+    assert.equal(imgs[0].source.media_type, 'image/png');
+    assert.match(content[content.indexOf(imgs[0]) - 1].text, /ภาพที่ 2/);
+    // 3 scenes from the model, 2 pictures → 2 scenes, shown in picture order
     assert.deepEqual(
       r.body.data.scenes.map((s) => s.media),
-      [2, null, null],
-    ); // 9 is out of range
+      [null, null],
+    );
   });
 
   test('switch hook replaces the opening scene; variant copies the project and shares files', async () => {
@@ -379,8 +395,11 @@ describe('own footage, hooks and variants', () => {
 
     calls.length = 0;
     assert.equal((await marketer.post(`/api/videos/${pid}/generate`)).status, 202);
-    await drain();
-    await drain();
+    for (let i = 0; i < 6 && (await db.one('SELECT status FROM video_projects WHERE id = :id', { id: pid })).status !== 'ready'; i += 1) await drain();
+    // Scene 1 is the user's own video (played as is); scene 2's photo is animated by Hailuo as the first frame
+    const hailuo = calls.filter((x) => x.url.includes('/v1/video_generation'));
+    assert.equal(hailuo.length, 1);
+    assert.match(JSON.parse(hailuo[0].init.body).first_frame_image, /^data:image\/png;base64,/);
     const render = calls.find((x) => x.url.endsWith('/edit/stage/render'));
     assert.ok(render, 'render requested');
     const edit = JSON.parse(render.init.body);
@@ -389,7 +408,11 @@ describe('own footage, hooks and variants', () => {
     assert.ok(signed.some((x) => x.asset.type === 'video'));
     const intro = clips.find((x) => x.start === 0 && x.length === 0.5 && x.asset.type === 'image');
     assert.ok(intro && intro.asset.src.startsWith('https://api.example.com/api/media/'));
-    assert.ok(clips.filter((x) => x.asset.type !== 'html' && x.asset.type !== 'audio').every((x) => x.length <= MAX_SHOT_SEC));
+    // one shot per scene, in order: own video, then the AI clip
+    const visual = clips.filter((x) => (x.asset.type === 'video' || x.asset.type === 'image') && x !== intro).sort((a, b) => a.start - b.start);
+    assert.equal(visual.length, 2);
+    assert.match(visual[0].asset.src, /^https:\/\/api\.example\.com\/api\/media\//);
+    assert.match(visual[1].asset.src, /^https:\/\/cdn\.minimax\.test\/t1-6\.mp4$/);
     assert.ok(clips.some((x) => x.asset.css?.includes('Kanit')));
 
     // The renderer can fetch the signed URLs without logging in
@@ -414,6 +437,59 @@ describe('own footage, hooks and variants', () => {
     assert.ok(after1.scenes.every((s) => s.media === null || s.media <= 1));
     assert.equal((await marketer.delete(`/api/videos/${pid}`)).status, 200);
     assert.ok(keys.every((k) => !fs.existsSync(media.filePath(k.storage_key))));
+  });
+});
+
+describe('scene pictures → AI video', () => {
+  test('no pictures: AI draws each scene (product scene uses the real photo), then Hailuo animates them in order', async () => {
+    mockScript();
+    env.PUBLIC_API_URL = 'https://api.example.com';
+    process.env.SHOTSTACK_API_KEY = 'ss-key';
+    const before = (await db.one('SELECT image_url FROM products WHERE id = 16')).image_url;
+    await db.query("UPDATE products SET image_url = 'https://img.example.com/p16.jpg' WHERE id = 16");
+    try {
+      const res = await marketer.post('/api/videos', { productId: 16, tone: 'friendly', lengthSec: 15, visualMode: 'my_footage' });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      const id = res.body.data.id;
+      created.push(id);
+      calls.length = 0;
+      const gen = await marketer.post(`/api/videos/${id}/generate`);
+      assert.equal(gen.status, 202, JSON.stringify(gen.body));
+      assert.equal(gen.body.data.status, 'generating_clips');
+      assert.equal(gen.body.data.estimate.aiImages, 3);
+      for (let i = 0; i < 10 && (await db.one('SELECT status FROM video_projects WHERE id = :id', { id })).status !== 'ready'; i += 1) await drain();
+      const v = await db.one('SELECT status, error FROM video_projects WHERE id = :id', { id });
+      assert.equal(v.status, 'ready', v.error);
+
+      const files = await db.query('SELECT label, kind FROM video_media WHERE video_project_id = :id ORDER BY sort_order, id', { id });
+      assert.deepEqual(
+        files.map((f) => f.label),
+        ['AI · ฉาก 1', 'รูปสินค้า · ฉาก 2', 'AI · ฉาก 3'],
+      );
+      assert.equal(calls.filter((c) => c.url.includes('/v1/image_generation')).length, 2);
+      const hailuo = calls.filter((c) => c.url.includes('/v1/video_generation')).map((c) => JSON.parse(c.init.body));
+      assert.equal(hailuo.length, 3);
+      assert.ok(hailuo.every((b) => b.first_frame_image.startsWith('data:image/')));
+      // the render plays the three AI clips in scene order
+      const edit = JSON.parse(calls.find((x) => x.url.endsWith('/edit/stage/render')).init.body);
+      const shots = edit.timeline.tracks
+        .flatMap((t) => t.clips)
+        .filter((x) => x.asset.type === 'video')
+        .sort((a, b) => a.start - b.start);
+      assert.deepEqual(
+        shots.map((x) => x.asset.src.replace(/^.*\/(t\d)-\d+\.mp4$/, '$1')),
+        ['t1', 't2', 't3'],
+      );
+
+      // A second run reuses the clips while the pictures are unchanged
+      calls.length = 0;
+      await marketer.post(`/api/videos/${id}/generate`);
+      for (let i = 0; i < 6 && (await db.one('SELECT status FROM video_projects WHERE id = :id', { id })).status !== 'ready'; i += 1) await drain();
+      assert.equal(calls.filter((c) => c.url.includes('/v1/video_generation') || c.url.includes('/v1/image_generation')).length, 0);
+    } finally {
+      await db.query('UPDATE products SET image_url = :u WHERE id = 16', { u: before });
+      delete process.env.SHOTSTACK_API_KEY;
+    }
   });
 });
 

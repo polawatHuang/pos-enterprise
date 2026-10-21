@@ -16,7 +16,7 @@ const r2 = require('../../integrations/r2');
 const { generateScript, productFacts, normalizeScene, TONES, ANGLES } = require('./script');
 const media = require('./media');
 const env = require('../../config/env');
-const { VOICE_PROVIDERS } = require('./pipeline');
+const { VOICE_PROVIDERS, missingSceneImages } = require('./pipeline');
 const runtime = require('../../config/runtime');
 const { singleFile } = require('../../utils/multipart');
 
@@ -178,7 +178,7 @@ async function writeScript(project, brief, orgId) {
   if (!facts) throw badRequest('ไม่พบสินค้าของโปรเจกต์นี้');
   await db.query("UPDATE video_projects SET status = 'scripting', stage_detail = 'AI กำลังเขียนสคริปต์', error = NULL WHERE id = :id", { id: project.id });
   try {
-    const footage = await listMedia(project.id);
+    const footage = (await listMedia(project.id)).map((m) => ({ kind: m.kind, label: m.label, image: media.imageForAi(m) }));
     const s = await generateScript({ facts: facts.facts, brief, footage });
     await db.query('DELETE FROM video_assets WHERE video_project_id = :id', { id: project.id });
     await db.query(
@@ -339,12 +339,13 @@ router.put(
 /* ------------------------------------------------------------- generation */
 
 /** Rough cost drivers shown before generating (provider prices change; see their pricing pages). */
-function estimate(v, scenes) {
+function estimate(v, scenes, aiImages = 0) {
   const chars = scenes.reduce((n, s) => n + s.voiceover.length, 0);
   return {
     scenes: scenes.length,
     voiceCharacters: chars,
-    aiClips: v.visual_mode === 'ai_clips' ? scenes.length : 0,
+    aiClips: v.visual_mode !== 'product_images' ? scenes.length : 0,
+    aiImages,
     estimatedSeconds: scenes.reduce((n, s) => n + s.durationSec, 0),
   };
 }
@@ -360,14 +361,24 @@ router.post('/:id/generate', validate({ params: idParam }), async (req, res) => 
     r2.requireConfig(); // ElevenLabs returns raw audio that must be hosted for the renderer
   } else minimaxMedia.requireConfig();
   if (v.visual_mode === 'ai_clips') minimaxMedia.requireConfig();
+  // Scene images: scenes without an uploaded picture get one drawn by AI first
+  const missing = await missingSceneImages({ id: v.id, visual_mode: v.visual_mode, scenes });
   if (v.visual_mode === 'my_footage') {
-    if (!(await listMedia(v.id)).length) throw badRequest('ยังไม่ได้อัปโหลดฟุตเทจ — เพิ่มคลิปหรือรูปที่ถ่ายเองก่อน');
-    if (!env.PUBLIC_API_URL) throw badRequest('ต้องตั้ง PUBLIC_API_URL (โดเมน HTTPS ของ backend) ก่อน เพื่อให้ระบบตัดต่อดึงฟุตเทจได้');
+    minimaxMedia.requireConfig(); // scene pictures become AI clips (Hailuo image-to-video)
+    if (!env.PUBLIC_API_URL) throw badRequest('ต้องตั้ง PUBLIC_API_URL (โดเมน HTTPS ของ backend) ก่อน เพื่อให้ระบบตัดต่อดึงภาพฉากได้');
   }
-  await db.query("UPDATE video_projects SET status = 'voicing', stage_detail = 'เข้าคิวแล้ว', error = NULL, output_url = NULL WHERE id = :id", { id: v.id });
-  await enqueue('video.voice', { projectId: v.id }, { orgId: req.user.orgId, maxAttempts: 1 });
-  audit(req, 'video.generate', 'video_project', v.id, estimate(v, scenes));
-  res.status(202).json({ data: { status: 'voicing', estimate: estimate(v, scenes) } });
+  const [status, job, detail] = missing.length
+    ? ['generating_clips', 'video.images', `เข้าคิวสร้างภาพฉาก ${missing.length} ภาพ`]
+    : ['voicing', 'video.voice', 'เข้าคิวแล้ว'];
+  await db.query('UPDATE video_projects SET status = :status, stage_detail = :detail, error = NULL, output_url = NULL WHERE id = :id', {
+    id: v.id,
+    status,
+    detail,
+  });
+  await enqueue(job, { projectId: v.id }, { orgId: req.user.orgId, maxAttempts: 1 });
+  const est = estimate(v, scenes, missing.length);
+  audit(req, 'video.generate', 'video_project', v.id, est);
+  res.status(202).json({ data: { status, estimate: est } });
 });
 
 /**

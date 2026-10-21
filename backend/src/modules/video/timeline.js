@@ -60,6 +60,7 @@ const TITLE_FONT_URL = 'https://github.com/google/fonts/raw/main/ofl/kanit/Kanit
 const MAX_SHOT_SEC = 1.8;
 const INTRO_SEC = 0.5;
 const IMAGE_EFFECTS = ['zoomIn', 'slideLeft', 'zoomOut', 'slideRight', 'zoomInSlow', 'slideUp'];
+const SLOW_EFFECTS = ['zoomInSlow', 'zoomOutSlow'];
 /** Words worth a different colour in captions: prices, numbers, offers. */
 const EMPHASIS = /[0-9๐-๙%฿]|ฟรี|ลด|ถูก|ส่วนลด|โปร|ด่วน|ที่สุด|ใหม่|ห้ามพลาด/;
 
@@ -114,7 +115,7 @@ function captionCues(scenes, timings, offset = 0) {
  * photos) with different trims / pan-zoom effects.
  * @param {{type:'video'|'image', url:string, durationSec?:number}[]} pool
  */
-function planShots({ timings, visuals = [], pool = [], offset = 0 }) {
+function planShots({ timings, visuals = [], pool = [], offset = 0, single = false }) {
   const shots = [];
   const cursor = new Map(); // url → next trim position, so repeated clips show new moments
   let n = 0;
@@ -122,7 +123,8 @@ function planShots({ timings, visuals = [], pool = [], offset = 0 }) {
     const own = visuals[i] ?? null;
     const sources = own ? [own, ...pool.filter((p) => p.url !== own.url)] : pool;
     if (!sources.length) return;
-    const count = Math.max(1, Math.ceil(tm.length / MAX_SHOT_SEC - 0.05));
+    // single: the scene's own picture holds for the whole scene (scene images played in order)
+    const count = single ? 1 : Math.max(1, Math.ceil(tm.length / MAX_SHOT_SEC - 0.05));
     const len = tm.length / count;
     for (let j = 0; j < count; j += 1) {
       const src = j === 0 ? sources[0] : sources[(n + j) % sources.length];
@@ -135,7 +137,7 @@ function planShots({ timings, visuals = [], pool = [], offset = 0 }) {
         cursor.set(src.url, trim + length);
         shots.push({ start, length, fit: 'crop', asset: { type: 'video', src: src.url, volume: 0, ...(trim ? { trim: Math.round(trim * 100) / 100 } : {}) } });
       } else {
-        const effect = shots.length === 0 ? 'zoomInFast' : IMAGE_EFFECTS[shots.length % IMAGE_EFFECTS.length];
+        const effect = single ? SLOW_EFFECTS[i % SLOW_EFFECTS.length] : shots.length === 0 ? 'zoomInFast' : IMAGE_EFFECTS[shots.length % IMAGE_EFFECTS.length];
         shots.push({ start, length, fit: 'crop', asset: { type: 'image', src: src.url }, effect });
       }
     }
@@ -157,7 +159,7 @@ const CAPTION_CSS = {
  * Shotstack edit: 1080x1920 mp4 — optional cover intro frame, fast-cut visuals, voice-over per scene,
  * word-by-word captions inside the TikTok safe zone, scene headline on top and an "AI-generated" label.
  * @param {{scenes:object[], timings:object[], voiceUrls:string[], visuals:({type:'video'|'image', url:string, durationSec?:number}|null)[],
- *   pool?:object[], captionStyle?:'pop'|'clean'|'none', introUrl?:string|null, fontUrl?:string, musicUrl?:string}} p
+ *   pool?:object[], single?:boolean, captionStyle?:'pop'|'clean'|'none', introUrl?:string|null, fontUrl?:string, musicUrl?:string}} p
  */
 function buildShotstackEdit({
   scenes,
@@ -165,6 +167,7 @@ function buildShotstackEdit({
   voiceUrls,
   visuals,
   pool = [],
+  single = false,
   captionStyle = 'pop',
   introUrl = null,
   fontUrl = DEFAULT_FONT_URL,
@@ -216,7 +219,7 @@ function buildShotstackEdit({
     offset: { x: 0.03, y: -0.03 },
     opacity: 0.85,
   };
-  const visualClips = planShots({ timings, visuals, pool, offset });
+  const visualClips = planShots({ timings, visuals, pool, offset, single });
   if (introUrl) visualClips.unshift({ start: 0, length: INTRO_SEC, fit: 'crop', asset: { type: 'image', src: introUrl } });
   const voice = voiceUrls.map((url, i) => ({ asset: { type: 'audio', src: url, volume: 1 }, start: timings[i].start + offset, length: timings[i].length }));
 

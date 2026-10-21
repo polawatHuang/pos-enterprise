@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('node:fs');
 const db = require('../../db/pool');
 const logger = require('../../core/logger');
 const { enqueue } = require('../../jobs/queue');
@@ -12,7 +13,7 @@ const media = require('./media');
 
 /**
  * Generation runs as a chain of queued jobs so each step fits the cron tick's time budget:
- *   video.voice → (video.clips_start → video.clips_poll …) → video.compose → video.compose_poll …
+ *   (video.images …) → video.voice → (video.clips_start → video.clips_poll …) → video.compose → video.compose_poll …
  * Provider URLs expire, so finished files are copied to R2 when it is configured.
  */
 const POLL_MS = 60_000;
@@ -68,6 +69,76 @@ const step = (fn) => async (payload) => {
   }
 };
 
+/* ------------------------------------------------------------ scene images */
+
+const mediaRows = (projectId) => db.query('SELECT * FROM video_media WHERE video_project_id = :id ORDER BY sort_order, id', { id: projectId });
+
+/** Scenes (my_footage) that have no picture yet; the images step creates one for each. */
+async function missingSceneImages(p) {
+  if (p.visual_mode !== 'my_footage') return [];
+  const rows = await mediaRows(p.id);
+  return media
+    .sceneMediaIndex(p.scenes, rows.length)
+    .map((k, i) => (k === null ? i : null))
+    .filter((i) => i !== null);
+}
+
+/** The product's own photo, when it can be downloaded as a supported image. */
+async function productPhoto(url) {
+  if (!/^https?:\/\//.test(url ?? '')) return null;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    const mime = String(res.headers.get('content-type') || '')
+      .split(';')[0]
+      .trim();
+    if (!res.ok || media.TYPES[mime]?.kind !== 'image') return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return buffer.length && buffer.length <= media.MAX_IMAGE_BYTES ? { buffer, mime } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One missing scene picture per run (each image takes a while), appended to the project's files so
+ * it plays at that scene's position and the user can see or replace it. Product scenes use the real
+ * product photo; the rest are drawn by MiniMax image-01 from the scene's visual prompt.
+ */
+const images = step(async ({ projectId }) => {
+  const p = await loadProject(projectId);
+  if (!p || p.status !== 'generating_clips' || p.visual_mode !== 'my_footage') return { status: 'skipped' };
+  const missing = await missingSceneImages(p);
+  if (!missing.length) {
+    await setStage(p.id, 'voicing', 'เข้าคิวสร้างเสียงพากย์');
+    await enqueue('video.voice', { projectId: p.id }, { orgId: p.org_id, maxAttempts: 1 });
+    return { status: 'ok' };
+  }
+  const i = missing[0];
+  const scene = p.scenes[i];
+  await db.query('UPDATE video_projects SET stage_detail = :d WHERE id = :id', {
+    id: p.id,
+    d: `กำลังสร้างภาพฉาก ${i + 1} (เหลือ ${missing.length} ภาพ)`,
+  });
+  let file = scene.showProduct ? await productPhoto(p.product_image) : null;
+  let label = `รูปสินค้า · ฉาก ${i + 1}`;
+  if (!file) {
+    const img = await minimaxMedia.generateImage({
+      prompt: `${scene.visual || scene.caption || scene.voiceover}. Vertical 9:16 realistic smartphone photo for a product review video. No text, letters, logos or watermarks.`,
+      aspectRatio: '9:16',
+    });
+    file = { buffer: img.buffer, mime: media.TYPES[img.mime] ? img.mime : 'image/jpeg' };
+    label = `AI · ฉาก ${i + 1}`;
+  }
+  const key = media.saveFile(file.buffer, file.mime);
+  await db.query(
+    `INSERT INTO video_media (video_project_id, kind, mime, storage_key, size_bytes, label, sort_order)
+     SELECT :id, 'image', :mime, :key, :size, :label, COALESCE(MAX(sort_order), 0) + 1 FROM video_media WHERE video_project_id = :id`,
+    { id: p.id, mime: file.mime, key, size: file.buffer.length, label },
+  );
+  await enqueue('video.images', { projectId: p.id }, { orgId: p.org_id, maxAttempts: 1 });
+  return { status: 'ok', scene: i };
+});
+
 /* ------------------------------------------------------------------- voice */
 
 const voice = step(async ({ projectId }) => {
@@ -93,7 +164,7 @@ const voice = step(async ({ projectId }) => {
       { id: p.id, i, provider: p.voice_provider ?? 'minimax', ms: durationMs, url },
     );
   }
-  if (p.visual_mode === 'ai_clips') {
+  if (p.visual_mode === 'ai_clips' || p.visual_mode === 'my_footage') {
     await setStage(p.id, 'generating_clips', 'กำลังสั่งสร้างคลิป AI');
     await enqueue('video.clips_start', { projectId: p.id }, { orgId: p.org_id, maxAttempts: 1 });
   } else {
@@ -105,27 +176,68 @@ const voice = step(async ({ projectId }) => {
 
 /* ------------------------------------------------------------------- clips */
 
+/** Hailuo makes 6s or 10s clips: pick 10s when the scene's voice-over would outlast a 6s clip. */
+const clipSeconds = (voiceMs) => (voiceMs && voiceMs / 1000 + 0.3 > 6 ? 10 : 6);
+
+/** A scene picture as a data URL, so MiniMax gets it without fetching from this server. */
+function imageDataUrl(row) {
+  const file = row && row.kind === 'image' ? media.filePath(row.storage_key) : null;
+  if (!file || !fs.existsSync(file)) return null;
+  return `data:${row.mime};base64,${fs.readFileSync(file).toString('base64')}`;
+}
+
+/**
+ * AI clips per scene. ai_clips: text-to-video (product photo as first frame on product scenes).
+ * my_footage: image-to-video, each scene's picture animated as the first frame; scenes whose file is
+ * already a video keep it. A clip is reused only while its scene still has the same picture.
+ */
 const clipsStart = step(async ({ projectId }) => {
   const p = await loadProject(projectId);
   if (!p || p.status !== 'generating_clips') return { status: 'skipped' };
+  const fromImages = p.visual_mode === 'my_footage';
+  const rows = fromImages ? await mediaRows(p.id) : [];
+  const pictureOf = fromImages ? media.sceneMediaIndex(p.scenes, rows.length).map((k) => (k === null ? null : rows[k])) : [];
+  const voiceMs = new Map((await assets(p.id, 'voice')).map((a) => [a.scene_index, a.duration_ms]));
   const existing = await assets(p.id, 'broll');
-  const have = new Set(existing.filter((a) => a.status !== 'failed').map((a) => a.scene_index));
-  await db.query("DELETE FROM video_assets WHERE video_project_id = :id AND kind = 'broll' AND status = 'failed'", { id: p.id });
+  const keep = new Set();
+  for (const a of existing) {
+    const source = parseJson(a.meta)?.source ?? null;
+    const current = fromImages ? (pictureOf[a.scene_index]?.storage_key ?? null) : null;
+    if (a.status !== 'failed' && a.scene_index < p.scenes.length && source === current) keep.add(a.scene_index);
+    else await db.query('DELETE FROM video_assets WHERE id = :id', { id: a.id });
+  }
+  let started = 0;
   for (const [i, scene] of p.scenes.entries()) {
-    if (have.has(i)) continue; // reuse clips from an earlier attempt of the same script
+    if (keep.has(i)) continue; // reuse clips from an earlier attempt of the same scene
+    const picture = pictureOf[i] ?? null;
+    if (fromImages && picture?.kind !== 'image') continue; // the user's own video plays as is
+    const imageUrl = fromImages ? imageDataUrl(picture) : scene.showProduct ? p.product_image : null;
+    if (fromImages && !imageUrl) continue;
     const { taskId } = await minimaxMedia.createVideo({
-      prompt: `${scene.visual}. Vertical 9:16 framing, smartphone ad style, no text.`,
-      imageUrl: scene.showProduct ? p.product_image : null,
+      prompt: fromImages
+        ? `${scene.visual || scene.caption}. Animate this exact scene with natural, subtle motion; keep the same person, product and framing. No text.`
+        : `${scene.visual}. Vertical 9:16 framing, smartphone ad style, no text.`,
+      imageUrl,
+      duration: clipSeconds(voiceMs.get(i)),
     });
     await db.query(
-      `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status)
-       VALUES (:id, 'broll', :i, 'minimax', :taskId, 'processing')`,
-      { id: p.id, i, taskId },
+      `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status, meta)
+       VALUES (:id, 'broll', :i, 'minimax', :taskId, 'processing', :meta)`,
+      { id: p.id, i, taskId, meta: JSON.stringify({ source: picture?.storage_key ?? null }) },
     );
+    started += 1;
   }
-  await db.query('UPDATE video_projects SET stage_detail = :d WHERE id = :id', { id: p.id, d: `กำลังสร้างคลิป AI ${p.scenes.length} ฉาก (ใช้เวลาหลายนาที)` });
+  if (!started && !(await assets(p.id, 'broll')).some((a) => a.status === 'processing')) {
+    await setStage(p.id, 'compositing', 'กำลังเตรียมประกอบคลิป');
+    await enqueue('video.compose', { projectId: p.id }, { orgId: p.org_id, maxAttempts: 1 });
+    return { status: 'ok', started };
+  }
+  await db.query('UPDATE video_projects SET stage_detail = :d WHERE id = :id', {
+    id: p.id,
+    d: `กำลังสร้างคลิป AI ${started || p.scenes.length} ฉาก (ใช้เวลาหลายนาที)`,
+  });
   await enqueue('video.clips_poll', { projectId: p.id, polls: 1 }, { orgId: p.org_id, runAt: new Date(Date.now() + POLL_MS), maxAttempts: 3 });
-  return { status: 'ok' };
+  return { status: 'ok', started };
 });
 
 const clipsPoll = step(async ({ projectId, polls = 1 }) => {
@@ -177,7 +289,7 @@ const compose = step(async ({ projectId }) => {
   const duration = Math.round(timings.at(-1).start + timings.at(-1).length);
   await db.query('UPDATE video_projects SET subtitle_srt = :srt, duration_sec = :duration WHERE id = :id', { id: p.id, srt, duration });
 
-  const clips = byScene(p.visual_mode === 'ai_clips' ? await assets(p.id, 'broll') : []);
+  const clips = byScene(p.visual_mode !== 'product_images' ? await assets(p.id, 'broll') : []);
   // Own footage / extra photos, served to the renderer through signed URLs
   const own = (await db.query('SELECT * FROM video_media WHERE video_project_id = :id ORDER BY sort_order, id', { id: p.id }))
     .map((m) => ({ type: m.kind, url: media.publicUrl('m', m.id), durationSec: m.duration_ms ? m.duration_ms / 1000 : null }))
@@ -185,9 +297,15 @@ const compose = step(async ({ projectId }) => {
   const productImage = p.product_image ? { type: 'image', url: p.product_image } : null;
   let visuals;
   let pool;
-  if (p.visual_mode === 'my_footage' && own.length) {
-    visuals = p.scenes.map((sc) => (sc.media ? (own[sc.media - 1] ?? null) : null));
-    pool = [...own, ...(productImage ? [productImage] : [])];
+  const single = p.visual_mode === 'my_footage';
+  if (single) {
+    // Scenes in order: the AI clip made from the scene's picture, else the picture / own video itself
+    visuals = media
+      .sceneMediaIndex(p.scenes, own.length)
+      .map((k, i) =>
+        clips[i] ? { type: 'video', url: clips[i].external_url, durationSec: clipSeconds(voiceRows[i]?.duration_ms) } : k === null ? productImage : own[k],
+      );
+    pool = [];
   } else {
     visuals = p.scenes.map((_, i) => (clips[i] ? { type: 'video', url: clips[i].external_url } : productImage));
     pool = own.filter((m) => m.type === 'image');
@@ -212,6 +330,7 @@ const compose = step(async ({ projectId }) => {
     voiceUrls: voiceRows.map((v) => v.external_url),
     visuals,
     pool,
+    single,
     captionStyle: p.caption_style || 'pop',
     introUrl,
     fontUrl: process.env.SHOTSTACK_FONT_URL || undefined,
@@ -251,4 +370,4 @@ const composePoll = step(async ({ projectId, polls = 1 }) => {
   return { status: 'ready', url: stored.url };
 });
 
-module.exports = { voice, clipsStart, clipsPoll, compose, composePoll, VOICE_PROVIDERS, loadProject };
+module.exports = { images, missingSceneImages, voice, clipsStart, clipsPoll, compose, composePoll, VOICE_PROVIDERS, loadProject };

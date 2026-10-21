@@ -45,6 +45,7 @@ handlers['scrape.ai'] = async ({ runId, step }) => require('../../modules/scrapi
 /** AI video pipeline steps (each step queues the next; see modules/video/pipeline.js). */
 const video = () => require('../../modules/video/pipeline');
 handlers['video.voice'] = (p) => video().voice(p);
+handlers['video.images'] = (p) => video().images(p);
 handlers['video.clips_start'] = (p) => video().clipsStart(p);
 handlers['video.clips_poll'] = (p) => video().clipsPoll(p);
 handlers['video.compose'] = (p) => video().compose(p);
