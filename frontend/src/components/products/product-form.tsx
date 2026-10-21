@@ -15,6 +15,7 @@ import { formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, NativeSelect, Textarea } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
+import { ScanButton } from "@/components/ui/barcode-scanner";
 
 const num = (msg: string) => z.string().trim().min(1, msg).refine((v) => !Number.isNaN(Number(v)) && Number(v) >= 0, "ต้องเป็นตัวเลขไม่ติดลบ");
 
@@ -168,7 +169,10 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
             <Input aria-invalid={!!errors.sku} {...register("sku")} />
           </Field>
           <Field label="บาร์โค้ด" error={errors.barcode?.message}>
-            <Input inputMode="numeric" aria-invalid={!!errors.barcode} {...register("barcode")} />
+            <div className="flex gap-2">
+              <Input inputMode="numeric" className="h-11" aria-invalid={!!errors.barcode} {...register("barcode")} />
+              <ScanButton onDetected={(code) => setValue("barcode", code, { shouldDirty: true, shouldValidate: true })} />
+            </div>
           </Field>
           <Field label="หมวดหมู่">
             <div className="relative flex gap-2">

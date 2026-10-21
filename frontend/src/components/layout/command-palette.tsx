@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { ScanButton } from "@/components/ui/barcode-scanner";
 import { allNavItems } from "@/config/nav";
 import { useAuth } from "@/components/auth/auth-provider";
 
@@ -228,6 +229,15 @@ function Palette({ onClose }: { onClose: () => void }) {
             className="h-14 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
             aria-label="ค้นหาทั้งระบบ"
             data-testid="search-input"
+          />
+          <ScanButton
+            variant="ghost"
+            title="สแกนบาร์โค้ดเพื่อค้นหา"
+            className="-mr-2 text-muted-foreground"
+            onDetected={(code) => {
+              setQ(code);
+              setActive(0);
+            }}
           />
           <kbd className="hidden rounded border border-border bg-muted px-1.5 font-mono text-[10px] text-muted-foreground sm:block">Esc</kbd>
         </div>

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Camera, CameraOff, CheckCircle2, Loader2, ScanBarcode, Send } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, ScanBarcode, Send } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { StockCountDetail, StockCountItem } from "@/lib/types";
@@ -11,6 +11,7 @@ import { cn, formatMoney, formatNumber } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, Skeleton } from "@/components/ui/primitives";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
+import { ScanButton } from "@/components/ui/barcode-scanner";
 import { beep } from "@/components/pos/sound";
 import { COUNT_STATUS } from "./counts-view";
 
@@ -19,16 +20,6 @@ interface ScanResult {
   added: number;
   unitName: string | null;
   progress: { total: number; counted: number };
-}
-
-/** Minimal typing for the Shape Detection API (Chrome on Android). */
-interface Detector {
-  detect(source: HTMLVideoElement): Promise<{ rawValue: string }[]>;
-}
-declare global {
-  interface Window {
-    BarcodeDetector?: new (opts?: { formats?: string[] }) => Detector;
-  }
 }
 
 export function CountDetail({ id }: { id: number }) {
@@ -41,14 +32,14 @@ export function CountDetail({ id }: { id: number }) {
   const [pulse, setPulse] = useState(0);
   const [tab, setTab] = useState<"todo" | "done">("todo");
   const [editing, setEditing] = useState<StockCountItem | null>(null);
-  const [camera, setCamera] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const c = count.data;
   const counting = c?.status === "counting";
 
-  const scan = async (raw: string, qty?: number) => {
+  /** Returns the product name (or false) so the camera scanner can label its running list. */
+  const scan = async (raw: string, qty?: number, refocus = true): Promise<string | false | undefined> => {
     const value = raw.trim();
     if (!value) return;
     try {
@@ -58,12 +49,15 @@ export function CountDetail({ id }: { id: number }) {
       beep("ok");
       if ("vibrate" in navigator) navigator.vibrate(40);
       void qc.invalidateQueries({ queryKey: key });
+      return `${r.item.name} +${formatNumber(r.added)}`;
     } catch (err) {
       beep("error");
       toast.error(err instanceof Error ? err.message : "สแกนไม่สำเร็จ");
+      return false;
     } finally {
       setCode("");
-      inputRef.current?.focus();
+      // Not while the camera is open: focusing the field would pop up the phone keyboard behind it
+      if (refocus) inputRef.current?.focus();
     }
   };
 
@@ -145,7 +139,6 @@ export function CountDetail({ id }: { id: number }) {
 
       {counting && (
         <Card className="mb-4 overflow-hidden">
-          {camera && <CameraScanner onCode={(v) => void scan(v)} onClose={() => setCamera(false)} />}
           <form
             className="flex gap-2 p-3"
             onSubmit={(e) => {
@@ -171,9 +164,7 @@ export function CountDetail({ id }: { id: number }) {
             <button type="submit" className="sr-only">
               นับ
             </button>
-            <Button type="button" variant={camera ? "secondary" : "outline"} className="h-12 w-12" onClick={() => setCamera((v) => !v)} aria-label="สแกนด้วยกล้อง">
-              {camera ? <CameraOff /> : <Camera />}
-            </Button>
+            <ScanButton mode="continuous" beep={false} title="สแกนนับด้วยกล้อง" className="size-12" onDetected={(v) => scan(v, undefined, false)} />
           </form>
           {last && (
             <div key={pulse} className="mx-3 mb-3 flex animate-[pos-flash_0.6s_ease-out] items-center gap-3 rounded-xl border border-primary/30 p-3" data-testid="last-scan">
@@ -360,65 +351,6 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "da
     <div className="rounded-lg bg-muted px-2 py-2">
       <p className={cn("font-semibold tabular-nums", tone === "danger" && "text-danger", tone === "success" && "text-success")}>{value}</p>
       <p className="text-[11px] text-muted-foreground">{label}</p>
-    </div>
-  );
-}
-
-/** Rear camera + BarcodeDetector (Chrome Android, many tablets). Same code twice within 1.5s counts once. */
-function CameraScanner({ onCode, onClose }: { onCode: (code: string) => void; onClose: () => void }) {
-  const video = useRef<HTMLVideoElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let stream: MediaStream | null = null;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    let last = { code: "", at: 0 };
-    const Ctor = window.BarcodeDetector;
-    if (!Ctor) {
-      setTimeout(() => setError("อุปกรณ์นี้ยังไม่รองรับการสแกนด้วยกล้อง ใช้เครื่องสแกนบาร์โค้ดหรือพิมพ์รหัสแทน"), 0);
-      return;
-    }
-    const detector = new Ctor({ formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"] });
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: "environment" } })
-      .then((s) => {
-        stream = s;
-        if (video.current) {
-          video.current.srcObject = s;
-          void video.current.play();
-        }
-        timer = setInterval(async () => {
-          if (!video.current || video.current.readyState < 2) return;
-          const found = await detector.detect(video.current).catch(() => []);
-          const code = found[0]?.rawValue;
-          const now = performance.now();
-          if (code && !(code === last.code && now - last.at < 1500)) {
-            last = { code, at: now };
-            onCode(code);
-          }
-        }, 250);
-      })
-      .catch(() => setError("เปิดกล้องไม่ได้ — อนุญาตการใช้กล้องในเบราว์เซอร์"));
-    return () => {
-      if (timer) clearInterval(timer);
-      stream?.getTracks().forEach((t) => t.stop());
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- start once; onCode is a fresh closure each render
-  }, []);
-  return (
-    <div className="relative bg-black">
-      {error ? (
-        <p className="p-4 text-sm text-white">
-          {error}{" "}
-          <button className="underline" onClick={onClose}>
-            ปิด
-          </button>
-        </p>
-      ) : (
-        <>
-          <video ref={video} className="aspect-video w-full object-cover" muted playsInline />
-          <div className="pointer-events-none absolute inset-x-10 top-1/2 h-0.5 -translate-y-1/2 bg-danger/80 shadow-[0_0_12px_2px] shadow-danger" />
-        </>
-      )}
     </div>
   );
 }
