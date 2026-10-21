@@ -86,7 +86,7 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
         await apiFetch(`/videos/${projectId}/media`, {
           method: "POST",
           body: form,
-          query: { label: file.name.replace(/\.[^.]+$/, "").slice(0, 100), durationMs: durationMs ?? undefined },
+          query: { label: file.name.replace(/\.[^.]+$/, "").slice(0, 100), durationMs: durationMs ?? undefined, size: file.size },
         });
       } catch (err) {
         // status 0: the request never got an answer from the app (connection dropped or a firewall refused the file)

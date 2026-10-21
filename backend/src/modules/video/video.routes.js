@@ -404,6 +404,7 @@ router.post(
     params: idParam,
     query: z.object({
       label: z.string().trim().max(100).optional(),
+      size: z.coerce.number().int().min(0).optional(),
       durationMs: z.coerce
         .number()
         .int()

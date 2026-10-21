@@ -2,6 +2,7 @@
 
 const Busboy = require('busboy');
 const { AppError, badRequest } = require('../core/errors');
+const logger = require('../core/logger');
 
 /**
  * Express middleware reading ONE file field of a multipart/form-data upload into memory:
@@ -20,6 +21,17 @@ function singleFile(field, maxBytes) {
     } catch {
       return next(badRequest('ข้อมูลอัปโหลดไม่ถูกต้อง'));
     }
+    // Bytes that actually arrived vs what the client sent: a proxy or firewall that cuts the body
+    // short shows up as received < expected
+    // ?size= is the file size the browser sent; Content-Length may already be the proxy's shortened one
+    const fileSize = Number(req.query?.size) || null;
+    const expected = Number(req.headers['content-length']) || null;
+    let received = 0;
+    req.on('data', (c) => {
+      received += c.length;
+    });
+    const sizes = () =>
+      `ได้รับ ${received.toLocaleString('en-US')} ไบต์${fileSize ? ` จากไฟล์ ${fileSize.toLocaleString('en-US')} ไบต์` : expected ? ` จาก ${expected.toLocaleString('en-US')}` : ''}`;
     let done = false;
     const finish = (err) => {
       if (done) return;
@@ -37,7 +49,18 @@ function singleFile(field, maxBytes) {
         if (!stream.truncated) req.upload = { buffer: Buffer.concat(chunks), mime: String(info.mimeType || '').toLowerCase(), filename: info.filename ?? null };
       });
     });
-    bb.on('error', () => finish(badRequest('อัปโหลดไม่สำเร็จ (ข้อมูลไม่ครบ)')));
+    bb.on('error', (err) => {
+      const cut = (fileSize && received < fileSize) || (expected && received < expected);
+      logger.warn({ err: err.message, received, expected, fileSize, path: req.path }, 'multipart upload incomplete');
+      finish(
+        badRequest(
+          cut
+            ? `อัปโหลดไม่สำเร็จ: ไฟล์มาไม่ครบ (${sizes()}) — เซิร์ฟเวอร์หรือไฟร์วอลล์ตัดข้อมูลระหว่างทาง`
+            : `อัปโหลดไม่สำเร็จ (ข้อมูลไม่ครบ, ${sizes()})`,
+          { received, expected, fileSize },
+        ),
+      );
+    });
     bb.on('close', () => finish());
     req.pipe(bb);
   };
