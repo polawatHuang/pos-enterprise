@@ -1256,6 +1256,8 @@ export interface VideoAsset {
 export interface VideoDetail extends VideoProject {
   media: VideoMedia[];
   assets: VideoAsset[];
+  /** While in progress: whether the background worker is picking jobs up */
+  queue: { due: number; waitingSec: number; stalled: boolean } | null;
 }
 
 interface Capability {

@@ -480,6 +480,15 @@ function Progress({ v, visualMode }: { v: VideoDetail; visualMode: VideoVisualMo
           })}
         </ol>
         {v.stageDetail && <p className="text-xs text-muted-foreground">{v.stageDetail}</p>}
+        {v.queue?.stalled && (
+          <div className="flex gap-1.5 rounded-lg bg-warning-soft px-2.5 py-2 text-xs text-warning">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              ตัวประมวลผลงานเบื้องหลังไม่ทำงาน — งานรอมา {Math.round(v.queue.waitingSec / 60)} นาทีแล้ว ยังไม่มีใครเริ่ม ให้ตรวจ Plesk → Scheduled Tasks ว่ามีงานเรียก{" "}
+              <code className="font-mono">/internal/cron/tick</code> ทุก 1 นาที และรันสำเร็จ (คู่มือ DEPLOY_PLESK ขั้นที่ 5)
+            </span>
+          </div>
+        )}
         {failed && v.error && (
           <p className="flex gap-1.5 rounded-lg bg-danger-soft px-2.5 py-2 text-xs text-danger">
             <AlertTriangle className="size-3.5 shrink-0" /> {v.error}

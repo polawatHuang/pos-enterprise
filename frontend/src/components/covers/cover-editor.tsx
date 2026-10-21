@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, Download, Loader2, RefreshCw, Save, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiBlob } from "@/lib/api";
+import { decodeImage } from "@/lib/image";
 import type { CoverDesign, CoverFont, CoverLayout, CoverProject, CoverUserDesign } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -23,10 +24,10 @@ const LAYOUT_LABEL: Record<CoverLayout, string> = {
   "center-burst": "หัวข้อกลางภาพ",
 };
 
-async function loadImage(url: string | null): Promise<ImageBitmap | null> {
+async function loadImage(url: string | null): Promise<CanvasImageSource | null> {
   if (!url) return null;
   try {
-    return await createImageBitmap(await apiBlob(url));
+    return (await decodeImage(await apiBlob(url))).source;
   } catch {
     return null;
   }
@@ -119,7 +120,7 @@ function Editor({ c }: { c: CoverProject }) {
   const [imageX, setImageX] = useState(u.imageX ?? pos0.x);
   const [imageY, setImageY] = useState(u.imageY ?? pos0.y);
   const [imageScale, setImageScale] = useState(u.imageScale ?? 0.7);
-  const [images, setImages] = useState<{ bg: ImageBitmap | null; product: ImageBitmap | null } | null>(null);
+  const [images, setImages] = useState<{ bg: CanvasImageSource | null; product: CanvasImageSource | null } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [newStyle, setNewStyle] = useState("");
   const hasProduct = c.uploadKind === "product" && Boolean(c.uploadUrl);

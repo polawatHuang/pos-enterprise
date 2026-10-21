@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
+import { base64Of, downscaleToDataUrl } from "@/lib/image";
 import type { ReceiptExtraction, TxnMeta, TxnType, VatMode } from "@/lib/types";
 import { cn, formatMoney, todayStr } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -295,12 +296,6 @@ export async function fileToPayload(file: File): Promise<{ mediaType: string; da
     return { mediaType: "application/pdf", data: btoa(bin) };
   }
   if (!file.type.startsWith("image/")) throw new Error("รองรับเฉพาะรูปภาพหรือ PDF");
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-  return { mediaType: "image/jpeg", data: dataUrl.slice(dataUrl.indexOf(",") + 1) };
+  const dataUrl = await downscaleToDataUrl(file, { maxSide: 2000, quality: 0.85 });
+  return { mediaType: "image/jpeg", data: base64Of(dataUrl) };
 }
