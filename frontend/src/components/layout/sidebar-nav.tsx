@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { navGroups } from "@/config/nav";
+import { hasPermission, navGroups } from "@/config/nav";
 import { cn } from "@/lib/utils";
 
 export function Brand({ collapsed = false }: { collapsed?: boolean }) {
@@ -38,7 +38,7 @@ export function SidebarNav({
     .filter(matches)
     .sort((a, b) => b.length - a.length)[0];
   const groups = navGroups
-    .map((g) => ({ ...g, items: g.items.filter((i) => permissions.includes(i.permission)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => hasPermission(permissions, i.permission)) }))
     .filter((g) => g.items.length > 0);
 
   return (

@@ -29,6 +29,7 @@ import {
   Hourglass,
   Users,
   ScrollText,
+  Contact,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,8 +37,8 @@ export interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
-  /** User needs this permission to see the item */
-  permission: string;
+  /** User needs this permission to see the item (an array = any one of them) */
+  permission: string | string[];
   /** Delivery phase of a module not yet built; 1 = available now (no badge) */
   phase: number;
 }
@@ -45,6 +46,16 @@ export interface NavItem {
 export interface NavGroup {
   label: string;
   items: NavItem[];
+}
+
+/** Customers (CRM) open for anyone who sells, chats with customers or does the books. */
+export const CUSTOMERS_READ = ["pos:sell", "inbox:read", "accounting:read"];
+/** Who may add or edit a customer. */
+export const CUSTOMERS_WRITE = ["pos:sell", "inbox:reply"];
+
+/** True when `permissions` satisfies a nav permission (a string, or any one of an array). */
+export function hasPermission(permissions: readonly string[], required: string | readonly string[]) {
+  return typeof required === "string" ? permissions.includes(required) : required.some((p) => permissions.includes(p));
 }
 
 export const navGroups: NavGroup[] = [
@@ -78,6 +89,7 @@ export const navGroups: NavGroup[] = [
   {
     label: "ลูกค้าและการตลาด",
     items: [
+      { href: "/customers", label: "ลูกค้า", icon: Contact, permission: CUSTOMERS_READ, phase: 1 },
       { href: "/inbox", label: "แชตลูกค้า + AI", icon: MessagesSquare, permission: "inbox:read", phase: 1 },
       { href: "/inbox/aftersales", label: "คืนสินค้า & ข้อเสนอ", icon: PackageX, permission: "inbox:read", phase: 1 },
       { href: "/inbox/settings", label: "ตั้งค่า AI แชต", icon: Bot, permission: "inbox:read", phase: 1 },
@@ -114,5 +126,5 @@ export function findNavItem(pathname: string) {
 
 /** First page the user may open — used as the post-login landing page. */
 export function homeFor(permissions: string[]) {
-  return allNavItems.find((i) => permissions.includes(i.permission))?.href ?? "/settings/account";
+  return allNavItems.find((i) => hasPermission(permissions, i.permission))?.href ?? "/settings/account";
 }
