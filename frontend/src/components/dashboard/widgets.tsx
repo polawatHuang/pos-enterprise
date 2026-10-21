@@ -142,10 +142,12 @@ export function ListSkeleton({ rows = 5 }: { rows?: number }) {
   );
 }
 
-export function ErrorNote({ onRetry }: { onRetry: () => void }) {
+/** A failed load, with the reason (e.g. a missing permission) and a retry, instead of looking like "no data". */
+export function ErrorNote({ onRetry, error }: { onRetry: () => void; error?: unknown }) {
+  const reason = error instanceof Error && error.message ? error.message : null;
   return (
     <div className="py-8 text-center text-sm text-muted-foreground">
-      โหลดข้อมูลไม่สำเร็จ{" "}
+      โหลดข้อมูลไม่สำเร็จ{reason ? ` — ${reason}` : ""}{" "}
       <button onClick={onRetry} className="font-medium text-primary underline underline-offset-2">
         ลองใหม่
       </button>

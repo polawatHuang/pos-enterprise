@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, Loader2, Printer, ScanBarcode, Send, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { PosSettings, PurchaseOrder } from "@/lib/types";
+import type { Organization, PurchaseOrder } from "@/lib/types";
 import { cn, formatMoney, formatNumber, formatThaiDate } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,8 @@ export function PoDetail({ id }: { id: number }) {
   const qc = useQueryClient();
   const key = ["purchasing", "orders", id];
   const po = useQuery({ queryKey: key, queryFn: () => api.get<PurchaseOrder>(`/purchasing/orders/${id}`) });
-  const org = useQuery({ queryKey: ["pos", "settings"], queryFn: () => api.get<PosSettings>("/pos/settings"), staleTime: 5 * 60_000 });
+  // /org/organization needs only a login (not pos:sell), so buyers' printouts keep the seller header
+  const org = useQuery({ queryKey: ["org", "organization"], queryFn: () => api.get<Organization>("/org/organization"), staleTime: 5 * 60_000 });
   const [recv, setRecv] = useState<Record<number, string>>({});
   const [exp, setExp] = useState<Record<number, string>>({});
   const [onlyDiff, setOnlyDiff] = useState(false);
@@ -134,9 +135,9 @@ export function PoDetail({ id }: { id: number }) {
       <Card className="p-6 print:border-0 print:p-0 print:shadow-none" id="po-paper">
         <div className="flex flex-wrap justify-between gap-4">
           <div>
-            <p className="text-lg font-bold">{org.data?.org.legalName || org.data?.org.name}</p>
-            {org.data?.org.address && <p className="text-sm text-muted-foreground">{org.data.org.address}</p>}
-            {org.data?.org.taxId && <p className="text-sm text-muted-foreground">เลขผู้เสียภาษี {org.data.org.taxId}</p>}
+            <p className="text-lg font-bold">{org.data?.legalName || org.data?.name}</p>
+            {org.data?.address && <p className="text-sm text-muted-foreground">{org.data.address}</p>}
+            {org.data?.taxId && <p className="text-sm text-muted-foreground">เลขผู้เสียภาษี {org.data.taxId}</p>}
           </div>
           <div className="text-right">
             <p className="text-xl font-bold">ใบสั่งซื้อ</p>

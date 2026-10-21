@@ -39,7 +39,13 @@ function status() {
       envDefault: Boolean(process.env[e.name]),
     })),
     configured: a.isConfigured(),
+    testable: TESTABLE.has(a.meta.id),
+    // Adapters whose API calls are not built yet (marketplace partner APIs, HeyGen)
+    available: !a.meta.planned,
   }));
 }
 
-module.exports = { adapters, status, EDITABLE };
+/** Services the settings page can test with a live request (see integrations.routes TESTS). */
+const TESTABLE = new Set(['minimax', 'anthropic', 'minimax_media', 'shotstack', 'line', 'elevenlabs', 'meta', 'meta_social']);
+
+module.exports = { adapters, status, EDITABLE, TESTABLE };

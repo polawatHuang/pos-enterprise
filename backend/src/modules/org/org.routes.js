@@ -116,10 +116,12 @@ router.get('/roles', requirePermission('users:read'), async (req, res) => {
 
 router.get('/organization', async (req, res) => {
   const org = await db.one(
-    'SELECT id, name, legal_name AS legalName, tax_id AS taxId, currency, timezone FROM organizations WHERE id = :orgId',
+    // Any signed-in user: document headers (purchase orders, receipts) need the seller's details
+    `SELECT id, name, legal_name AS legalName, tax_id AS taxId, address, phone, vat_registered AS vatRegistered, currency, timezone
+       FROM organizations WHERE id = :orgId`,
     { orgId: req.user.orgId },
   );
-  res.json({ data: org });
+  res.json({ data: { ...org, vatRegistered: Boolean(org.vatRegistered) } });
 });
 
 /**

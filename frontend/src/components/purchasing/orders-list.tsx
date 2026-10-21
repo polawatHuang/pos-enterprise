@@ -6,11 +6,13 @@ import { api } from "@/lib/api";
 import type { PurchaseOrder } from "@/lib/types";
 import { formatMoney, formatThaiDate } from "@/lib/utils";
 import { Badge, Skeleton } from "@/components/ui/primitives";
+import { ErrorNote } from "@/components/dashboard/widgets";
 import { PO_STATUS } from "./labels";
 
 export function OrdersList() {
   const orders = useQuery({ queryKey: ["purchasing", "orders"], queryFn: () => api.get<PurchaseOrder[]>("/purchasing/orders") });
   if (orders.isPending) return <Skeleton className="m-4 h-48" />;
+  if (orders.isError) return <ErrorNote onRetry={() => orders.refetch()} error={orders.error} />;
   if (!orders.data?.length) return <p className="p-12 text-center text-sm text-muted-foreground">ยังไม่มีใบสั่งซื้อ — สร้างจากแท็บ &quot;สั่งของ&quot;</p>;
   return (
     <div className="overflow-x-auto">

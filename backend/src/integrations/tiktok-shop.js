@@ -6,12 +6,13 @@ const { notImplemented } = require('../core/errors');
 // Interface is fixed now so modules can be built against it; bodies land in phase 5.
 const planned = (method) => () => {
   adapter.requireConfig();
-  throw notImplemented(`TikTok Shop Partner API: ${method} จะเปิดใช้งานในเฟสที่ 5`);
+  throw notImplemented(`TikTok Shop Partner API: ${method} ยังไม่เปิดใช้งาน (รอสิทธิ์ Partner API ของแพลตฟอร์ม)`);
 };
 
 const adapter = defineAdapter(
   {
     id: 'tiktok_shop',
+    planned: true,
     name: 'TikTok Shop Partner API',
     category: 'commerce',
     usedBy: ['scraping','inbox','pos'],

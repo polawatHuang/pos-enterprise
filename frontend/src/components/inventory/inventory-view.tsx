@@ -55,9 +55,12 @@ export function InventoryView() {
               <Button variant="outline" onClick={() => setAction("adjust")}>
                 <ClipboardCheck /> ปรับยอด
               </Button>
-              <Button variant="outline" onClick={() => setAction("transfer")} disabled={whs.length < 2}>
-                <ArrowLeftRight /> โอนย้าย
-              </Button>
+              {/* Transfers are posted by the purchasing module (purchasing:write) */}
+              {can("purchasing:write") && (
+                <Button variant="outline" onClick={() => setAction("transfer")} disabled={whs.length < 2}>
+                  <ArrowLeftRight /> โอนย้าย
+                </Button>
+              )}
               <Button onClick={() => setAction("receive")}>
                 <PackagePlus /> รับสินค้าเข้า
               </Button>
@@ -358,7 +361,7 @@ function MovementsTable({ warehouseId }: { warehouseId: string }) {
             {movements.data?.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-12 text-center text-muted-foreground">
-                  ยังไม่มีความเคลื่อนไหว — ยอดขายเดโมจาก seed ไม่ได้สร้างประวัติสต๊อก
+                  ยังไม่มีความเคลื่อนไหวของสต๊อก — การขาย รับของ โอนย้าย และปรับสต๊อกจะแสดงที่นี่
                 </td>
               </tr>
             )}

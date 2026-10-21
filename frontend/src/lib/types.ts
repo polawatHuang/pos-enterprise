@@ -138,6 +138,10 @@ export interface IntegrationStatus {
   purpose: string;
   applyUrl: string;
   configured: boolean;
+  /** The settings page can check the keys with a live request */
+  testable?: boolean;
+  /** false = the platform API is not built yet (partner access pending) */
+  available?: boolean;
   env: IntegrationEnv[];
 }
 
@@ -1440,4 +1444,17 @@ export interface CoverProject {
   finalUrl: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** GET /org/organization — the seller's details for document headers */
+export interface Organization {
+  id: number;
+  name: string;
+  legalName: string | null;
+  taxId: string | null;
+  address: string | null;
+  phone: string | null;
+  vatRegistered: boolean;
+  currency: string;
+  timezone: string;
 }

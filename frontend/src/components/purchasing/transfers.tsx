@@ -11,6 +11,7 @@ import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Input, Skeleton } from "@/components/ui/primitives";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
+import { ErrorNote } from "@/components/dashboard/widgets";
 import { TRANSFER_STATUS } from "./labels";
 
 /** Branch transfers: shipped stock is "in transit" until the destination counts what arrived. */
@@ -18,6 +19,7 @@ export function TransfersList() {
   const transfers = useQuery({ queryKey: ["purchasing", "transfers"], queryFn: () => api.get<StockTransfer[]>("/purchasing/transfers") });
   const [open, setOpen] = useState<number | null>(null);
   if (transfers.isPending) return <Skeleton className="m-4 h-48" />;
+  if (transfers.isError) return <ErrorNote onRetry={() => transfers.refetch()} error={transfers.error} />;
   return (
     <>
       {!transfers.data?.length ? (

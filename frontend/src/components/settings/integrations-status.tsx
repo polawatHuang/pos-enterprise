@@ -52,11 +52,16 @@ export function IntegrationsStatus() {
                     <h2 className="font-semibold leading-tight">{it.name}</h2>
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       <Badge>{CATEGORY_LABEL[it.category] ?? it.category}</Badge>
-                      <Badge tone="primary">ใช้ในเฟส {it.phase}</Badge>
+                      {it.available === false && <Badge tone="warning">ยังไม่เปิดใช้งาน</Badge>}
                     </div>
                   </div>
                 </div>
                 <p className="mt-3 text-sm text-muted-foreground">{it.purpose}</p>
+                {it.available === false && (
+                  <p className="mt-2 rounded-lg bg-warning-soft px-2.5 py-2 text-xs text-warning">
+                    ระบบยังไม่ได้เชื่อม API นี้ (รอสิทธิ์ Partner API ของแพลตฟอร์ม) — ใส่คีย์ไว้ก่อนได้ แต่ยังไม่มีฟีเจอร์ที่ใช้งาน
+                  </p>
+                )}
                 <ul className="mt-3 space-y-1">
                   {it.env.map((e) => (
                     <li key={e.name} className="flex items-center gap-2 font-mono text-[11px]">
@@ -85,7 +90,6 @@ export function IntegrationsStatus() {
   );
 }
 
-const TESTABLE = new Set(["minimax", "anthropic"]);
 
 function sourceLabel(e: IntegrationEnv) {
   if (e.source === "db") return { text: "จากหน้าเว็บ", cls: "bg-primary-soft text-primary" };
@@ -122,8 +126,8 @@ function ConfigDialog({ integration, onClose }: { integration: IntegrationStatus
   const test = async () => {
     setBusy("test");
     try {
-      const r = await api.post<{ ms: number }>(`/integrations/${integration.id}/test`);
-      toast.success(`เชื่อมต่อ ${integration.name} สำเร็จ (${r.ms} ms)`);
+      const r = await api.post<{ ms: number; detail: string | null }>(`/integrations/${integration.id}/test`);
+      toast.success(`เชื่อมต่อ ${integration.name} สำเร็จ (${r.ms} ms)`, r.detail ? { description: r.detail } : undefined);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "ทดสอบไม่สำเร็จ");
     } finally {
@@ -191,7 +195,7 @@ function ConfigDialog({ integration, onClose }: { integration: IntegrationStatus
         })}
 
         <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
-          {TESTABLE.has(integration.id) && (
+          {integration.testable && (
             <Button type="button" variant="outline" onClick={test} disabled={busy !== null || dirty || !integration.configured} className="mr-auto">
               {busy === "test" ? <Loader2 className="size-4 animate-spin" /> : <PlugZap className="size-4" />} ทดสอบการเชื่อมต่อ
             </Button>
