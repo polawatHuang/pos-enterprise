@@ -19,12 +19,16 @@ const STATUS: Record<string, { label: string; tone: "success" | "neutral" | "dan
   refunded: { label: "คืนเงินแล้ว", tone: "danger" },
 };
 
-/** One sale from รายรับ-รายจ่าย: what the customer bought and how they paid. Render inside a <Dialog>. */
-export function SaleDetailDialog({ id }: { id: number }) {
+/**
+ * One sale from รายรับ-รายจ่าย: what the customer bought and how they paid. Render inside a <Dialog>.
+ * `path` loads the bill from another endpoint with the same shape (e.g. the customer page, for users without accounting access).
+ */
+export function SaleDetailDialog({ id, path }: { id: number; path?: string }) {
   const { tax } = useTaxSettings();
+  const url = path ?? `/accounting/transactions/sales/${id}`;
   const order = useQuery({
-    queryKey: ["accounting", "sale", id],
-    queryFn: () => api.get<PosOrder>(`/accounting/transactions/sales/${id}`),
+    queryKey: path ? ["sale", url] : ["accounting", "sale", id],
+    queryFn: () => api.get<PosOrder>(url),
   });
   const o = order.data;
 

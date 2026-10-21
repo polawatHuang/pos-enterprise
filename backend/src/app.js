@@ -98,6 +98,7 @@ function createApp() {
   app.use('/api/search', require('./modules/search/search.routes').router);
   app.use('/api/notifications', require('./modules/notifications/notifications.routes').router);
   app.use('/api/pos', require('./modules/pos/pos.routes').router);
+  app.use('/api/customers', require('./modules/customers/customers.routes').router);
   app.use('/api/accounting', require('./modules/accounting').router);
   app.use('/api/inbox', require('./modules/inbox/inbox.routes').router);
   app.use('/api/inbox', require('./modules/inbox/aftersales.routes').router);

@@ -16,10 +16,10 @@ export function PageHeader({ title, description, actions }: { title: string; des
   );
 }
 
-/** Renders children only when the user holds `permission`; otherwise a 403 state. */
-export function RequirePermission({ permission, children }: { permission: string; children: ReactNode }) {
+/** Renders children only when the user holds `permission` (an array = any one of them); otherwise a 403 state. */
+export function RequirePermission({ permission, children }: { permission: string | string[]; children: ReactNode }) {
   const { can } = useAuth();
-  if (can(permission)) return <>{children}</>;
+  if (typeof permission === "string" ? can(permission) : permission.some((p) => can(p))) return <>{children}</>;
   return (
     <div className="mx-auto mt-16 max-w-md text-center">
       <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-danger-soft text-danger">
@@ -27,7 +27,9 @@ export function RequirePermission({ permission, children }: { permission: string
       </div>
       <h1 className="mt-5 text-xl font-semibold">ไม่มีสิทธิ์เข้าถึงหน้านี้</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        บัญชีของคุณไม่มีสิทธิ์ <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{permission}</code> กรุณาติดต่อผู้ดูแลระบบ
+        บัญชีของคุณไม่มีสิทธิ์{" "}
+        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{typeof permission === "string" ? permission : permission.join(" / ")}</code>{" "}
+        กรุณาติดต่อผู้ดูแลระบบ
       </p>
     </div>
   );
