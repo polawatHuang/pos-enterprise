@@ -13,6 +13,7 @@ import { cn, formatDateTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Input, Label, Skeleton } from "@/components/ui/primitives";
 import { PageHeader } from "@/components/layout/page";
+import { isUnreadable, readFileNow, UNREADABLE_HELP } from "@/lib/files";
 
 export const STYLE_PRESETS = ["ป๊อปสดใส", "มินิมอล", "หรูหรา", "สตรีทแฟชั่น", "น่ารักพาสเทล", "ลดราคาแรง", "นีออนกลางคืน", "ธรรมชาติอบอุ่น"];
 const MAX_SIDE = 1600;
@@ -120,8 +121,14 @@ function CreateForm() {
     // HEIC (iPhone) is converted to JPEG when the browser can decode it (Safari)
     if (!/^image\/(png|jpeg|webp|heic|heif)$/.test(file.type)) return toast.error("รองรับรูป PNG, JPEG, WebP หรือ HEIC");
     if (file.size > 20 * 1024 * 1024) return toast.error("รูปใหญ่เกิน 20 MB");
+    let copy: File;
     try {
-      setImage(await fileToDataUrl(file));
+      copy = await readFileNow(file); // read right away: Safari may refuse a late read of a picked file
+    } catch (err) {
+      return toast.error(isUnreadable(err) ? UNREADABLE_HELP : "อ่านไฟล์ไม่สำเร็จ");
+    }
+    try {
+      setImage(await fileToDataUrl(copy));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "อ่านรูปไม่สำเร็จ");
     }

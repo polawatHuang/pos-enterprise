@@ -9,6 +9,7 @@ import type { VideoMedia } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@/components/ui/primitives";
+import { isUnreadable, readFilesNow, UNREADABLE_HELP } from "@/lib/files";
 
 const ACCEPT = "video/mp4,video/quicktime,video/webm,image/jpeg,image/png,image/webp";
 const MAX_FILES = 10;
@@ -116,8 +117,10 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
 
   const upload = async (files: FileList | null) => {
     if (!files?.length) return;
-    const list = Array.from(files).slice(0, MAX_FILES - media.length);
-    if (!list.length) return toast.error(`อัปโหลดได้สูงสุด ${MAX_FILES} ไฟล์`);
+    const picked = Array.from(files).slice(0, MAX_FILES - media.length);
+    if (!picked.length) return toast.error(`อัปโหลดได้สูงสุด ${MAX_FILES} ไฟล์`);
+    // Read the bytes now, before the input is disabled/re-rendered (Safari may refuse a late read)
+    const list = await readFilesNow(picked, (f, err) => toast.error(`${f.name}: ${isUnreadable(err) ? UNREADABLE_HELP : "อ่านไฟล์ไม่สำเร็จ"}`));
     for (const [i, file] of list.entries()) {
       if (!ACCEPT.split(",").includes(file.type)) {
         toast.error(`${file.name}: รองรับ MP4/MOV/WebM และ JPG/PNG/WebP`);
