@@ -6,6 +6,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const env = require('./config/env');
 const db = require('./db/pool');
+const runtime = require('./config/runtime');
 const { notFoundHandler, errorHandler } = require('./core/http');
 
 /** "https://*.vercel.app" -> /^https:\/\/[^.]+\.vercel\.app$/ */
@@ -46,6 +47,8 @@ function createApp() {
       maxAge: 600,
     }),
   );
+  // Integration keys saved from the web UI (loaded before the first request, refreshed when stale)
+  app.use(runtime.middleware);
   // Platform webhooks need the raw body for signature checks, so they go before the JSON parser.
   app.use('/webhooks', require('./modules/inbox/webhooks.routes').router);
 

@@ -134,7 +134,22 @@ export interface IntegrationStatus {
   purpose: string;
   applyUrl: string;
   configured: boolean;
-  env: { name: string; optional: boolean; set: boolean }[];
+  env: IntegrationEnv[];
+}
+
+export interface IntegrationEnv {
+  name: string;
+  optional: boolean;
+  /** Adapter's built-in value when nothing is set */
+  default: string | null;
+  set: boolean;
+  /** "db" = saved from the web UI (wins), "env" = server environment */
+  source: "db" | "env" | null;
+  secret: boolean;
+  /** Secrets: last 4 characters only */
+  hint: string | null;
+  /** A value exists in the server environment to fall back to */
+  envDefault: boolean;
 }
 
 /* ------------------------------------------------------------- Phase 2 */

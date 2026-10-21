@@ -1,5 +1,7 @@
 'use strict';
 
+const runtime = require('../config/runtime');
+
 // Registry of all third-party adapters (see docs/API_KEYS.md for how to obtain each key)
 const adapters = [
   require('./minimax'),
@@ -19,12 +21,25 @@ const adapters = [
   require('./apify'),
 ];
 
+/** Settings the web UI may change: every adapter's variables plus the AI provider switch. Nothing else (DB, JWT, cron secrets stay server-only). */
+const EDITABLE = new Set(['AI_PROVIDER', ...adapters.flatMap((a) => a.meta.env.map((e) => e.name))]);
+
+// Never includes a secret's value: secrets are reduced to their last 4 characters by runtime.hint().
 function status() {
   return adapters.map((a) => ({
     ...a.meta,
-    env: a.meta.env.map((e) => ({ name: e.name, optional: Boolean(e.optional), set: Boolean(process.env[e.name]) })),
+    env: a.meta.env.map((e) => ({
+      name: e.name,
+      optional: Boolean(e.optional),
+      default: e.default ?? null,
+      set: Boolean(runtime.get(e.name)),
+      source: runtime.source(e.name),
+      secret: runtime.isSecret(e.name),
+      hint: runtime.hint(e.name),
+      envDefault: Boolean(process.env[e.name]),
+    })),
     configured: a.isConfigured(),
   }));
 }
 
-module.exports = { adapters, status };
+module.exports = { adapters, status, EDITABLE };

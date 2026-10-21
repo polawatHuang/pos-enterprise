@@ -20,7 +20,6 @@ const router = express.Router();
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 const parseJson = (v) => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v);
 const appUrl = () => (env.APP_PUBLIC_URL || env.corsOrigins.find((o) => !o.includes('*')) || 'http://localhost:3000').replace(/\/+$/, '');
-const missing = (a) => a.meta.env.filter((e) => !e.optional && !process.env[e.name]).map((e) => e.name);
 
 /* ----------------------------------------------------------------- OAuth */
 
@@ -115,8 +114,8 @@ router.get('/accounts', requirePermission('social:read'), async (req, res) => {
       meta: parseJson(a.meta),
     })),
     meta: {
-      tiktok: { configured: tiktok.isConfigured(), missing: missing(tiktok) },
-      meta: { configured: metaSocial.isConfigured(), missing: missing(metaSocial) },
+      tiktok: { configured: tiktok.isConfigured(), missing: tiktok.missing() },
+      meta: { configured: metaSocial.isConfigured(), missing: metaSocial.missing() },
       encryption: Boolean(env.APP_ENCRYPTION_KEY),
       callbackUrls: { tiktok: `${appUrl()}/api/social/oauth/tiktok/callback`, meta: `${appUrl()}/api/social/oauth/meta/callback` },
     },
@@ -424,7 +423,7 @@ router.get('/affiliate-links', requirePermission('social:read'), async (req, res
       postCount: Number(l.post_count),
       createdAt: l.created_at,
     })),
-    meta: { shopeeConfigured: shopeeAffiliate.isConfigured(), missing: missing(shopeeAffiliate) },
+    meta: { shopeeConfigured: shopeeAffiliate.isConfigured(), missing: shopeeAffiliate.missing() },
   });
 });
 

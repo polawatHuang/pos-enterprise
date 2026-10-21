@@ -1,9 +1,10 @@
 'use strict';
 
 const { defineAdapter } = require('./define');
+const runtime = require('../config/runtime');
 const { AppError } = require('../core/errors');
 
-const version = () => process.env.META_GRAPH_VERSION || 'v23.0';
+const version = () => runtime.get('META_GRAPH_VERSION') || 'v23.0';
 const graph = () => `https://graph.facebook.com/${version()}`;
 const SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'business_management', 'instagram_basic', 'instagram_content_publish'];
 

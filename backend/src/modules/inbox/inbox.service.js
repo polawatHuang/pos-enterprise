@@ -6,6 +6,7 @@ const { conflict, badRequest } = require('../../core/errors');
 const { encryptJson, decryptJson } = require('../../utils/crypto');
 const line = require('../../integrations/line');
 const meta = require('../../integrations/meta');
+const runtime = require('../../config/runtime');
 
 /* ------------------------------------------------------------- credentials */
 
@@ -25,7 +26,7 @@ async function channelToken(channel) {
       logger.error({ err, channelId: channel.id }, 'cannot decrypt channel token (APP_ENCRYPTION_KEY changed?)');
     }
   }
-  if (channel.platform === 'line') return process.env.LINE_CHANNEL_ACCESS_TOKEN || null;
+  if (channel.platform === 'line') return runtime.get('LINE_CHANNEL_ACCESS_TOKEN') || null;
   if (channel.platform === 'facebook' || channel.platform === 'instagram') return process.env.META_PAGE_ACCESS_TOKEN || null;
   return null;
 }

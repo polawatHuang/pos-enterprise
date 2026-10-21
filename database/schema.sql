@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -137,6 +137,14 @@ CREATE TABLE refresh_tokens (
   UNIQUE KEY uq_rt_hash (token_hash),
   KEY idx_rt_family (family_id),
   CONSTRAINT fk_rt_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Integration keys saved from the web UI (system-wide, encrypted; wins over the environment)
+CREATE TABLE app_config (
+  name        VARCHAR(100) NOT NULL PRIMARY KEY COMMENT 'environment variable name, e.g. MINIMAX_API_KEY',
+  value_enc   TEXT NOT NULL COMMENT 'AES-256-GCM with APP_ENCRYPTION_KEY',
+  updated_by  BIGINT UNSIGNED NULL,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE audit_logs (
@@ -1288,6 +1296,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config');
 
 SET FOREIGN_KEY_CHECKS = 1;

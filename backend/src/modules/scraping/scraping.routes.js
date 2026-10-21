@@ -38,7 +38,7 @@ function mapSource(s) {
     runnable: Boolean(p?.runnable),
     notRunnableReason: p?.runnable ? null : (p?.reason ?? null),
     configured: p?.adapter ? p.adapter.isConfigured() : Boolean(p?.runnable),
-    missingEnv: p?.adapter && !p.adapter.isConfigured() ? p.adapter.meta.env.filter((e) => !e.optional && !process.env[e.name]).map((e) => e.name) : [],
+    missingEnv: p?.adapter && !p.adapter.isConfigured() ? p.adapter.missing() : [],
     itemCount: Number(s.item_count ?? 0),
   };
 }

@@ -1,6 +1,7 @@
 'use strict';
 
 const { AppError, badRequest } = require('../core/errors');
+const runtime = require('../config/runtime');
 const minimax = require('./minimax');
 const anthropic = require('./anthropic');
 
@@ -12,7 +13,7 @@ const anthropic = require('./anthropic');
 const PROVIDERS = { minimax, anthropic };
 
 function providerId() {
-  const id = (process.env.AI_PROVIDER || 'minimax').toLowerCase();
+  const id = (runtime.get('AI_PROVIDER') || 'minimax').toLowerCase();
   return PROVIDERS[id] ? id : 'minimax';
 }
 const active = () => PROVIDERS[providerId()];

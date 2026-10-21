@@ -2,9 +2,10 @@
 
 const crypto = require('node:crypto');
 const { defineAdapter } = require('./define');
+const runtime = require('../config/runtime');
 const { AppError } = require('../core/errors');
 
-const graph = () => `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v23.0'}`;
+const graph = () => `https://graph.facebook.com/${runtime.get('META_GRAPH_VERSION') || 'v23.0'}`;
 
 const adapter = defineAdapter(
   {

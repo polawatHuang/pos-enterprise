@@ -17,6 +17,7 @@ const { generateScript, productFacts, normalizeScene, TONES, ANGLES } = require(
 const media = require('./media');
 const env = require('../../config/env');
 const { VOICE_PROVIDERS } = require('./pipeline');
+const runtime = require('../../config/runtime');
 
 const router = express.Router();
 router.use(authenticate, requirePermission('video:create'));
@@ -25,23 +26,21 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
 const parseJson = (v) => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v);
 const IN_PROGRESS = ['scripting', 'voicing', 'generating_clips', 'rendering_avatar', 'compositing'];
 
-const missing = (adapter) => adapter.meta.env.filter((e) => !e.optional && !process.env[e.name]).map((e) => e.name);
-
 /** What can run right now, so the UI can explain before anyone spends money. */
 function capabilities() {
   return {
     script: { configured: ai.isConfigured(), provider: ai.providerId() },
     voice: {
-      minimax: { configured: minimaxMedia.isConfigured(), missing: missing(minimaxMedia), defaultVoiceId: process.env.MINIMAX_VOICE_ID || null },
+      minimax: { configured: minimaxMedia.isConfigured(), missing: minimaxMedia.missing(), defaultVoiceId: runtime.get('MINIMAX_VOICE_ID') || null },
       elevenlabs: {
         configured: elevenlabs.isConfigured() && r2.isConfigured(),
-        missing: [...missing(elevenlabs), ...missing(r2)],
-        defaultVoiceId: process.env.ELEVENLABS_VOICE_ID || null,
+        missing: [...elevenlabs.missing(), ...r2.missing()],
+        defaultVoiceId: runtime.get('ELEVENLABS_VOICE_ID') || null,
       },
     },
-    clips: { configured: minimaxMedia.isConfigured(), missing: missing(minimaxMedia), model: process.env.MINIMAX_VIDEO_MODEL || 'MiniMax-Hailuo-2.3' },
-    compose: { configured: shotstack.isConfigured(), missing: missing(shotstack), env: process.env.SHOTSTACK_ENV || 'stage' },
-    storage: { configured: r2.isConfigured(), missing: missing(r2) },
+    clips: { configured: minimaxMedia.isConfigured(), missing: minimaxMedia.missing(), model: runtime.get('MINIMAX_VIDEO_MODEL') || 'MiniMax-Hailuo-2.3' },
+    compose: { configured: shotstack.isConfigured(), missing: shotstack.missing(), env: runtime.get('SHOTSTACK_ENV') || 'stage' },
+    storage: { configured: r2.isConfigured(), missing: r2.missing() },
     // Own footage and cover intro are fetched by the renderer from this server
     publicMedia: { configured: Boolean(env.PUBLIC_API_URL), missing: env.PUBLIC_API_URL ? [] : ['PUBLIC_API_URL'] },
   };
