@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Check, Copy, KeyRound, Loader2, Plus, Send, Trash2, Wrench } from "lucide-react";
+import { Bot, Check, Copy, ExternalLink, KeyRound, Loader2, Plus, Send, Trash2, Wrench } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
-import type { AgentProfile, InboxChannelConfig, KnowledgeItem, Platform } from "@/lib/types";
+import { api, apiFetch } from "@/lib/api";
+import type { AgentProfile, InboxChannelConfig, InboxChannelsMeta, KnowledgeItem, Platform } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,19 @@ import { PlatformBadge } from "./inbox-view";
 type Tab = "agent" | "knowledge" | "channels" | "simulator";
 
 export function InboxSettingsView() {
-  const [tab, setTab] = useState<Tab>("simulator");
+  // Back from Facebook Login: /inbox/settings?tab=channels&connected=meta&count=2 (or &error=…)
+  const params = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = params.get("tab");
+    return t === "agent" || t === "knowledge" || t === "channels" || t === "simulator" ? t : "simulator";
+  });
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("connected")) toast.success(`เชื่อมต่อ Facebook / Instagram แล้ว ${q.get("count") ?? ""} ช่องทาง`);
+    if (q.get("warning")) toast.warning(q.get("warning"), { duration: 15_000 });
+    if (q.get("error")) toast.error(q.get("error"), { duration: 15_000 });
+    if (q.size) window.history.replaceState(null, "", window.location.pathname);
+  }, []);
   return (
     <div>
       <PageHeader title="ตั้งค่า AI แชต" description="กำหนดบุคลิกและกติกาของ AI ฐานความรู้ร้าน ช่องทางแชต และทดลองคุยกับ AI ก่อนเปิดใช้จริง" />
@@ -257,10 +270,23 @@ const ID_HINT: Partial<Record<Platform, string>> = {
 function Channels() {
   const { can } = useAuth();
   const editable = can("inbox:manage_ai");
-  const list = useQuery({
-    queryKey: ["inbox", "channels"],
-    queryFn: () => api.get<InboxChannelConfig[]>("/inbox/channels"),
+  const res = useQuery({
+    queryKey: ["inbox", "channels", "full"],
+    queryFn: () => apiFetch<{ data: InboxChannelConfig[]; meta: InboxChannelsMeta }>("/inbox/channels"),
   });
+  const list = { isPending: res.isPending, data: res.data?.data };
+  const meta = res.data?.meta;
+  const [connecting, setConnecting] = useState(false);
+  const connectMeta = async () => {
+    setConnecting(true);
+    try {
+      const { url } = await api.get<{ url: string }>("/inbox/oauth/meta/start");
+      window.location.href = url;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "เริ่มเชื่อมต่อไม่สำเร็จ");
+      setConnecting(false);
+    }
+  };
   const [editing, setEditing] = useState<InboxChannelConfig | "new" | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -277,11 +303,17 @@ function Channels() {
           นำ Webhook URL ไปวางใน LINE Developers / Meta App Dashboard แล้วใส่ Channel access token (LINE) หรือ Page access token (Meta) — token ถูกเข้ารหัสก่อนเก็บ
         </p>
         {editable && (
-          <Button onClick={() => setEditing("new")}>
-            <Plus /> เพิ่มช่องทาง
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => void connectMeta()} disabled={connecting || meta?.metaLogin?.configured === false}>
+              {connecting ? <Loader2 className="animate-spin" /> : <ExternalLink />} เชื่อมต่อ Facebook Page / Instagram
+            </Button>
+            <Button variant="outline" onClick={() => setEditing("new")}>
+              <Plus /> เพิ่มเอง (กรอก token)
+            </Button>
+          </div>
         )}
       </div>
+      {meta && <MetaSetup meta={meta} />}
       {list.isPending ? (
         <Skeleton className="h-48" />
       ) : (
@@ -341,6 +373,34 @@ function Channels() {
         {editing !== null && <ChannelDialog key={editing === "new" ? "new" : editing.id} channel={editing === "new" ? null : editing} onDone={() => setEditing(null)} />}
       </Dialog>
     </div>
+  );
+}
+
+/** What the Meta app needs before Messenger / Instagram Direct messages can arrive. */
+function MetaSetup({ meta }: { meta: InboxChannelsMeta }) {
+  const login = meta.metaLogin;
+  const hook = meta.metaWebhook;
+  if (!login || !hook) return null;
+  const ready = login.configured && hook.configured;
+  return (
+    <Card className={cn("p-4 text-sm", !ready && "border-warning/50")}>
+      <p className="font-medium">Facebook Page / Instagram: สิ่งที่ต้องตั้งค่าใน Meta App (developers.facebook.com) ครั้งเดียว</p>
+      <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
+        <li>
+          ตั้งค่า {login.configured ? <span className="text-success">META_APP_ID / META_APP_SECRET / META_REDIRECT_URI ✓</span> : <b className="text-warning">{login.missing.join(", ")}</b>}{" "}
+          และ {hook.configured ? <span className="text-success">META_WEBHOOK_VERIFY_TOKEN ✓</span> : <b className="text-warning">{hook.missing.filter((k) => !login.missing.includes(k)).join(", ") || "META_WEBHOOK_VERIFY_TOKEN"}</b>} ที่หน้า{" "}
+          <a href="/settings/integrations" className="text-primary hover:underline">
+            การเชื่อมต่อ API
+          </a>
+        </li>
+        <li>
+          ใน Meta App เปิดผลิตภัณฑ์ <b>Messenger</b> และ <b>Instagram</b> → Webhooks: Callback URL <code className="rounded bg-muted px-1">{hook.callbackUrl}</code> · Verify
+          token = ค่า META_WEBHOOK_VERIFY_TOKEN · subscribe field <code className="rounded bg-muted px-1">messages</code>
+        </li>
+        <li>กด &quot;เชื่อมต่อ Facebook Page / Instagram&quot; แล้วเลือกเพจ ระบบสร้างช่องทาง ใส่ token และเปิดรับข้อความของเพจให้อัตโนมัติ</li>
+        <li>สิทธิ์ pages_messaging และ instagram_manage_messages ใช้ได้ทันทีกับแอดมินของแอป ถ้าจะให้คนอื่นใช้ต้องผ่าน App Review ของ Meta</li>
+      </ol>
+    </Card>
   );
 }
 

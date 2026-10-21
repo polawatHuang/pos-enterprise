@@ -14,6 +14,7 @@ const metaSocial = require('../../integrations/meta-social');
 const shopeeAffiliate = require('../../integrations/shopee-affiliate');
 const { signState, verifyState, saveAccount, credentialFor, requireEncryption } = require('./accounts.service');
 const { buildCaption, DEFAULT_PLACEMENT } = require('./publish');
+const { connectInboxPages } = require('../inbox/channels.service');
 
 const router = express.Router();
 
@@ -29,8 +30,11 @@ const appUrl = () => (env.APP_PUBLIC_URL || env.corsOrigins.find((o) => !o.inclu
  */
 router.get('/oauth/:platform/callback', async (req, res) => {
   const platform = req.params.platform;
-  const back = (params) => res.redirect(`${appUrl()}/social/accounts?${new URLSearchParams(params)}`);
   const state = verifyState(req.query.state);
+  // The same Meta callback serves Facebook Login for the inbox (state k = 'inbox')
+  const inboxLogin = state?.k === 'inbox';
+  const back = (params) =>
+    res.redirect(`${appUrl()}${inboxLogin ? '/inbox/settings?tab=channels&' : '/social/accounts?'}${new URLSearchParams(params)}`);
   if (!state || state.p !== platform) return back({ error: 'ลิงก์เชื่อมต่อหมดอายุหรือไม่ถูกต้อง กรุณาลองใหม่' });
   if (req.query.error) return back({ error: String(req.query.error_description ?? req.query.error).slice(0, 200) });
   if (!req.query.code) return back({ error: 'ไม่ได้รับรหัสยืนยันจากแพลตฟอร์ม' });
@@ -51,6 +55,12 @@ router.get('/oauth/:platform/callback', async (req, res) => {
         expiresAt: new Date(expiresAt),
       });
       connected = 1;
+    } else if (platform === 'meta' && inboxLogin) {
+      const { userToken } = await metaSocial.exchangeCode(String(req.query.code));
+      const r = await connectInboxPages(state.o, await metaSocial.listPages(userToken));
+      if (!r.connected) return back({ error: 'ไม่พบเพจที่บัญชีนี้ดูแล (ต้องเป็นแอดมินของเพจ)' });
+      audit({ user: { orgId: state.o, id: state.u }, ip: req.ip }, 'inbox.channel.connect', 'channel', null, r);
+      return back({ connected: 'meta', count: String(r.connected), ...(r.warnings.length ? { warning: r.warnings.join(' · ').slice(0, 300) } : {}) });
     } else if (platform === 'meta') {
       const { userToken } = await metaSocial.exchangeCode(String(req.query.code));
       const pages = await metaSocial.listPages(userToken);

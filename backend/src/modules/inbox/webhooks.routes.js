@@ -6,6 +6,7 @@ const logger = require('../../core/logger');
 const { enqueue } = require('../../jobs/queue');
 const line = require('../../integrations/line');
 const meta = require('../../integrations/meta');
+const metaSocial = require('../../integrations/meta-social');
 const inbox = require('./inbox.service');
 const { replyToConversation } = require('./agent.service');
 
@@ -120,7 +121,11 @@ router.post('/meta', async (req, res) => {
           continue;
         }
         const text = msg.text ?? (msg.attachments?.length ? `[ส่ง${msg.attachments[0].type === 'image' ? 'รูปภาพ' : 'ไฟล์แนบ'}]` : '[ข้อความ]');
-        const r = await inbox.ingestInbound({ channel, threadId: ev.sender.id, customerName: null, text, externalMessageId: msg.mid });
+        // First message from this person: look up their name (Messenger / Instagram profile)
+        const known = await db.one('SELECT 1 AS x FROM conversations WHERE channel_id = :id AND external_thread_id = :t', { id: channel.id, t: ev.sender.id });
+        const token = known ? null : await inbox.channelToken(channel);
+        const customerName = token ? await metaSocial.customerName(channel.platform, ev.sender.id, token) : null;
+        const r = await inbox.ingestInbound({ channel, threadId: ev.sender.id, customerName, text, externalMessageId: msg.mid });
         if (!r.duplicate) await respond(r.conversationId);
       } catch (err) {
         logger.error({ err }, 'Meta webhook event failed');

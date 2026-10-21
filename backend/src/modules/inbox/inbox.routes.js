@@ -13,6 +13,9 @@ const ai = require('../../integrations/ai');
 const inbox = require('./inbox.service');
 const { replyToConversation } = require('./agent.service');
 const runtime = require('../../config/runtime');
+const metaSocial = require('../../integrations/meta-social');
+const metaWebhook = require('../../integrations/meta');
+const { signState, requireEncryption } = require('../social/accounts.service');
 
 const router = express.Router();
 router.use(authenticate);
@@ -67,6 +70,14 @@ router.get('/summary', requirePermission('inbox:read'), async (req, res) => {
   );
   const approvals = await db.one("SELECT COUNT(*) AS n FROM ai_offers WHERE org_id = :orgId AND status = 'needs_approval'", { orgId: req.user.orgId });
   const returns = await db.one("SELECT COUNT(*) AS n FROM returns WHERE org_id = :orgId AND status = 'requested'", { orgId: req.user.orgId });
+  // Per platform: connected (active) channels and open chats, for the channel filter
+  const platforms = await db.query(
+    `SELECT ch.platform, COUNT(DISTINCT ch.id) AS channels,
+            COUNT(c.id) AS open_count
+       FROM channels ch LEFT JOIN conversations c ON c.channel_id = ch.id AND c.status IN ('open','pending')
+      WHERE ch.org_id = :orgId AND ch.is_active = 1 GROUP BY ch.platform`,
+    { orgId: req.user.orgId },
+  );
   res.json({
     data: {
       open: Number(row.open_count ?? 0),
@@ -76,6 +87,7 @@ router.get('/summary', requirePermission('inbox:read'), async (req, res) => {
       newReturns: Number(returns.n),
       aiProvider: ai.providerId(),
       aiConfigured: ai.isConfigured(),
+      platforms: platforms.map((p) => ({ platform: p.platform, channels: Number(p.channels), open: Number(p.open_count) })),
     },
   });
 });
@@ -87,6 +99,7 @@ router.get(
     query: z.object({
       view: z.enum(['active', 'human', 'ai', 'resolved', 'all']).default('active'),
       channelId: z.coerce.number().int().positive().optional(),
+      platform: z.enum(['facebook', 'instagram', 'line', 'tiktok', 'shopee', 'website', 'email']).optional(),
       q: z.string().trim().max(100).optional(),
       limit: z.coerce.number().int().min(1).max(100).default(50),
     }),
@@ -104,10 +117,11 @@ router.get(
       `${CONV_SELECT}
         WHERE c.org_id = :orgId AND ${viewSql}
           AND (:channelId IS NULL OR c.channel_id = :channelId)
+          AND (:platform IS NULL OR c.channel_id IN (SELECT id FROM channels WHERE org_id = :orgId AND platform = :platform))
           AND (:q IS NULL OR c.customer_name LIKE :q)
         ORDER BY (c.mode = 'human' AND c.status IN ('open','pending')) DESC, c.last_message_at DESC
         LIMIT :limit`,
-      { orgId: req.user.orgId, channelId: f.channelId ?? null, q: f.q ? `%${f.q}%` : null, limit: f.limit },
+      { orgId: req.user.orgId, channelId: f.channelId ?? null, platform: f.platform ?? null, q: f.q ? `%${f.q}%` : null, limit: f.limit },
     );
     res.json({ data: rows.map(mapConversation) });
   },
@@ -360,8 +374,20 @@ router.get('/channels', requirePermission('inbox:read'), async (req, res) => {
       webhookUrl: WEBHOOK_PATH[c.platform] ? `${base}${WEBHOOK_PATH[c.platform]}` : null,
       supported: ['line', 'facebook', 'instagram', 'website'].includes(c.platform),
     })),
-    meta: { publicApiUrlConfigured: Boolean(process.env.PUBLIC_API_URL) },
+    meta: {
+      publicApiUrlConfigured: Boolean(process.env.PUBLIC_API_URL),
+      // "เชื่อมต่อด้วย Facebook" needs the Facebook Login app keys; messages arrive through the Meta webhook
+      metaLogin: { configured: metaSocial.isConfigured(), missing: metaSocial.missing() },
+      metaWebhook: { configured: metaWebhook.isConfigured(), missing: metaWebhook.missing(), callbackUrl: `${base}${WEBHOOK_PATH.facebook}` },
+    },
   });
+});
+
+/** Facebook Login for Messenger + Instagram Direct: pick the pages, channels and tokens are set up on return. */
+router.get('/oauth/meta/start', requirePermission('inbox:manage_ai'), (req, res) => {
+  metaSocial.requireConfig();
+  requireEncryption();
+  res.json({ data: { url: metaSocial.getAuthorizeUrl(signState({ o: req.user.orgId, u: req.user.id, p: 'meta', k: 'inbox' }), { inbox: true }) } });
 });
 
 const channelBody = z.object({
