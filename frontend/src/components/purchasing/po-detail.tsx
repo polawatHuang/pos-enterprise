@@ -10,6 +10,7 @@ import type { Organization, PurchaseOrder } from "@/lib/types";
 import { cn, formatMoney, formatNumber, formatThaiDate } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
+import { ScanButton } from "@/components/ui/barcode-scanner";
 import { Badge, Card, Input, Skeleton } from "@/components/ui/primitives";
 import { beep } from "@/components/pos/sound";
 import { PO_STATUS } from "./labels";
@@ -37,18 +38,20 @@ export function PoDetail({ id }: { id: number }) {
   const remaining = (i: (typeof items)[number]) => Math.max(i.quantity - i.receivedQty, 0);
   const val = (i: (typeof items)[number]) => (recv[i.productId] === undefined ? null : Number(recv[i.productId]) || 0);
 
-  const scan = () => {
-    const c = code.trim();
+  /** Typed/USB scanner code, or one from the camera (which shows the returned name in its list). */
+  const scan = (scanned?: string): string | false | undefined => {
+    const c = (scanned ?? code).trim();
     if (!c) return;
     const line = items.find((i) => i.barcode === c || i.sku === c);
-    setCode("");
+    if (scanned === undefined) setCode("");
     if (!line) {
       beep("error");
       toast.error(`ไม่มีรหัส ${c} ในใบสั่งซื้อนี้`);
-      return;
+      return false;
     }
     beep("ok");
     setRecv((r) => ({ ...r, [line.productId]: String((Number(r[line.productId]) || 0) + 1) }));
+    return `${line.name} +1`;
   };
 
   const act = async (what: "send" | "cancel" | "receive", close = false) => {
@@ -118,6 +121,7 @@ export function PoDetail({ id }: { id: number }) {
               <ScanBarcode className="absolute left-3 top-1/2 size-5 -translate-y-1/2 text-primary" />
               <Input ref={scanRef} value={code} onChange={(e) => setCode(e.target.value)} placeholder="สแกนกล่อง/ชิ้นที่มาถึง (+1 ต่อการสแกน)" className="h-11 pl-10" aria-label="สแกนรับของ" />
             </div>
+            <ScanButton mode="continuous" beep={false} title="สแกนรับของด้วยกล้อง" onDetected={(c) => scan(c)} />
             <button type="submit" className="sr-only">
               รับ
             </button>

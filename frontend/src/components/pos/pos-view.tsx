@@ -20,21 +20,24 @@ import {
   Settings2,
   ShoppingCart,
   Star,
+  TicketPercent,
   Trash2,
   UserRound,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import type { CatalogItem, HeldBill, PaymentMethod, PosMember, PosOrder, PosSettings, Shift, ShiftReport } from "@/lib/types";
+import type { CatalogItem, DiscountCheck, DiscountCode, HeldBill, PaymentMethod, PosMember, PosOrder, PosSettings, Shift, ShiftReport } from "@/lib/types";
 import { cn, formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, Skeleton } from "@/components/ui/primitives";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
+import { ScanButton } from "@/components/ui/barcode-scanner";
 import { useCategories } from "@/components/products/product-form";
 import { BillsDialog } from "./bills-dialog";
 import { baseQty, blockedNow, type CartLine, lineKey, lineMarkdown, lineTotal, nowHHMM, r2, totalsOf, unitName, unitPrice } from "./cart";
+import { codeAmount, codeLabel, codeProblem, DiscountCodesDialog } from "./discount-codes";
 import { type DisplayMessage, openDisplayChannel } from "./display-channel";
 import { toggleFavorite, useFavorites } from "./favorites";
 import { HELD_KEY, HeldDialog } from "./held-dialog";
@@ -48,7 +51,7 @@ import { ShortcutsDialog } from "./shortcuts";
 import { beep } from "./sound";
 import { useTaxSettings } from "@/lib/tax";
 
-type Modal = "pay" | "bills" | "close" | "settings" | "receipt" | "member" | "held" | "line" | "cash" | "report" | "keys" | null;
+type Modal = "pay" | "codes" | "bills" | "close" | "settings" | "receipt" | "member" | "held" | "line" | "cash" | "report" | "keys" | null;
 type Filter = number | "all" | "fav";
 
 export function PosView() {
@@ -67,6 +70,9 @@ export function PosView() {
   const [selected, setSelected] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [discount, setDiscount] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [code, setCode] = useState<DiscountCode | null>(null);
+  const [checkingCode, setCheckingCode] = useState(false);
   const [member, setMember] = useState<PosMember | null>(null);
   const [pointsUse, setPointsUse] = useState(0);
   const [pendingQty, setPendingQty] = useState<number | null>(null);
@@ -96,10 +102,15 @@ export function PosView() {
 
   const pointValue = settings.data?.pointValue ?? 0;
   const discountNum = Math.max(Number(discount) || 0, 0);
-  const base = useMemo(() => totalsOf(cart, discountNum, 0, tax), [cart, discountNum, tax]);
+  const lines = useMemo(() => totalsOf(cart, 0, 0, tax), [cart, tax]);
+  // A code applies to the subtotal after line discounts, never more than what is left after the bill discount
+  const codeIssue = code ? codeProblem(code, lines.subtotal, member?.id ?? null) : null;
+  const codeOff = code && !codeIssue ? Math.min(codeAmount(code, lines.subtotal), Math.max(r2(lines.subtotal - discountNum), 0)) : 0;
+  const billOff = r2(discountNum + codeOff);
+  const base = useMemo(() => totalsOf(cart, billOff, 0, tax), [cart, billOff, tax]);
   const maxPoints = member && pointValue > 0 ? Math.min(member.points, Math.floor(base.total / pointValue)) : 0;
   const points = Math.min(pointsUse, maxPoints);
-  const totals = useMemo(() => totalsOf(cart, discountNum, r2(points * pointValue), tax), [cart, discountNum, points, pointValue, tax]);
+  const totals = useMemo(() => totalsOf(cart, billOff, r2(points * pointValue), tax), [cart, billOff, points, pointValue, tax]);
   const needsAge = cart.some((l) => l.item.ageRestricted);
   const selectedLine = cart.find((l) => l.key === selected) ?? null;
 
@@ -174,6 +185,8 @@ export function PosView() {
   const clearBill = () => {
     setCart([]);
     setDiscount("");
+    setCode(null);
+    setCodeInput("");
     setMember(null);
     setPointsUse(0);
     setSelected(null);
@@ -181,8 +194,8 @@ export function PosView() {
   };
 
   /** Barcode scanners type the code then Enter. "6*" first means the next scan counts 6. */
-  const onSearchEnter = async () => {
-    const code = search.trim();
+  const onSearchEnter = async (scanned?: string) => {
+    const code = (scanned ?? search).trim();
     if (!code) return;
     try {
       const item = await api.get<CatalogItem>("/pos/lookup", { code });
@@ -191,7 +204,7 @@ export function PosView() {
       setPendingQty(null);
     } catch (err) {
       if (!(err instanceof ApiError && err.status === 404)) toast.error(err instanceof Error ? err.message : "ค้นหาไม่สำเร็จ");
-      else if (catalog.data?.length === 1) {
+      else if (scanned === undefined && catalog.data?.length === 1) {
         add(catalog.data[0], null, pendingQty ?? 1);
         setSearch("");
         setPendingQty(null);
@@ -255,6 +268,29 @@ export function PosView() {
   };
 
   /* ------------------------------------------------------------------- payment */
+  const applyCode = async () => {
+    const c = codeInput.trim();
+    if (!c) return;
+    setCheckingCode(true);
+    try {
+      const r = await api.get<DiscountCheck>("/pos/discount-codes/check", { code: c, subtotal: lines.subtotal, customerId: member?.id });
+      // Minimum spend can still be reached by adding items, so keep that code and show the hint
+      if (r.code && (r.valid || r.reason?.startsWith("ใช้ได้เมื่อซื้อครบ"))) {
+        setCode(r.code);
+        setCodeInput("");
+        if (r.valid) toast.success(`ใช้โค้ด ${r.code.code} · ${codeLabel(r.code)}`);
+        else toast.warning(r.reason);
+      } else {
+        beep("error");
+        toast.error(r.reason ?? "ใช้โค้ดนี้ไม่ได้");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "ตรวจโค้ดไม่สำเร็จ");
+    } finally {
+      setCheckingCode(false);
+    }
+  };
+
   const openPay = (m: PaymentMethod) => {
     if (!cart.length) return;
     setPayMethod(m);
@@ -269,6 +305,7 @@ export function PosView() {
       const order = await api.post<PosOrder>("/pos/checkout", {
         items: cart.map((l) => ({ productId: l.item.id, unitId: l.unitId, quantity: l.quantity, discount: l.discount || undefined })),
         discount: discountNum || undefined,
+        discountCode: codeOff > 0 ? code?.code : undefined,
         customerId: member?.id ?? null,
         pointsUsed: points || undefined,
         ageConfirmed: needsAge ? p.ageConfirmed : undefined,
@@ -372,7 +409,8 @@ export function PosView() {
           </p>
         </div>
         <ToolButton icon={PauseCircle} label="บิลพัก" k="F5" onClick={() => setModal("held")} badge={heldCount} />
-        <ToolButton icon={ReceiptText} label="บิลในกะ" onClick={() => setModal("bills")} />
+        <ToolButton icon={ReceiptText} label="บิล / คืนสินค้า" onClick={() => setModal("bills")} />
+        <ToolButton icon={TicketPercent} label="โค้ดส่วนลด" onClick={() => setModal("codes")} />
         <ToolButton icon={ArrowLeftRight} label="เงินเข้า/ออก" onClick={() => setModal("cash")} />
         <ToolButton icon={FileBarChart} label="รายงาน X" onClick={() => void showReport()} />
         <ToolButton icon={MonitorSmartphone} label="จอลูกค้า" onClick={() => window.open("/customer-display", "pos-customer-display", "popup,width=1024,height=700")} />
@@ -414,7 +452,7 @@ export function PosView() {
                 }
               }}
               placeholder="สแกนบาร์โค้ด หรือพิมพ์ชื่อ/SKU · พิมพ์ 6* ก่อนสแกน = 6 ชิ้น"
-              className="h-14 rounded-2xl pl-12 pr-24 text-lg shadow-sm"
+              className="h-14 rounded-2xl pl-12 pr-32 text-lg shadow-sm"
               aria-label="สแกนหรือค้นหาสินค้า"
               autoFocus
             />
@@ -430,6 +468,14 @@ export function PosView() {
                 </button>
               )}
               <kbd className="hidden rounded border border-border bg-muted px-1.5 text-[10px] text-muted-foreground sm:block">F2</kbd>
+              <ScanButton
+                mode="continuous"
+                beep={false}
+                variant="ghost"
+                title="สแกนสินค้าด้วยกล้อง"
+                className="-mr-1.5 rounded-xl text-primary"
+                onDetected={(code) => onSearchEnter(code)}
+              />
             </div>
           </div>
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
@@ -568,6 +614,44 @@ export function PosView() {
                   className="h-8 w-28 text-right"
                 />
               </div>
+              {code ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                    <TicketPercent className="size-4 shrink-0 text-primary" />
+                    <span className="truncate">
+                      โค้ด <span className="font-mono font-semibold text-foreground">{code.code}</span> · {codeLabel(code)}
+                    </span>
+                    <button onClick={() => setCode(null)} className="shrink-0 rounded p-0.5 hover:bg-muted" aria-label="เอาโค้ดออก">
+                      <X className="size-3.5" />
+                    </button>
+                  </span>
+                  {codeIssue ? (
+                    <span className="shrink-0 text-right text-xs text-warning">{codeIssue}</span>
+                  ) : (
+                    <span className="shrink-0 tabular-nums text-danger">−{formatMoney(codeOff)}</span>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <label htmlFor="dcode" className="text-muted-foreground">
+                    โค้ดส่วนลด
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <Input
+                      id="dcode"
+                      value={codeInput}
+                      onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => e.key === "Enter" && void applyCode()}
+                      placeholder="กรอกโค้ด"
+                      autoCapitalize="characters"
+                      className="h-8 w-28 font-mono uppercase"
+                    />
+                    <Button size="sm" variant="outline" className="h-8 px-2 text-xs" disabled={!codeInput.trim() || !cart.length || checkingCode} onClick={() => void applyCode()}>
+                      {checkingCode ? <Loader2 className="animate-spin" /> : "ใช้"}
+                    </Button>
+                  </div>
+                </div>
+              )}
               {member && maxPoints > 0 && (
                 <div className="flex items-center justify-between gap-3">
                   <label htmlFor="points" className="text-muted-foreground">
@@ -659,6 +743,7 @@ export function PosView() {
             }}
           />
         )}
+        {modal === "codes" && <DiscountCodesDialog canManage={can("pos:manage")} />}
         {modal === "settings" && settings.data && <PosSettingsDialog settings={settings.data} onDone={closeModal} />}
         {modal === "member" && (
           <MemberDialog
@@ -705,8 +790,11 @@ export function PosView() {
           </DialogContent>
         )}
         {modal === "receipt" && receipt && (
-          <DialogContent title={receipt.status === "cancelled" ? "ใบเสร็จ (ยกเลิกแล้ว)" : "ขายสำเร็จ"} className="max-w-md">
-            {receipt.status !== "cancelled" && (
+          <DialogContent
+            title={receipt.status === "cancelled" ? "ใบเสร็จ (ยกเลิกแล้ว)" : receipt.change === undefined ? `ใบเสร็จ ${receipt.orderNo}` : "ขายสำเร็จ"}
+            className="max-w-md"
+          >
+            {receipt.status !== "cancelled" && receipt.change !== undefined && (
               <div className="mb-4 rounded-2xl bg-success p-5 text-center text-white">
                 <p className="text-sm opacity-90">เงินทอน</p>
                 <p className="text-5xl font-bold tabular-nums" data-testid="receipt-change">

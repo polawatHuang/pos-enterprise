@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, MapPin, Pencil, Plus, Store, Trash2, Warehouse } from "lucide-react";
+import { Landmark, Loader2, MapPin, Pencil, Plus, QrCode, Store, Trash2, Warehouse } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { Branch } from "@/lib/types";
+import type { BankAccount, Branch } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, Label, Skeleton, Textarea } from "@/components/ui/primitives";
@@ -69,6 +69,14 @@ export function BranchesManager() {
                   <Warehouse className="mt-0.5 size-4 shrink-0" />
                   {b.warehouseName ?? "ไม่มีคลังสินค้าผูกกับสาขานี้ (ขายจากคลังแรกขององค์กร)"}
                 </p>
+                <p className="flex gap-2">
+                  <QrCode className="mt-0.5 size-4 shrink-0" />
+                  {b.promptpayId ? `PromptPay ${b.promptpayId}` : "PromptPay ของร้าน (ค่าเริ่มต้น)"}
+                </p>
+                <p className="flex gap-2">
+                  <Landmark className="mt-0.5 size-4 shrink-0" />
+                  <span className="min-w-0 truncate">{b.bankAccount ? `${b.bankAccount.bank} ${b.bankAccount.display ?? b.bankAccount.number} · ${b.bankAccount.name}` : "บัญชีรับโอนของร้าน (ค่าเริ่มต้น)"}</span>
+                </p>
               </div>
               <div className="mt-auto flex justify-end pt-4">
                 <Button size="sm" variant="outline" onClick={() => setEditing(b)}>
@@ -95,6 +103,10 @@ function BranchDialog({ branch, onClose }: { branch: Branch | null; onClose: () 
   const [branchNo, setBranchNo] = useState(branch?.branchNo ?? "");
   const [address, setAddress] = useState(branch?.address ?? "");
   const [isActive, setIsActive] = useState(branch?.isActive ?? true);
+  const [ownPay, setOwnPay] = useState(!!(branch?.promptpayId || branch?.bankAccount));
+  const [promptpayId, setPromptpayId] = useState(branch?.promptpayId ?? "");
+  const [bank, setBank] = useState<BankAccount>(branch?.bankAccount ?? { bank: "", type: "ออมทรัพย์", number: "", name: "" });
+  const hasBank = !!(bank.bank.trim() || bank.number.trim() || bank.name.trim());
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -118,11 +130,20 @@ function BranchDialog({ branch, onClose }: { branch: Branch | null; onClose: () 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const body = { code: code.trim(), name: name.trim(), branchNo: branchNo.trim(), address: address.trim() || null };
+    const body = {
+      code: code.trim(),
+      name: name.trim(),
+      branchNo: branchNo.trim(),
+      address: address.trim() || null,
+      // empty = this branch uses the shop-wide accounts from POS settings
+      promptpayId: ownPay ? promptpayId.replace(/[\s-]/g, "") || null : null,
+      bankAccount: ownPay && hasBank ? { bank: bank.bank.trim(), type: bank.type.trim() || "ออมทรัพย์", number: bank.number.replace(/[\s-]/g, ""), name: bank.name.trim() } : null,
+    };
     try {
       if (branch) await api.patch(`/org/branches/${branch.id}`, { ...body, isActive });
       else await api.post("/org/branches", body);
       await qc.invalidateQueries({ queryKey: BRANCHES_KEY });
+      void qc.invalidateQueries({ queryKey: ["pos", "settings"] }); // the till may charge into this branch
       toast.success(branch ? "บันทึกสาขาแล้ว" : "เพิ่มสาขาและคลังสินค้าแล้ว");
       onClose();
     } catch (err) {
@@ -134,7 +155,7 @@ function BranchDialog({ branch, onClose }: { branch: Branch | null; onClose: () 
   return (
     <DialogContent title={branch ? `แก้ไขสาขา ${branch.name}` : "เพิ่มสาขา"} description="เลขที่สาขาใช้พิมพ์บนใบกำกับภาษี: สำนักงานใหญ่ = 00000">
       <form onSubmit={save} className="space-y-4">
-        <div className="grid grid-cols-[1fr_8rem] gap-3">
+        <div className="grid grid-cols-[1fr_7rem] gap-3 sm:grid-cols-[1fr_8rem]">
           <div className="space-y-2">
             <Label htmlFor="br-name">ชื่อสาขา</Label>
             <Input id="br-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น สาขาสยาม" required maxLength={191} />
@@ -172,6 +193,47 @@ function BranchDialog({ branch, onClose }: { branch: Branch | null; onClose: () 
           <Label htmlFor="br-address">ที่อยู่</Label>
           <Textarea id="br-address" value={address} onChange={(e) => setAddress(e.target.value)} rows={3} placeholder="ที่อยู่สำหรับใบเสร็จและใบกำกับภาษี" />
         </div>
+        <fieldset className="space-y-3 rounded-xl border border-border p-3">
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" checked={ownPay} onChange={(e) => setOwnPay(e.target.checked)} className="mt-0.5 size-4 accent-primary" />
+            <span>
+              <span className="font-medium">รับเงินเข้าบัญชีของสาขานี้เอง</span>
+              <span className="block text-xs text-muted-foreground">ไม่ติ๊ก = ใช้ PromptPay และบัญชีรับโอนของร้านจาก “ตั้งค่า POS”</span>
+            </span>
+          </label>
+          {ownPay && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="br-pp">PromptPay ของสาขา</Label>
+                <Input
+                  id="br-pp"
+                  inputMode="numeric"
+                  value={promptpayId}
+                  onChange={(e) => setPromptpayId(e.target.value)}
+                  placeholder="เบอร์มือถือ 10 หลัก · เลขผู้เสียภาษี 13 หลัก · เลขอ้างอิง K PLUS 15 หลัก"
+                />
+                <p className="text-xs text-muted-foreground">เว้นว่าง = ใช้ PromptPay ของร้าน · ลองสแกนจ่าย 1 บาทเพื่อตรวจว่าขึ้นชื่อบัญชีถูกต้อง</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="br-bank">ธนาคาร</Label>
+                <Input id="br-bank" value={bank.bank} onChange={(e) => setBank({ ...bank, bank: e.target.value })} placeholder="เช่น ธนาคารกสิกรไทย" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="br-bank-type">ประเภทบัญชี</Label>
+                <Input id="br-bank-type" value={bank.type} onChange={(e) => setBank({ ...bank, type: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="br-bank-no">เลขที่บัญชี</Label>
+                <Input id="br-bank-no" inputMode="numeric" value={bank.number} onChange={(e) => setBank({ ...bank, number: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="br-bank-holder">ชื่อบัญชี</Label>
+                <Input id="br-bank-holder" value={bank.name} onChange={(e) => setBank({ ...bank, name: e.target.value })} />
+              </div>
+              <p className="text-xs text-muted-foreground sm:col-span-2">เว้นว่างทั้งหมด = ใช้บัญชีรับโอนของร้าน · ใช้แสดงตอนลูกค้าโอนเงินและตรวจสลิปของสาขานี้</p>
+            </div>
+          )}
+        </fieldset>
         {branch && (
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="size-4 accent-primary" />

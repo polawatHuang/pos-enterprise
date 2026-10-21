@@ -12,6 +12,7 @@ import { cn, formatCompact, formatDateTime, formatMoney, formatNumber } from "@/
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, NativeSelect, Pagination, Skeleton, TabBar } from "@/components/ui/primitives";
+import { ScanButton } from "@/components/ui/barcode-scanner";
 import { Dialog } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
 import { ErrorNote } from "@/components/dashboard/widgets";
@@ -174,17 +175,27 @@ function LevelsTable({
   return (
     <>
       <div className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center">
-        <div className="relative w-full lg:max-w-xs">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
+        <div className="flex w-full gap-2 lg:max-w-xs">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setPage(1);
+              }}
+              placeholder="ค้นหาสินค้า / SKU / บาร์โค้ด"
+              className="h-11 pl-9 lg:h-9"
+              aria-label="ค้นหาสินค้า"
+            />
+          </div>
+          <ScanButton
+            title="สแกนบาร์โค้ดเพื่อค้นหา"
+            className="lg:size-9"
+            onDetected={(code) => {
+              setQ(code);
               setPage(1);
             }}
-            placeholder="ค้นหาสินค้า"
-            className="h-9 pl-9"
-            aria-label="ค้นหาสินค้า"
           />
         </div>
         <NativeSelect aria-label="คลัง" value={warehouseId} onChange={(e) => onWarehouse(e.target.value)}>

@@ -380,11 +380,11 @@ function PromptPayQr({ amount, enabled, onPayload }: { amount: number; enabled: 
     );
   }
   return (
-    <div className="flex items-center gap-4 rounded-xl border border-border p-3">
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-border p-3 sm:flex-row sm:gap-4">
       <div className="grid size-[200px] shrink-0 place-items-center rounded-lg bg-white" data-testid="promptpay-qr">
         {svg ? <div dangerouslySetInnerHTML={{ __html: svg }} /> : <Loader2 className="size-6 animate-spin text-muted-foreground" />}
       </div>
-      <div className="text-sm text-muted-foreground">
+      <div className="text-center text-sm text-muted-foreground sm:text-left">
         <p className="font-medium text-foreground">QR ใส่ยอด {formatMoney(amount)}</p>
         <p className="mt-1">ลูกค้าสแกนแล้วยอดขึ้นเอง ไม่ต้องพิมพ์</p>
         <p className="mt-1">QR แสดงบนจอลูกค้าด้วย (ถ้าเปิดไว้)</p>

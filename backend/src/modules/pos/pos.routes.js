@@ -6,10 +6,13 @@ const db = require('../../db/pool');
 const { validate } = require('../../core/http');
 const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
-const { badRequest, notFound } = require('../../core/errors');
+const { badRequest, conflict, notFound } = require('../../core/errors');
 const { promptPayPayload, isValidPromptPayId } = require('../../utils/promptpay');
 const ai = require('../../integrations/ai');
 const service = require('./pos.service');
+const discounts = require('./discounts');
+const returns = require('./returns');
+const { paymentFor, promptpayIdSchema, bankAccountSchema } = require('./payment-target');
 const { SLIP_SCHEMA, SLIP_SYSTEM } = require('./slip');
 const { LOCAL_TODAY } = require('../inventory/analytics');
 
@@ -158,16 +161,30 @@ router.get('/lookup', validate({ query: z.object({ code: z.string().trim().min(1
 
 /* --------------------------------------------------------------- settings */
 
+/** The branch whose accounts take this user's payments: the open shift's, else the user's own. */
+async function payingBranch(user) {
+  const shift = await service.currentShift(user.id);
+  return shift?.branch_id ?? user.branchId ?? null;
+}
+
 router.get('/settings', async (req, res) => {
-  const [settings, org] = await Promise.all([
-    service.getSettings(req.user.orgId),
+  const [pay, org] = await Promise.all([
+    paymentFor(req.user.orgId, await payingBranch(req.user)),
     db.one('SELECT name, legal_name, tax_id, address, phone, vat_registered FROM organizations WHERE id = :orgId', { orgId: req.user.orgId }),
   ]);
   res.json({
     data: {
-      ...settings,
-      bankAccount: { ...settings.bankAccount, display: service.formatAccountNo(settings.bankAccount?.number) },
-      promptpayEnabled: isValidPromptPayId(settings.promptpayId),
+      ...pay.settings,
+      // what this till charges into (the branch's own account when it has one)
+      promptpayId: pay.promptpayId,
+      bankAccount: pay.bankAccount,
+      promptpayEnabled: isValidPromptPayId(pay.promptpayId),
+      paymentBranch: pay.branch,
+      // the shop-wide accounts edited in POS settings
+      defaults: {
+        promptpayId: pay.settings.promptpayId,
+        bankAccount: { ...pay.settings.bankAccount, display: service.formatAccountNo(pay.settings.bankAccount?.number) },
+      },
       org: {
         name: org.name,
         legalName: org.legal_name,
@@ -185,29 +202,13 @@ router.put(
   requirePermission('pos:manage'),
   validate({
     body: z.object({
-      promptpayId: z
-        .string()
-        .trim()
-        .max(20)
-        .refine((v) => v === '' || isValidPromptPayId(v), 'PromptPay ต้องเป็นเบอร์มือถือ 10 หลัก หรือเลขผู้เสียภาษี 13 หลัก')
-        .optional(),
+      promptpayId: promptpayIdSchema.optional(),
       receiptFooter: z.string().trim().max(200).optional(),
       maxDiscountPct: z.coerce.number().min(0).max(100).optional(),
       pointsEarnBaht: z.coerce.number().min(0).max(100_000).optional(),
       pointValue: z.coerce.number().min(0).max(1000).optional(),
       cashLimit: money.optional(),
-      bankAccount: z
-        .object({
-          bank: z.string().trim().min(1).max(60),
-          type: z.string().trim().max(30).default('ออมทรัพย์'),
-          number: z
-            .string()
-            .trim()
-            .transform((v) => v.replace(/[\s-]/g, ''))
-            .refine((v) => /^\d{10,15}$/.test(v), 'เลขที่บัญชีต้องเป็นตัวเลข 10-15 หลัก'),
-          name: z.string().trim().min(1).max(100),
-        })
-        .optional(),
+      bankAccount: bankAccountSchema.optional(),
     }),
   }),
   async (req, res) => {
@@ -218,8 +219,8 @@ router.put(
 );
 
 router.get('/promptpay', validate({ query: z.object({ amount: z.coerce.number().positive().max(10_000_000) }) }), async (req, res) => {
-  const { promptpayId } = await service.getSettings(req.user.orgId);
-  if (!isValidPromptPayId(promptpayId)) throw badRequest('ยังไม่ได้ตั้งค่าหมายเลข PromptPay ของร้าน');
+  const { promptpayId } = await paymentFor(req.user.orgId, await payingBranch(req.user));
+  if (!isValidPromptPayId(promptpayId)) throw badRequest('ยังไม่ได้ตั้งค่าหมายเลข PromptPay ของร้าน/สาขา');
   res.json({ data: { payload: promptPayPayload(promptpayId, req.valid.query.amount), amount: req.valid.query.amount } });
 });
 
@@ -444,7 +445,7 @@ router.post(
     });
     const transRef = slip.transRef ? String(slip.transRef).replace(/\s+/g, '').slice(0, 64) : null;
     const used = transRef ? await db.one('SELECT order_id FROM payment_slips WHERE org_id = :orgId AND trans_ref = :ref', { orgId: req.user.orgId, ref: transRef }) : null;
-    const { promptpayId, bankAccount } = await service.getSettings(req.user.orgId);
+    const { promptpayId, bankAccount } = await paymentFor(req.user.orgId, await payingBranch(req.user));
     // Slips mask most digits (e.g. xxx-x-x5427-x): the visible digits must appear in one of the shop's numbers
     const ours = [String(promptpayId || '').replace(/\D/g, ''), String(bankAccount?.number ?? '').replace(/\D/g, '')].filter(Boolean);
     const receiverDigits = String(slip.receiverAccount ?? '').replace(/\D/g, '');
@@ -483,6 +484,7 @@ router.post(
         .min(1, 'ตะกร้าว่าง')
         .max(300),
       discount: money.optional(),
+      discountCode: z.string().trim().min(2).max(50).optional(),
       customerId: z.number().int().positive().nullable().optional(),
       pointsUsed: z.number().int().min(0).max(10_000_000).optional(),
       ageConfirmed: z.boolean().optional(),
@@ -516,20 +518,21 @@ router.post(
 
 router.get(
   '/orders',
-  validate({ query: z.object({ scope: z.enum(['shift', 'today']).default('shift'), limit: z.coerce.number().int().min(1).max(100).default(30) }) }),
+  validate({ query: z.object({ scope: z.enum(['shift', 'today']).default('shift'), q: z.string().trim().max(40).optional(), limit: z.coerce.number().int().min(1).max(100).default(30) }) }),
   async (req, res) => {
-    const { scope, limit } = req.valid.query;
+    const { scope, q, limit } = req.valid.query;
     const shift = await service.currentShift(req.user.id);
-    if (scope === 'shift' && !shift) return res.json({ data: [] });
+    // A bill number search spans every date (returns are usually for an older bill)
+    if (!q && scope === 'shift' && !shift) return res.json({ data: [] });
     const rows = await db.query(
-      `SELECT so.id, so.order_no, so.status, so.total, so.ordered_at, u.full_name AS cashier_name,
+      `SELECT so.id, so.order_no, so.status, so.total, so.refunded_amount, so.ordered_at, u.full_name AS cashier_name,
               (SELECT CASE WHEN COUNT(DISTINCT p.method) > 1 THEN 'split' ELSE MIN(p.method) END FROM payments p WHERE p.order_id = so.id AND p.amount > 0) AS method,
               (SELECT COALESCE(SUM(i.quantity), 0) FROM sales_order_items i WHERE i.order_id = so.id) AS items
          FROM sales_orders so LEFT JOIN users u ON u.id = so.created_by
         WHERE so.org_id = :orgId AND so.channel = 'pos'
-          AND (${scope === 'shift' ? 'so.shift_id = :shiftId' : 'so.ordered_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY'})
+          AND (${q ? 'so.order_no LIKE :q' : scope === 'shift' ? 'so.shift_id = :shiftId' : 'so.ordered_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY'})
         ORDER BY so.id DESC LIMIT :limit`,
-      { orgId: req.user.orgId, shiftId: shift?.id ?? 0, limit },
+      { orgId: req.user.orgId, shiftId: shift?.id ?? 0, q: q ? `%${q.replace(/[%_\\]/g, '\\$&')}%` : null, limit },
     );
     return res.json({
       data: rows.map((r) => ({
@@ -537,6 +540,7 @@ router.get(
         orderNo: r.order_no,
         status: r.status,
         total: Number(r.total),
+        refundedAmount: Number(r.refunded_amount ?? 0),
         orderedAt: r.ordered_at,
         cashierName: r.cashier_name,
         method: r.method,
@@ -558,6 +562,131 @@ router.post(
     const order = await service.voidOrder(req.user, req.valid.params.id, req.valid.body.reason);
     audit(req, 'pos.void', 'sales_order', order.id, { reason: req.valid.body.reason, total: order.total });
     res.json({ data: order });
+  },
+);
+
+/* ------------------------------------------------------- returns / refunds */
+
+const idParam = z.object({ id: z.coerce.number().int().positive() });
+
+router.post(
+  '/orders/:id/returns',
+  requirePermission('pos:manage'),
+  validate({
+    params: idParam,
+    body: z.object({
+      items: z
+        .array(z.object({ orderItemId: z.number().int().positive(), quantity: positiveQty }))
+        .min(1, 'เลือกสินค้าที่จะคืนอย่างน้อย 1 รายการ')
+        .max(300),
+      reason: z.string().trim().min(1, 'กรุณาระบุเหตุผล').max(200),
+      refundMethod: z.enum(['cash', 'promptpay', 'card', 'transfer', 'ewallet']),
+      restock: z.boolean().default(true),
+      aftersalesReturnId: z.number().int().positive().optional(),
+    }),
+  }),
+  async (req, res) => {
+    const b = req.valid.body;
+    const shift = await service.currentShift(req.user.id);
+    const r = await returns.createReturn(req.user, req.valid.params.id, { ...b, shiftId: shift?.id ?? null });
+    audit(req, 'pos.return', 'sales_order', req.valid.params.id, { returnNo: r.returnNo, refund: r.refund, method: b.refundMethod, restock: b.restock });
+    res.status(201).json({ data: { ...r, order: await service.getOrder(req.user.orgId, req.valid.params.id) } });
+  },
+);
+
+/* ---------------------------------------------------------- discount codes */
+
+const codeBody = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(3, 'โค้ดอย่างน้อย 3 ตัวอักษร')
+    .max(50)
+    .regex(/^[A-Za-z0-9_-]+$/, 'ใช้ได้เฉพาะ A-Z 0-9 - _'),
+  description: z.string().trim().max(191).nullable().optional(),
+  type: z.enum(['percent', 'fixed']),
+  value: z.number().positive().max(1_000_000),
+  minSpend: z.number().min(0).max(10_000_000).default(0),
+  maxUses: z.number().int().positive().max(1_000_000).nullable().optional(),
+  expiresAt: z.iso.date().nullable().optional(),
+  isActive: z.boolean().default(true),
+});
+
+/** Check a code against the cart before paying (the till shows the amount it takes off). */
+router.get(
+  '/discount-codes/check',
+  validate({ query: z.object({ code: z.string().trim().min(1).max(50), subtotal: z.coerce.number().min(0), customerId: z.coerce.number().int().positive().optional() }) }),
+  async (req, res) => {
+    const q = req.valid.query;
+    res.json({ data: await discounts.check(req.user.orgId, q.code, { subtotal: q.subtotal, customerId: q.customerId ?? null }) });
+  },
+);
+
+router.get(
+  '/discount-codes',
+  validate({ query: z.object({ status: z.enum(['active', 'all']).default('active'), q: z.string().trim().max(50).optional() }) }),
+  async (req, res) => {
+    const q = req.valid.query;
+    const rows = await db.query(
+      `SELECT d.*, cu.name AS customer_name FROM discount_codes d LEFT JOIN customers cu ON cu.id = d.customer_id
+        WHERE d.org_id = :orgId
+          AND (:all OR (d.is_active = 1 AND (d.expires_at IS NULL OR d.expires_at > UTC_TIMESTAMP()) AND (d.max_uses IS NULL OR d.used_count < d.max_uses)))
+          AND (:q IS NULL OR d.code LIKE :q OR d.description LIKE :q)
+        ORDER BY d.id DESC LIMIT 200`,
+      { orgId: req.user.orgId, all: q.status === 'all' ? 1 : 0, q: q.q ? `%${q.q.replace(/[%_\\]/g, '\\$&')}%` : null },
+    );
+    res.json({ data: rows.map(discounts.mapCode) });
+  },
+);
+
+router.post('/discount-codes', requirePermission('pos:manage'), validate({ body: codeBody }), async (req, res) => {
+  const b = req.valid.body;
+  if (b.type === 'percent' && b.value > 100) throw badRequest('ส่วนลดเปอร์เซ็นต์ต้องไม่เกิน 100');
+  const r = await db
+    .query(
+      `INSERT INTO discount_codes (org_id, code, description, type, value, min_spend, max_uses, issued_by, expires_at, is_active)
+       VALUES (:orgId, :code, :description, :type, :value, :minSpend, :maxUses, 'user', :expiresAt, :isActive)`,
+      {
+        orgId: req.user.orgId,
+        code: discounts.normalizeCode(b.code),
+        description: b.description ?? null,
+        type: b.type,
+        value: b.value,
+        minSpend: b.minSpend,
+        maxUses: b.maxUses ?? null,
+        // a date means "through the end of that day" in Thailand
+        expiresAt: b.expiresAt ? `${b.expiresAt} 16:59:59` : null,
+        isActive: b.isActive ? 1 : 0,
+      },
+    )
+    .catch((err) => {
+      if (err.code === 'ER_DUP_ENTRY') throw conflict('มีโค้ดนี้อยู่แล้ว');
+      throw err;
+    });
+  audit(req, 'pos.discount_code.create', 'discount_code', r.insertId, { code: discounts.normalizeCode(b.code), type: b.type, value: b.value });
+  res.status(201).json({ data: discounts.mapCode(await db.one('SELECT * FROM discount_codes WHERE id = :id', { id: r.insertId })) });
+});
+
+router.patch(
+  '/discount-codes/:id',
+  requirePermission('pos:manage'),
+  validate({ params: idParam, body: z.object({ isActive: z.boolean().optional(), description: z.string().trim().max(191).nullable().optional() }) }),
+  async (req, res) => {
+    const b = req.valid.body;
+    const r = await db.query(
+      `UPDATE discount_codes SET is_active = COALESCE(:active, is_active), description = IF(:descSet, :description, description)
+        WHERE id = :id AND org_id = :orgId`,
+      {
+        id: req.valid.params.id,
+        orgId: req.user.orgId,
+        active: b.isActive === undefined ? null : b.isActive ? 1 : 0,
+        descSet: b.description !== undefined ? 1 : 0,
+        description: b.description ?? null,
+      },
+    );
+    if (!r.affectedRows) throw notFound('ไม่พบโค้ด');
+    audit(req, 'pos.discount_code.update', 'discount_code', req.valid.params.id, b);
+    res.json({ data: discounts.mapCode(await db.one('SELECT * FROM discount_codes WHERE id = :id', { id: req.valid.params.id })) });
   },
 );
 

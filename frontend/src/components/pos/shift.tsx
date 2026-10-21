@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, Input, Label, NativeSelect } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
 import { METHOD_LABEL } from "./receipt";
+import { POS_SETTINGS_KEY } from "./settings-dialog";
 
 export const SHIFT_KEY = ["pos", "shift"] as const;
 
@@ -33,6 +34,8 @@ export function OpenShiftCard() {
       await api.post<Shift>("/pos/shift/open", { branchId: Number(selected), openingCash: Number(cash) || 0 });
       toast.success("เปิดกะแล้ว พร้อมขาย");
       await qc.invalidateQueries({ queryKey: SHIFT_KEY });
+      // the branch decides which PromptPay / bank account the till charges into
+      void qc.invalidateQueries({ queryKey: POS_SETTINGS_KEY });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "เปิดกะไม่สำเร็จ");
     } finally {

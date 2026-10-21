@@ -64,7 +64,8 @@ export function Receipt({ order, settings }: { order: PosOrder; settings?: PosSe
       </table>
       <div className="my-2 border-t border-dashed border-black" />
       <Row label="รวม" value={order.subtotal} />
-      {order.discount > 0 && <Row label="ส่วนลด" value={-order.discount} />}
+      {order.discount - (order.codeDiscount ?? 0) > 0 && <Row label="ส่วนลด" value={-(order.discount - (order.codeDiscount ?? 0))} />}
+      {order.codeDiscount > 0 && <Row label={`โค้ด ${order.discountCode ?? ""}`} value={-order.codeDiscount} />}
       <Row label="ยอดสุทธิ" value={order.total} bold />
       {org?.vatRegistered && (
         <>
@@ -84,6 +85,23 @@ export function Receipt({ order, settings }: { order: PosOrder; settings?: PosSe
           {order.pointsUsed > 0 && <p>ใช้แต้ม {order.pointsUsed.toLocaleString("th-TH")} แต้ม</p>}
           {order.pointsEarned > 0 && <p>ได้รับแต้ม +{order.pointsEarned.toLocaleString("th-TH")} แต้ม</p>}
           {order.customerPoints !== null && <p>แต้มคงเหลือ {order.customerPoints.toLocaleString("th-TH")} แต้ม</p>}
+        </>
+      )}
+      {order.returns?.length > 0 && (
+        <>
+          <div className="my-2 border-t border-dashed border-black" />
+          <p className="font-bold">รายการคืนสินค้า</p>
+          {order.returns.map((r) => (
+            <div key={r.id}>
+              <Row label={`${r.returnNo} (${METHOD_LABEL[r.refundMethod] ?? r.refundMethod})`} value={-r.refundAmount} />
+              {r.items.map((i, idx) => (
+                <p key={idx} className="pl-2 text-[11px]">
+                  {i.name} x {i.quantity}
+                </p>
+              ))}
+            </div>
+          ))}
+          <Row label="คงเหลือสุทธิ" value={order.total - order.refundedAmount} bold />
         </>
       )}
       <p className="mt-3 text-center">{settings?.receiptFooter || "ขอบคุณที่อุดหนุน"}</p>

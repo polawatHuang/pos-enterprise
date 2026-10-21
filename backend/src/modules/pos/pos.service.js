@@ -7,6 +7,9 @@ const { consumeFefo, restoreLots, parseAlloc } = require('../inventory/lots');
 const { postJournal, reverseJournalsFor, saleLines } = require('../accounting/ledger.service');
 const { localDate, localTime } = require('../../utils/dates');
 const { getTaxSettings, lineRate } = require('../org/tax');
+const discounts = require('./discounts');
+// returns.js needs warehouseForBranch from this module: load it lazily to avoid a require cycle
+const listForOrder = (orderId) => require('./returns').listForOrder(orderId);
 
 const r2 = (n) => Math.round(n * 100) / 100;
 
@@ -361,12 +364,21 @@ async function checkout(user, input) {
       });
       if (!customer) throw badRequest('ไม่พบสมาชิก');
     }
+    // A discount code (store promo or one issued by the AI chat) is the shop's offer, not the cashier's
+    // discount, so it sits outside the cashier limit above. It applies to the bill after line discounts.
+    let codeDiscount = 0;
+    let codeId = null;
+    if (input.discountCode) {
+      const r = await discounts.redeemInTx(conn, user.orgId, input.discountCode, { subtotal: beforePoints.subtotal, customerId: customer?.id ?? null });
+      codeId = r.code.id;
+      codeDiscount = Math.min(r.amount, beforePoints.total);
+    }
     const pointsUsed = input.pointsUsed ?? 0;
     if (pointsUsed && !customer) throw badRequest('ต้องเลือกสมาชิกก่อนใช้แต้ม');
     if (pointsUsed > Number(customer?.points ?? 0)) throw badRequest(`แต้มไม่พอ (มี ${customer?.points ?? 0} แต้ม)`);
     const pointsDiscount = r2(pointsUsed * settings.pointValue);
-    if (pointsDiscount > beforePoints.total) throw badRequest('ใช้แต้มเกินยอดบิล');
-    const totals = computeTotals(lines, r2((input.discount ?? 0) + pointsDiscount), tax);
+    if (pointsDiscount > r2(beforePoints.total - codeDiscount)) throw badRequest('ใช้แต้มเกินยอดบิล');
+    const totals = computeTotals(lines, r2((input.discount ?? 0) + codeDiscount + pointsDiscount), tax);
     const pointsEarned = customer && settings.pointsEarnBaht > 0 ? Math.floor(totals.total / settings.pointsEarnBaht) : 0;
 
     const { rows: payRows, change } = settlePayments(normalizePayments(input, totals.total), totals.total);
@@ -374,9 +386,10 @@ async function checkout(user, input) {
     const tmpNo = `TMP-${user.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const [ins] = await conn.query(
       `INSERT INTO sales_orders (org_id, branch_id, customer_id, shift_id, order_no, channel, status, subtotal, discount,
-                                 shipping_fee, vat_amount, total, cost_total, platform_fee, points_earned, points_used, ordered_at, created_by)
+                                 shipping_fee, vat_amount, total, cost_total, platform_fee, points_earned, points_used,
+                                 discount_code_id, code_discount, ordered_at, created_by)
        VALUES (:orgId, :branchId, :customerId, :shiftId, :tmpNo, 'pos', 'completed', :subtotal, :discount,
-               0, :vat, :total, :cost, 0, :pointsEarned, :pointsUsed, UTC_TIMESTAMP(), :userId)`,
+               0, :vat, :total, :cost, 0, :pointsEarned, :pointsUsed, :codeId, :codeDiscount, UTC_TIMESTAMP(), :userId)`,
       {
         orgId: user.orgId,
         branchId: shift.branch_id,
@@ -386,6 +399,8 @@ async function checkout(user, input) {
         ...totals,
         pointsEarned,
         pointsUsed,
+        codeId,
+        codeDiscount,
         userId: user.id,
       },
     );
@@ -447,7 +462,7 @@ async function checkout(user, input) {
       userId: user.id,
       lines: saleLines({ total: totals.total, vat: totals.vat, cost: totals.cost, payments: payRows }),
     });
-    return { orderId, orderNo, ...totals, change, pointsEarned, pointsUsed, warehouseId };
+    return { orderId, orderNo, ...totals, change, pointsEarned, pointsUsed, codeDiscount, warehouseId };
   });
 }
 
@@ -455,8 +470,10 @@ async function checkout(user, input) {
 
 async function getOrder(orgId, orderId) {
   const o = await db.one(
-    `SELECT so.*, b.name AS branch_name, b.branch_no, u.full_name AS cashier_name, c.name AS customer_name, c.points AS customer_points
+    `SELECT so.*, b.name AS branch_name, b.branch_no, u.full_name AS cashier_name, c.name AS customer_name, c.points AS customer_points,
+            dc.code AS discount_code
        FROM sales_orders so
+       LEFT JOIN discount_codes dc ON dc.id = so.discount_code_id
        LEFT JOIN branches b ON b.id = so.branch_id
        LEFT JOIN users u ON u.id = so.created_by
        LEFT JOIN customers c ON c.id = so.customer_id
@@ -465,7 +482,7 @@ async function getOrder(orgId, orderId) {
   );
   if (!o) throw notFound('ไม่พบบิล');
   const items = await db.query(
-    'SELECT product_id, name, unit_name, quantity, unit_price, discount, line_total FROM sales_order_items WHERE order_id = :orderId ORDER BY id',
+    'SELECT id, product_id, name, unit_name, quantity, returned_qty, unit_price, discount, line_total FROM sales_order_items WHERE order_id = :orderId ORDER BY id',
     { orderId },
   );
   const payments = await db.query('SELECT method, amount, reference, paid_at FROM payments WHERE order_id = :orderId ORDER BY id', {
@@ -490,7 +507,13 @@ async function getOrder(orgId, orderId) {
     vatAmount: Number(o.vat_amount),
     total: Number(o.total),
     orderedAt: o.ordered_at,
+    codeDiscount: Number(o.code_discount ?? 0),
+    discountCode: o.discount_code ?? null,
+    refundedAmount: Number(o.refunded_amount ?? 0),
+    returns: await listForOrder(o.id),
     items: items.map((i) => ({
+      id: i.id,
+      returnedQty: Number(i.returned_qty ?? 0),
       productId: i.product_id,
       name: i.name,
       unitName: i.unit_name,
@@ -513,6 +536,8 @@ async function voidOrder(user, orderId, reason) {
     if (!o) throw notFound('ไม่พบบิล');
     if (o.channel !== 'pos') throw badRequest('ยกเลิกได้เฉพาะบิลหน้าร้าน');
     if (o.status !== 'completed') throw conflict('บิลนี้ถูกยกเลิกไปแล้ว');
+    // Part of it already went back through a return: voiding would restock and refund those twice
+    if (Number(o.refunded_amount ?? 0) > 0) throw conflict('บิลนี้มีการคืนสินค้าแล้ว — ใช้ "คืนสินค้า" กับรายการที่เหลือแทนการยกเลิกบิล');
     const warehouseId = await warehouseForBranch(conn, user.orgId, o.branch_id);
     const [items] = await conn.query('SELECT product_id, quantity, unit_factor, lot_allocations FROM sales_order_items WHERE order_id = :orderId', { orderId });
     for (const i of items) {
@@ -537,6 +562,8 @@ async function voidOrder(user, orderId, reason) {
       );
     }
     await conn.query(`UPDATE sales_orders SET status = 'cancelled' WHERE id = :orderId`, { orderId });
+    // The voided bill did not use its discount code
+    if (o.discount_code_id) await conn.query('UPDATE discount_codes SET used_count = GREATEST(used_count - 1, 0) WHERE id = :id', { id: o.discount_code_id });
     // A voided bill frees its slip reference so the customer's transfer can be re-used on the corrected bill
     await conn.query('DELETE FROM payment_slips WHERE order_id = :orderId', { orderId });
     await reverseJournalsFor(conn, {
@@ -577,4 +604,5 @@ module.exports = {
   computeTotals,
   getOrder,
   voidOrder,
+  warehouseForBranch,
 };

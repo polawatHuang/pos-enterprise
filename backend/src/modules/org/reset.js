@@ -34,6 +34,8 @@ const STEPS = [
   ['returns', 'DELETE FROM returns WHERE org_id = :orgId'],
   ['messages', 'DELETE m FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE c.org_id = :orgId'],
   ['conversations', 'DELETE FROM conversations WHERE org_id = :orgId'],
+  ['sales_return_items', 'DELETE ri FROM sales_return_items ri JOIN sales_returns r ON r.id = ri.return_id WHERE r.org_id = :orgId'],
+  ['sales_returns', 'DELETE FROM sales_returns WHERE org_id = :orgId'],
   ['sales_order_items', 'DELETE i FROM sales_order_items i JOIN sales_orders o ON o.id = i.order_id WHERE o.org_id = :orgId'],
   ['sales_orders', 'DELETE FROM sales_orders WHERE org_id = :orgId'],
   ['pos_shifts', 'DELETE FROM pos_shifts WHERE org_id = :orgId'],
