@@ -339,6 +339,8 @@ export interface OrderSuggestion {
   leadTime: number;
   onHand: number;
   onOrder: number;
+  /** Stock in the org's other warehouses */
+  otherStock: number;
   reorderPoint: number;
   avgDaily: number;
   sold7: number;

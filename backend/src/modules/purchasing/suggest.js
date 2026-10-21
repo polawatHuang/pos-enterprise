@@ -33,7 +33,9 @@ async function suggestions({ orgId, warehouseId, supplierId = null, onlyNeeded =
             COALESCE(s.lead_time_days, 2) AS lead_time, c.name AS category_name,
             COALESCE(sl.quantity, 0) AS qty, COALESCE(sl.reorder_point, p.reorder_point) AS reorder_point, sl.max_qty,
             COALESCE((SELECT SUM(i.quantity - i.received_qty) FROM purchase_order_items i JOIN purchase_orders po ON po.id = i.po_id
-                       WHERE i.product_id = p.id AND po.warehouse_id = :warehouseId AND po.status IN ('ordered','partial')), 0) AS on_order
+                       WHERE i.product_id = p.id AND po.warehouse_id = :warehouseId AND po.status IN ('ordered','partial')), 0) AS on_order,
+            COALESCE((SELECT SUM(x.quantity) FROM stock_levels x JOIN warehouses w ON w.id = x.warehouse_id
+                       WHERE x.product_id = p.id AND x.variant_id = 0 AND w.org_id = :orgId AND x.warehouse_id <> :warehouseId), 0) AS other_qty
        FROM products p
        LEFT JOIN suppliers s ON s.id = p.supplier_id
        LEFT JOIN product_categories c ON c.id = p.category_id
@@ -78,6 +80,8 @@ async function suggestions({ orgId, warehouseId, supplierId = null, onlyNeeded =
       leadTime,
       onHand,
       onOrder,
+      // Stock in the org's other warehouses: a transfer may be better than a purchase
+      otherStock: Math.max(Number(r.other_qty), 0),
       reorderPoint,
       avgDaily,
       sold7: st?.sold7 ?? 0,
@@ -86,6 +90,7 @@ async function suggestions({ orgId, warehouseId, supplierId = null, onlyNeeded =
       suggested,
       wasted28: wasted,
       reason:
+        (onHand <= 0 && Number(r.other_qty) > 0 ? `คลังอื่นมี ${Number(r.other_qty)} — โอนย้ายแทนการสั่งซื้อได้ · ` : '') +
         (wasted > 0 ? `ทิ้ง ${wasted} ใน 28 วัน สั่งลดลง ${Math.round(Math.min(wasteRate, 0.5) * 100)}% · ` : '') +
         (avgDaily > 0
           ? `ขายเฉลี่ย ${avgDaily.toFixed(1)}/วัน × (ส่งของ ${leadTime} + รอบสั่ง ${REVIEW_DAYS} วัน) − มี ${onHand}${onOrder ? ` − กำลังมา ${onOrder}` : ''}`
