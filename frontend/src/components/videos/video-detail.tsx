@@ -650,6 +650,7 @@ function FinishedClip({ v, durable }: { v: VideoDetail; durable: boolean }) {
             </span>
           </p>
         )}
+        <RetryFailedClips v={v} />
         {!durable && (
           <p className="flex gap-1.5 rounded-lg bg-warning-soft px-2.5 py-2 text-xs text-warning">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
@@ -717,9 +718,38 @@ function Outputs({ v }: { v: VideoDetail }) {
                 )}
               </p>
             ))}
+            <RetryFailedClips v={v} />
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** Make only the failed scenes' AI clips again, then re-assemble: no new voice-over, finished clips kept. */
+function RetryFailedClips({ v }: { v: VideoDetail }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const failed = v.assets.filter((a) => a.kind === "broll" && a.status === "failed").length;
+  if (!failed || IN_PROGRESS.includes(v.status)) return null;
+  const retry = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/videos/${v.id}/clips/retry`);
+      toast.success(`เริ่มสร้างคลิป AI ใหม่ ${failed} ฉาก แล้วจะประกอบวิดีโอให้อัตโนมัติ`);
+      await qc.invalidateQueries({ queryKey: ["videos"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "เริ่มไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-1 pt-1">
+      <Button size="sm" variant="outline" className="w-full" disabled={busy} onClick={() => void retry()}>
+        {busy ? <Loader2 className="animate-spin" /> : <Wand2 />} สร้างคลิปฉากที่ไม่สำเร็จใหม่ ({failed} ฉาก)
+      </Button>
+      <p className="text-[11px] text-muted-foreground">ใช้เครดิตเฉพาะ {failed} ฉากนี้ · ไม่สร้างเสียงพากย์ใหม่ · คลิปที่สำเร็จแล้วใช้ต่อ</p>
+    </div>
   );
 }
