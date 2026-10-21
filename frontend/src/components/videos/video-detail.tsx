@@ -83,6 +83,8 @@ function Editor({ v }: { v: VideoDetail }) {
     voiceId !== (v.voiceId ?? "");
   const total = scenes.reduce((n, s) => n + (Number(s.durationSec) || 0), 0);
   const caps = meta.data?.capabilities;
+  // Speech fails without a voice, so don't let the user start (and pay for) a run that can't finish
+  const hasVoice = Boolean(voiceId || caps?.voice[voiceProvider].defaultVoiceId);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["videos"] });
   const run = async (key: string, fn: () => Promise<unknown>, ok?: string) => {
@@ -407,8 +409,20 @@ function Editor({ v }: { v: VideoDetail }) {
           <Progress v={v} visualMode={visualMode} />
           <Card>
             <CardContent className="space-y-3 p-4 text-sm">
-              {caps && <Readiness caps={caps} visualMode={visualMode} voiceProvider={voiceProvider} needsPublic={visualMode === "my_footage" || coverId !== null} />}
-              <Button className="w-full" disabled={locked || busy !== null || !scenes.length || scenes.some((s) => !s.voiceover.trim())} onClick={() => void generate()}>
+              {caps && (
+                <Readiness
+                  caps={caps}
+                  visualMode={visualMode}
+                  voiceProvider={voiceProvider}
+                  hasVoice={hasVoice}
+                  needsPublic={visualMode === "my_footage" || coverId !== null}
+                />
+              )}
+              <Button
+                className="w-full"
+                disabled={locked || busy !== null || !scenes.length || scenes.some((s) => !s.voiceover.trim()) || (caps !== undefined && !hasVoice)}
+                onClick={() => void generate()}
+              >
                 {busy === "gen" || locked ? <Loader2 className="animate-spin" /> : <Sparkles />}
                 {v.status === "ready" || v.status === "parts_ready" ? "สร้างวิดีโอใหม่" : "สร้างวิดีโอ"}
               </Button>
@@ -430,18 +444,22 @@ function Readiness({
   caps,
   visualMode,
   voiceProvider,
+  hasVoice,
   needsPublic,
 }: {
   caps: NonNullable<ReturnType<typeof useVideoMeta>["data"]>["capabilities"];
   visualMode: string;
   voiceProvider: "minimax" | "elevenlabs";
+  hasVoice: boolean;
   needsPublic: boolean;
 }) {
   const rows = [
     ...(needsPublic && caps.publicMedia
       ? [{ label: "ลิงก์ฟุตเทจ/ปกให้ระบบตัดต่อ", ok: caps.publicMedia.configured, missing: caps.publicMedia.missing, required: visualMode === "my_footage", note: "โดเมน HTTPS ของ backend" }]
       : []),
-    { label: "เสียงพากย์", ok: caps.voice[voiceProvider].configured, missing: caps.voice[voiceProvider].missing, required: true },
+    caps.voice[voiceProvider].configured
+      ? { label: "เสียงพากย์", ok: hasVoice, missing: [], required: true, problem: "ยังไม่ได้เลือกเสียง (เลือกที่ช่องเสียงพากย์ทางซ้าย)" }
+      : { label: "เสียงพากย์", ok: false, missing: caps.voice[voiceProvider].missing, required: true },
     ...(visualMode === "ai_clips" ? [{ label: "คลิป AI", ok: caps.clips.configured, missing: caps.clips.missing, required: true }] : []),
     { label: "ประกอบคลิป (Shotstack)", ok: caps.compose.configured, missing: caps.compose.missing, required: false, note: "ถ้าไม่มี จะได้ชิ้นส่วนไปตัดต่อเอง" },
     { label: "เก็บไฟล์ถาวร (R2)", ok: caps.storage.configured, missing: caps.storage.missing, required: false, note: "ถ้าไม่มี ลิงก์ไฟล์หมดอายุใน ~24 ชม." },
@@ -453,7 +471,13 @@ function Readiness({
           {r.ok ? <Check className="mt-0.5 size-3.5 shrink-0 text-success" /> : <AlertTriangle className={cn("mt-0.5 size-3.5 shrink-0", r.required ? "text-danger" : "text-warning")} />}
           <span>
             <span className="font-medium">{r.label}</span>
-            {!r.ok && <span className="text-muted-foreground"> — ต้องตั้ง {r.missing.join(", ")}{r.note ? ` (${r.note})` : ""}</span>}
+            {!r.ok && (
+              <span className="text-muted-foreground">
+                {" "}
+                — {"problem" in r && r.problem ? r.problem : `ต้องตั้ง ${r.missing.join(", ")}`}
+                {r.note ? ` (${r.note})` : ""}
+              </span>
+            )}
           </span>
         </li>
       ))}
