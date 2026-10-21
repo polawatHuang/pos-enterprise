@@ -44,6 +44,34 @@ export interface UserRow {
   createdAt: string;
 }
 
+export interface AuditUser {
+  id: number;
+  name: string;
+  email: string | null;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  action: string;
+  /** First segment of the action, e.g. "pos" for "pos.void" */
+  module: string;
+  entityType: string | null;
+  entityId: string | null;
+  /** Free-form; credential-like keys are masked by the server */
+  metadata: unknown;
+  ip: string | null;
+  createdAt: string;
+  /** null = system / webhook */
+  user: AuditUser | null;
+}
+
+export interface AuditFacets {
+  /** id null = actions without a signed-in user (system, webhooks) */
+  users: { id: number | null; name: string; email: string | null; count: number; lastAt: string }[];
+  modules: { module: string; count: number }[];
+  entityTypes: { entityType: string; count: number }[];
+}
+
 export interface DashboardSummary {
   today: { revenue: number; orders: number; grossProfit: number };
   yesterdaySamePeriod: { revenue: number; orders: number };
