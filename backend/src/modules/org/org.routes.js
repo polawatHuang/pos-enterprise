@@ -76,10 +76,10 @@ router.post(
   async (req, res) => {
     onlyOwner(req);
     if (req.valid.body.confirm.trim() !== CONFIRM_PHRASE) throw badRequest(`พิมพ์ "${CONFIRM_PHRASE}" เพื่อยืนยัน`);
-    const deleted = await resetOrgData({ orgId: req.user.orgId, keepUserId: req.user.id });
+    const { deleted, skipped } = await resetOrgData({ orgId: req.user.orgId, keepUserId: req.user.id });
     // The audit log was cleared with the rest; this entry records who reset it and when
-    audit(req, 'org.reset_data', 'organization', req.user.orgId, { tables: Object.keys(deleted).length });
-    res.json({ data: { deleted } });
+    audit(req, 'org.reset_data', 'organization', req.user.orgId, { tables: Object.keys(deleted).length, skipped });
+    res.json({ data: { deleted, skipped } });
   },
 );
 
