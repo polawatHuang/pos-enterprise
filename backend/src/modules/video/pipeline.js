@@ -194,8 +194,7 @@ const voice = step(async ({ projectId }) => {
       { id: p.id, i, provider: p.voice_provider ?? 'minimax', ms: durationMs, url },
     );
   }
-  // Shotstack animates scene pictures during the render itself, so there is no clip step for it
-  if (p.visual_mode === 'ai_clips' || (p.visual_mode === 'my_footage' && sceneAi() === 'minimax')) {
+  if (p.visual_mode === 'ai_clips' || p.visual_mode === 'my_footage') {
     await setStage(p.id, 'generating_clips', 'กำลังสั่งสร้างคลิป AI');
     await enqueue('video.clips_start', { projectId: p.id }, { orgId: p.org_id, maxAttempts: 1 });
   } else {
@@ -242,6 +241,20 @@ const clipsStart = step(async ({ projectId }) => {
     if (keep.has(i)) continue; // reuse clips from an earlier attempt of the same scene
     const picture = pictureOf[i] ?? null;
     if (fromImages && picture?.kind !== 'image') continue; // the user's own video plays as is
+    const meta = { source: picture?.storage_key ?? null };
+    if (fromImages && sceneAi() === 'shotstack') {
+      // Shotstack image-to-video needs an exact 576x1024 frame: render the picture to that size first
+      const src = media.publicUrl('m', picture.id);
+      if (!src) continue;
+      const { renderId } = await shotstack.resizeImage(src);
+      await db.query(
+        `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status, meta)
+         VALUES (:id, 'broll', :i, 'shotstack', :renderId, 'processing', :meta)`,
+        { id: p.id, i, renderId, meta: JSON.stringify({ ...meta, step: 'resize' }) },
+      );
+      started += 1;
+      continue;
+    }
     const imageUrl = fromImages ? imageDataUrl(picture) : scene.showProduct ? p.product_image : null;
     if (fromImages && !imageUrl) continue;
     const { taskId } = await minimaxMedia.createVideo({
@@ -254,7 +267,7 @@ const clipsStart = step(async ({ projectId }) => {
     await db.query(
       `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status, meta)
        VALUES (:id, 'broll', :i, 'minimax', :taskId, 'processing', :meta)`,
-      { id: p.id, i, taskId, meta: JSON.stringify({ source: picture?.storage_key ?? null }) },
+      { id: p.id, i, taskId, meta: JSON.stringify(meta) },
     );
     started += 1;
   }
@@ -267,15 +280,54 @@ const clipsStart = step(async ({ projectId }) => {
     id: p.id,
     d: `กำลังสร้างคลิป AI ${started || p.scenes.length} ฉาก (ใช้เวลาหลายนาที)`,
   });
-  await enqueue('video.clips_poll', { projectId: p.id, polls: 1 }, { orgId: p.org_id, runAt: new Date(Date.now() + POLL_MS), maxAttempts: 3 });
+  await enqueue('video.clips_poll', { projectId: p.id, polls: 1 }, { orgId: p.org_id, runAt: new Date(Date.now() + clipPollMs()), maxAttempts: 3 });
   return { status: 'ok', started };
 });
+
+/** Shotstack clips are quick (seconds to a minute); MiniMax Hailuo takes minutes. */
+const clipPollMs = () => (sceneAi() === 'shotstack' ? 15_000 : POLL_MS);
+/** Shotstack image-to-video output runs about 4-6s; use the first 4s and hold the picture after. */
+const SHOTSTACK_CLIP_SEC = 4;
+
+/**
+ * One Shotstack scene clip: resize render → image-to-video asset → ready. A scene that gives up
+ * shows its still picture; the reason is recorded on the asset and shown in the stage detail.
+ */
+async function pollShotstackClip(p, a, polls) {
+  const meta = parseJson(a.meta) ?? {};
+  const giveUp = async (why) => {
+    await db.query("UPDATE video_assets SET status = 'failed', error = :e WHERE id = :id", { id: a.id, e: String(why).slice(0, 500) });
+    return why;
+  };
+  if (meta.step === 'resize') {
+    const r = await shotstack.getRender(a.external_id);
+    if (r.status === 'failed') return giveUp(`ย่อภาพไม่สำเร็จ: ${r.error}`);
+    if (r.status === 'processing') return polls >= MAX_CLIP_POLLS ? giveUp('รอนานเกินไป') : null;
+    const { assetId } = await shotstack.createImageToVideo(r.url);
+    await db.query('UPDATE video_assets SET external_id = :assetId, meta = :meta WHERE id = :id', {
+      id: a.id,
+      assetId,
+      meta: JSON.stringify({ ...meta, step: 'animate' }),
+    });
+    return null;
+  }
+  const r = await shotstack.getAsset(a.external_id);
+  if (r.status === 'failed') return giveUp(`สร้างคลิปไม่สำเร็จ: ${r.error}`);
+  if (r.status === 'processing') return polls >= MAX_CLIP_POLLS ? giveUp('รอนานเกินไป') : null;
+  const url = (await persist(r.url, keyFor(p, `clip-${a.scene_index}.mp4`), 'video/mp4')).url;
+  await db.query("UPDATE video_assets SET status = 'ready', external_url = :url WHERE id = :id", { id: a.id, url });
+  return null;
+}
 
 const clipsPoll = step(async ({ projectId, polls = 1 }) => {
   const p = await loadProject(projectId);
   if (!p || p.status !== 'generating_clips') return { status: 'skipped' };
   const clips = await assets(p.id, 'broll');
   for (const a of clips.filter((c) => c.status === 'processing')) {
+    if (a.provider === 'shotstack') {
+      await pollShotstackClip(p, a, polls);
+      continue;
+    }
     const q = await minimaxMedia.queryVideo(a.external_id);
     if (q.status === 'ready') {
       const url = (await persist(await minimaxMedia.fileUrl(q.fileId), keyFor(p, `clip-${a.scene_index}.mp4`), 'video/mp4')).url;
@@ -295,10 +347,17 @@ const clipsPoll = step(async ({ projectId, polls = 1 }) => {
       id: p.id,
       d: `สร้างคลิป AI เสร็จ ${after.length - pending}/${after.length} ฉาก`,
     });
-    await enqueue('video.clips_poll', { projectId: p.id, polls: polls + 1 }, { orgId: p.org_id, runAt: new Date(Date.now() + POLL_MS), maxAttempts: 3 });
+    await enqueue('video.clips_poll', { projectId: p.id, polls: polls + 1 }, { orgId: p.org_id, runAt: new Date(Date.now() + clipPollMs()), maxAttempts: 3 });
     return { status: 'waiting', pending };
   }
-  await setStage(p.id, 'compositing', 'กำลังเตรียมประกอบคลิป');
+  const failed = after.filter((a) => a.status === 'failed');
+  await setStage(
+    p.id,
+    'compositing',
+    failed.length
+      ? `กำลังประกอบคลิป — ${failed.length} ฉากใช้ภาพนิ่งแทน (${failed.map((a) => `ฉาก ${a.scene_index + 1}: ${a.error}`).join('; ')})`.slice(0, 500)
+      : 'กำลังเตรียมประกอบคลิป',
+  );
   await enqueue('video.compose', { projectId: p.id }, { orgId: p.org_id, maxAttempts: 1 });
   return { status: 'ok' };
 });
@@ -331,12 +390,12 @@ const compose = step(async ({ projectId }) => {
   const single = p.visual_mode === 'my_footage';
   if (single) {
     // Scenes in order: the AI clip made from the scene's picture, else the picture / own video itself
-    // (Shotstack: the picture is animated by an image-to-video asset inside the render)
-    const animate = sceneAi() === 'shotstack';
     visuals = media.sceneMediaIndex(p.scenes, own.length).map((k, i) => {
-      if (clips[i]) return { type: 'video', url: clips[i].external_url, durationSec: clipSeconds(voiceRows[i]?.duration_ms) };
       const pic = k === null ? productImage : own[k];
-      return pic && animate && pic.type === 'image' ? { ...pic, animate: p.scenes[i].visual || p.scenes[i].caption || 'subtle natural motion' } : pic;
+      if (!clips[i]) return pic;
+      // A scene longer than its AI clip holds the picture for the rest
+      const durationSec = clips[i].provider === 'shotstack' ? SHOTSTACK_CLIP_SEC : clipSeconds(voiceRows[i]?.duration_ms);
+      return { type: 'video', url: clips[i].external_url, durationSec, hold: pic?.type === 'image' ? pic.url : null };
     });
     pool = [];
   } else {

@@ -61,8 +61,6 @@ const MAX_SHOT_SEC = 1.8;
 const INTRO_SEC = 0.5;
 const IMAGE_EFFECTS = ['zoomIn', 'slideLeft', 'zoomOut', 'slideRight', 'zoomInSlow', 'slideUp'];
 const SLOW_EFFECTS = ['zoomInSlow', 'zoomOutSlow'];
-/** Length of a Shotstack image-to-video clip used per scene (the generated clip runs ~5-6s). */
-const AI_CLIP_SEC = 5;
 /** Words worth a different colour in captions: prices, numbers, offers. */
 const EMPHASIS = /[0-9๐-๙%฿]|ฟรี|ลด|ถูก|ส่วนลด|โปร|ด่วน|ที่สุด|ใหม่|ห้ามพลาด/;
 
@@ -132,30 +130,23 @@ function planShots({ timings, visuals = [], pool = [], offset = 0, single = fals
       const src = j === 0 ? sources[0] : sources[(n + j) % sources.length];
       const start = Math.round((offset + tm.start + j * len) * 100) / 100;
       const length = Math.round(len * 100) / 100;
-      if (src.type === 'video') {
+      if (single && src.type === 'video' && src.hold && Number(src.durationSec) > 0 && length - Number(src.durationSec) > 0.05) {
+        // The AI clip is shorter than the scene: play it, then hold the scene's picture
+        const dur = Number(src.durationSec);
+        shots.push({ start, length: dur, fit: 'crop', asset: { type: 'video', src: src.url, volume: 0 } });
+        shots.push({
+          start: Math.round((start + dur) * 100) / 100,
+          length: Math.round((length - dur) * 100) / 100,
+          fit: 'crop',
+          asset: { type: 'image', src: src.hold },
+          effect: 'zoomInSlow',
+        });
+      } else if (src.type === 'video') {
         const dur = Number(src.durationSec) || 0;
         let trim = cursor.get(src.url) ?? 0;
         if (dur && trim + length > dur) trim = 0;
         cursor.set(src.url, trim + length);
         shots.push({ start, length, fit: 'crop', asset: { type: 'video', src: src.url, volume: 0, ...(trim ? { trim: Math.round(trim * 100) / 100 } : {}) } });
-      } else if (single && src.animate) {
-        // Shotstack image-to-video: the AI clip is ~5s; a longer scene holds the picture for the rest
-        const ai = Math.min(length, AI_CLIP_SEC);
-        shots.push({
-          start,
-          length: ai,
-          fit: 'crop',
-          asset: { type: 'image-to-video', src: src.url, prompt: `${src.animate}. Smooth, subtle camera motion.` },
-        });
-        if (length - ai > 0.05) {
-          shots.push({
-            start: Math.round((start + ai) * 100) / 100,
-            length: Math.round((length - ai) * 100) / 100,
-            fit: 'crop',
-            asset: { type: 'image', src: src.url },
-            effect: 'zoomInSlow',
-          });
-        }
       } else {
         const effect = single ? SLOW_EFFECTS[i % SLOW_EFFECTS.length] : shots.length === 0 ? 'zoomInFast' : IMAGE_EFFECTS[shots.length % IMAGE_EFFECTS.length];
         shots.push({ start, length, fit: 'crop', asset: { type: 'image', src: src.url }, effect });
@@ -267,6 +258,5 @@ module.exports = {
   planShots,
   DEFAULT_FONT_URL,
   MAX_SHOT_SEC,
-  AI_CLIP_SEC,
   INTRO_SEC,
 };
