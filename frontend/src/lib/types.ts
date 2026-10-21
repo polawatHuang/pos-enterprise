@@ -1486,3 +1486,125 @@ export interface Organization {
   currency: string;
   timezone: string;
 }
+
+/* --------------------------------------------------------------- customers (CRM) */
+
+export type CustomerSort = "recent" | "top" | "orders" | "name" | "newest";
+
+export interface CustomerListItem {
+  id: number;
+  name: string;
+  memberNo: string | null;
+  phone: string | null;
+  email: string | null;
+  tags: string[];
+  points: number;
+  consentMarketing: boolean;
+  totalSpent: number;
+  orderCount: number;
+  avgBasket: number;
+  firstOrderAt: string | null;
+  lastOrderAt: string | null;
+  openChats: number;
+  chatCount: number;
+  /** Sales channels the customer bought through (pos, shopee, ...) */
+  salesChannels: string[];
+  /** Chat platforms the customer talked to us on */
+  chatPlatforms: Platform[];
+  createdAt: string;
+}
+
+export interface CustomerList {
+  data: CustomerListItem[];
+  meta: { total: number; limit: number; offset: number };
+}
+
+export interface CustomerSummary {
+  totalCustomers: number;
+  newThisMonth: number;
+  consentCount: number;
+  buyers: number;
+  repeatBuyers: number;
+  /** % of buying customers with 2+ bills */
+  repeatRate: number;
+  /** Lifetime spend per buying customer */
+  avgSpend: number;
+  avgBasket: number;
+  tags: { tag: string; count: number }[];
+}
+
+export interface CustomerProfile {
+  id: number;
+  name: string;
+  memberNo: string | null;
+  phone: string | null;
+  email: string | null;
+  taxId: string | null;
+  branchNo: string | null;
+  address: string | null;
+  tags: string[];
+  points: number;
+  consentMarketing: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerOrderRow {
+  id: number;
+  orderNo: string;
+  channel: string;
+  status: string;
+  total: number;
+  /** Total quantity of items on the bill */
+  itemCount: number;
+  lineCount: number;
+  branchName: string | null;
+  orderedAt: string;
+}
+
+export interface CustomerConversationRow {
+  id: number;
+  platform: Platform;
+  channelName: string;
+  customerName: string | null;
+  status: "open" | "pending" | "resolved" | "closed";
+  mode: "ai" | "human" | "hybrid";
+  intent: string | null;
+  sentiment: "positive" | "neutral" | "negative" | null;
+  unreadCount: number;
+  lastMessage: string | null;
+  lastMessageAt: string | null;
+  createdAt: string;
+}
+
+export interface CustomerDetail extends CustomerProfile {
+  stats: {
+    totalSpent: number;
+    orderCount: number;
+    avgBasket: number;
+    firstOrderAt: string | null;
+    lastOrderAt: string | null;
+    itemsBought: number;
+    totalDiscount: number;
+    pointsEarned: number;
+    pointsUsed: number;
+    points: number;
+    cancelledCount: number;
+    openChats: number;
+  };
+  channels: { channel: string; orderCount: number; totalSpent: number }[];
+  topProducts: { productId: number; name: string; quantity: number; total: number; orderCount: number }[];
+  recentOrders: CustomerOrderRow[];
+  conversations: CustomerConversationRow[];
+}
+
+export interface CustomerInput {
+  name: string;
+  phone: string | null;
+  email: string | null;
+  taxId: string | null;
+  branchNo: string | null;
+  address: string | null;
+  tags: string[];
+  consentMarketing: boolean;
+}

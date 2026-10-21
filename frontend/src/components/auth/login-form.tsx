@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import type { User } from "@/lib/types";
-import { findNavItem, homeFor } from "@/config/nav";
+import { findNavItem, hasPermission, homeFor } from "@/config/nav";
 
 const schema = z.object({
   email: z.email("กรุณากรอกอีเมลให้ถูกต้อง"),
@@ -26,7 +26,7 @@ function postLoginTarget(user: User) {
   const next = new URLSearchParams(window.location.search).get("next");
   if (!next || !next.startsWith("/") || next.startsWith("//")) return home;
   const item = findNavItem(next.split("?")[0]);
-  return item && !user.permissions.includes(item.permission) ? home : next;
+  return item && !hasPermission(user.permissions, item.permission) ? home : next;
 }
 
 export function LoginForm() {

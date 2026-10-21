@@ -142,7 +142,7 @@ function Palette({ onClose }: { onClose: () => void }) {
   const term = q.trim().toLowerCase();
   const rows = useMemo<Row[]>(() => {
     const pages = allNavItems
-      .filter((i) => can(i.permission) && (!term || i.label.toLowerCase().includes(term)))
+      .filter((i) => (typeof i.permission === "string" ? can(i.permission) : i.permission.some(can)) && (!term || i.label.toLowerCase().includes(term)))
       .map((i) => ({ id: `nav${i.href}`, title: i.label, subtitle: i.href, href: i.href, group: "ไปที่หน้า", icon: i.icon }));
     const actions = ACTIONS.filter((a) => can(a.permission) && (!term || `${a.label} ${a.keywords}`.toLowerCase().includes(term))).map((a) => ({
       id: `act${a.href}${a.label}`,

@@ -19,11 +19,11 @@ export function PageHeader({ title, description, actions }: { title: string; des
   );
 }
 
-/** Renders children only when the user holds `permission`; otherwise a 403 state. */
-export function RequirePermission({ permission, children }: { permission: string; children: ReactNode }) {
+/** Renders children only when the user holds `permission` (an array = any one of them); otherwise a 403 state. */
+export function RequirePermission({ permission, children }: { permission: string | string[]; children: ReactNode }) {
   const { can, user } = useAuth();
   const router = useRouter();
-  const allowed = can(permission);
+  const allowed = typeof permission === "string" ? can(permission) : permission.some((p) => can(p));
   const home = homeFor(user?.permissions ?? []);
   // "/" lands on the dashboard; a role without it (cashier, support …) goes to its own first page instead
   const redirect = !allowed && permission === "dashboard:view" && home !== "/dashboard";
@@ -39,7 +39,9 @@ export function RequirePermission({ permission, children }: { permission: string
       </div>
       <h1 className="mt-5 text-xl font-semibold">ไม่มีสิทธิ์เข้าถึงหน้านี้</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        บัญชีของคุณไม่มีสิทธิ์ <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{permission}</code> กรุณาติดต่อผู้ดูแลระบบ
+        บัญชีของคุณไม่มีสิทธิ์{" "}
+        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{typeof permission === "string" ? permission : permission.join(" / ")}</code>{" "}
+        กรุณาติดต่อผู้ดูแลระบบ
       </p>
       <Link href={home} className="mt-5 inline-block text-sm font-medium text-primary hover:underline">
         ไปหน้าที่ใช้งานได้ →
