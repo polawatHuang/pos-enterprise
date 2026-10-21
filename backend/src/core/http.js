@@ -24,6 +24,17 @@ function errorHandler(err, req, res, next) {
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: { code: 'BAD_JSON', message: 'Malformed JSON body' } });
   }
+  // Code newer than the database: a migration in database/migrations was not imported yet
+  if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+    logger.error({ err, path: req.path }, 'Database schema is behind the code');
+    const what = /Table '[^.']*\.?([^']+)'/.exec(err.sqlMessage ?? '')?.[1] ?? /Unknown column '([^']+)'/.exec(err.sqlMessage ?? '')?.[1] ?? '';
+    return res.status(500).json({
+      error: {
+        code: 'SCHEMA_OUTDATED',
+        message: `ฐานข้อมูลยังไม่ได้อัปเดต (ไม่พบ ${err.code === 'ER_NO_SUCH_TABLE' ? 'ตาราง' : 'คอลัมน์'} ${what}) — import ไฟล์ใน database/migrations ที่ยังไม่ได้รันผ่าน phpMyAdmin`,
+      },
+    });
+  }
   logger.error({ err, path: req.path }, 'Unhandled error');
   return res.status(500).json({ error: { code: 'INTERNAL', message: 'เกิดข้อผิดพลาดภายในระบบ' } });
 }
