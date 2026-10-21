@@ -186,6 +186,7 @@ Passenger ปิดแอปเมื่อไม่มีคนใช้สั�
 | Plesk เตือนเรื่อง Document Root | ตั้ง Document Root เป็น `<Application Root>/public` ห้ามชี้ที่ Application Root เพราะไฟล์อย่าง `.env` / `package.json` อาจถูกเปิดจากเว็บได้ |
 | `/api/health` ได้ `database: error` | ดู `databaseError` + `hint` ในผลลัพธ์: `ER_ACCESS_DENIED_ERROR` = user/รหัสผ่านผิดหรือ user ไม่มีสิทธิ์ในฐาน, `ER_BAD_DB_ERROR` = `DB_NAME` ผิด (ต้องรวม prefix), `ECONNREFUSED`/`ENOTFOUND` = ใช้ `DB_HOST=localhost` `DB_PORT=3306` — แก้แล้ว Restart App |
 | เปิดหน้าแรกไม่มีข้อมูล ต้องกด refresh | แอปหลับหรือ connection DB ค้าง: ตั้ง uptime ping ตามหัวข้อ "กันแอปหลับ" ด้านบน — ถ้ายังเป็น เปิด DevTools → Network ดู status ของ request `/api/...` ที่ล้ม (502/503/504 = แอปเริ่มไม่ทัน, 500 = ดู log ของแอป) |
+| อัปโหลดไฟล์ (ฟุตเทจ/รูป) แล้วขึ้น "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้" แต่หน้าอื่นใช้ได้ | ไฟร์วอลล์ของ hosting (ModSecurity/Imunify360) ปฏิเสธ request body ขนาดใหญ่ก่อนถึงแอป — ดู Logs ช่วงเวลาที่อัปโหลด (มองหา 403/413 หรือคำว่า ModSecurity) ระบบส่งไฟล์แบบ multipart/form-data แล้ว ถ้ายังโดนบล็อกให้ขอ hosting เพิ่ม `SecRequestBodyLimit` / `SecRequestBodyNoFilesLimit` หรือยกเว้น path `/api/videos/*/media` |
 | login สำเร็จแต่เด้งกลับหน้า login | `COOKIE_SECURE=true` แต่ใช้ http, หรือเรียก API ตรงโดยไม่ได้ตั้ง `COOKIE_DOMAIN` — ใช้ rewrite ของ Vercel ตามค่าเริ่มต้น |
 | CORS error ใน console | เพิ่มโดเมน frontend ใน `CORS_ORIGINS` แล้ว Restart App |
 | แก้โค้ดแล้วไม่เปลี่ยน | กด **Restart App** หลัง deploy ทุกครั้ง (หรือ `touch tmp/restart.txt` ในโฟลเดอร์ backend) |

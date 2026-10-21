@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Film, ImageIcon, Loader2, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { api, apiBlob, apiFetch } from "@/lib/api";
+import { api, apiBlob, apiFetch, ApiError } from "@/lib/api";
 import type { VideoMedia } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -80,14 +80,23 @@ export function MediaPanel({ projectId, media, locked, highlight }: { projectId:
       setUploading(`กำลังอัปโหลด ${i + 1}/${list.length}`);
       try {
         const durationMs = file.type.startsWith("video/") ? await videoDurationMs(file) : null;
+        // multipart/form-data: hosting firewalls (ModSecurity) drop large raw request bodies but allow file uploads
+        const form = new FormData();
+        form.append("file", file);
         await apiFetch(`/videos/${projectId}/media`, {
           method: "POST",
-          body: file,
-          headers: { "Content-Type": file.type },
+          body: form,
           query: { label: file.name.replace(/\.[^.]+$/, "").slice(0, 100), durationMs: durationMs ?? undefined },
         });
       } catch (err) {
-        toast.error(`${file.name}: ${err instanceof Error ? err.message : "อัปโหลดไม่สำเร็จ"}`);
+        // status 0: the request never got an answer from the app (connection dropped or a firewall refused the file)
+        const message =
+          err instanceof ApiError && err.status === 0
+            ? `อัปโหลดไม่ผ่าน (${(file.size / 1024 / 1024).toFixed(1)} MB) — การเชื่อมต่อหลุดหรือไฟร์วอลล์ของเซิร์ฟเวอร์ปฏิเสธไฟล์ ลองใหม่อีกครั้ง ถ้ายังไม่ได้ให้ดู Plesk Logs`
+            : err instanceof Error
+              ? err.message
+              : "อัปโหลดไม่สำเร็จ";
+        toast.error(`${file.name}: ${message}`);
       }
     }
     setUploading(null);

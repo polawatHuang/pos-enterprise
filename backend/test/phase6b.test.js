@@ -39,6 +39,7 @@ async function cookie(email) {
   return res.headers['set-cookie'].map((c) => c.split(';')[0]).join('; ');
 }
 const as = (c) => ({
+  cookie: c,
   get: (url) => request(app).get(url).set('Cookie', c),
   post: (url, body) => request(app).post(url).set('Cookie', c).send(body),
   put: (url, body) => request(app).put(url).set('Cookie', c).send(body),
@@ -254,6 +255,23 @@ describe('own footage, hooks and variants', () => {
     assert.equal((await request(app).get(d.media[0].url)).status, 401);
     const renamed = await marketer.patch(`/api/videos/${pid}/media/${d.media[1].id}`, { label: 'ใช้งานกลางแดด' });
     assert.equal(renamed.body.data.label, 'ใช้งานกลางแดด');
+  });
+
+  test('upload footage as multipart/form-data (what the web app sends; passes hosting firewalls)', async () => {
+    const form = (buf, type, name) =>
+      request(app).post(`/api/videos/${pid}/media?label=${encodeURIComponent('มัลติพาร์ต')}`).set('Cookie', marketer.cookie).attach('file', buf, { filename: name, contentType: type });
+    const ok = await form(png, 'image/png', 'shot.png');
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+    assert.deepEqual([ok.body.data.kind, ok.body.data.label, ok.body.data.mime], ['image', 'มัลติพาร์ต', 'image/png']);
+    const saved = await marketer.get(ok.body.data.url);
+    assert.ok(Buffer.from(saved.body).equals(png), 'stored bytes are the uploaded file');
+
+    assert.equal((await form(Buffer.from('%PDF'), 'application/pdf', 'x.pdf')).status, 400);
+    const big = await form(Buffer.alloc(media.MAX_IMAGE_BYTES + 1), 'image/png', 'big.png');
+    assert.equal(big.status, 400);
+    assert.match(big.body.error.message, /ใหญ่เกิน/);
+    // keep the two files the next tests expect
+    assert.equal((await marketer.delete(`/api/videos/${pid}/media/${ok.body.data.id}`)).status, 200);
   });
 
   test('AI rewrite sees footage labels and maps scenes to footage numbers', async () => {
