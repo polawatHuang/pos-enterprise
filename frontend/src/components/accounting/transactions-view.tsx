@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, FileCheck2, Loader2, Plus, Search, Sparkles } from "lucide-react";
+import { Ban, ChevronRight, FileCheck2, Loader2, Plus, Search, ShoppingBag, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiFetch, ApiError } from "@/lib/api";
 import type { ReceiptExtraction, Transaction, TxnType } from "@/lib/types";
@@ -15,8 +15,20 @@ import { Badge, Card, Input, NativeSelect, Pagination, Segmented, Skeleton } fro
 import { Dialog } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
 import { fileToPayload, prefillFromExtraction, TransactionDialog, type TxnPrefill, useTxnMeta } from "./transaction-dialog";
+import { SaleDetailDialog } from "./sale-detail";
 
 type Meta = { page: number; pageSize: number; total: number; income: number; expense: number };
+
+const CHANNEL_LABEL: Record<string, string> = {
+  pos: "หน้าร้าน (POS)",
+  shopee: "Shopee",
+  tiktok: "TikTok Shop",
+  facebook: "Facebook",
+  instagram: "Instagram",
+  line: "LINE",
+  website: "เว็บไซต์",
+  other: "อื่นๆ",
+};
 
 export function TransactionsView() {
   const { can } = useAuth();
@@ -25,6 +37,7 @@ export function TransactionsView() {
   const meta = useTxnMeta();
   const fileRef = useRef<HTMLInputElement>(null);
   const [type, setType] = useState<TxnType | "all">("all");
+  const [saleId, setSaleId] = useState<number | null>(null);
   const [range, setRange] = useState(monthRange(0));
   const [category, setCategory] = useState("");
   const [q, setQ] = useState("");
@@ -39,7 +52,8 @@ export function TransactionsView() {
     placeholderData: keepPreviousData,
   });
   const writable = can("accounting:write");
-  const allCategories = [...(meta.data?.categories.expense ?? []), ...(meta.data?.categories.income ?? [])];
+  // "ยอดขาย" = the order rows merged in from POS/online sales
+  const allCategories = [{ name: "ยอดขาย" }, ...(meta.data?.categories.expense ?? []), ...(meta.data?.categories.income ?? [])];
 
   const readReceipt = async (file: File) => {
     setReading(true);
@@ -122,7 +136,7 @@ export function TransactionsView() {
         <Card className="p-5">
           <p className="text-sm text-muted-foreground">สุทธิ</p>
           <p className="mt-1 text-2xl font-semibold">{m ? formatMoney(m.income - m.expense) : "–"}</p>
-          <p className="mt-1 text-xs text-muted-foreground">ไม่รวมยอดขาย POS/ออนไลน์ (ดูที่รายงานการเงิน)</p>
+          <p className="mt-1 text-xs text-muted-foreground">รวมยอดขายหน้าร้านและออนไลน์ทุกออร์เดอร์</p>
         </Card>
       </section>
 
@@ -142,7 +156,13 @@ export function TransactionsView() {
             ]}
           />
           <div className="flex flex-wrap items-center gap-2">
-            <Input type="date" aria-label="ตั้งแต่" value={range.from} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="h-9 w-40" />
+            <Input
+              type="date"
+              aria-label="ตั้งแต่"
+              value={range.from}
+              onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+              className="h-9 w-40"
+            />
             <span className="text-muted-foreground">–</span>
             <Input type="date" aria-label="ถึง" value={range.to} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} className="h-9 w-40" />
             <NativeSelect aria-label="หมวด" value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -189,16 +209,31 @@ export function TransactionsView() {
                   </tr>
                 )}
                 {list.data?.data.map((t) => (
-                  <tr key={t.id} className="border-b border-border last:border-0 hover:bg-muted/40">
+                  <tr
+                    key={`${t.source}-${t.id}`}
+                    className={`border-b border-border last:border-0 hover:bg-muted/40 ${t.source === "sale" ? "cursor-pointer" : ""}`}
+                    onClick={t.source === "sale" ? () => setSaleId(t.id) : undefined}
+                  >
                     <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{formatThaiDate(t.txnDate)}</td>
                     <td className="max-w-72 px-4 py-3">
                       <p className="truncate font-medium">
+                        {t.source === "sale" && <ShoppingBag className="mr-1 inline size-3.5 text-success" aria-hidden />}
                         {t.description} {t.aiExtracted && <Sparkles className="inline size-3.5 text-primary" aria-label="กรอกโดย AI" />}
                       </p>
-                      {t.counterparty && <p className="truncate text-xs text-muted-foreground">{t.counterparty}</p>}
+                      {t.source === "sale" ? (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {CHANNEL_LABEL[t.channel ?? ""] ?? t.channel} · {t.itemCount} รายการ
+                          {t.counterparty ? ` · ${t.counterparty}` : ""}
+                          {t.status === "void" ? " · ยกเลิกแล้ว" : ""}
+                        </p>
+                      ) : (
+                        t.counterparty && <p className="truncate text-xs text-muted-foreground">{t.counterparty}</p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
-                      <Badge tone={t.type === "income" ? "success" : "neutral"}>{t.category}</Badge>
+                      <Badge tone={t.type === "income" ? "success" : "neutral"} className="whitespace-nowrap">
+                        {t.category}
+                      </Badge>
                     </td>
                     <td className={`px-4 py-3 text-right font-medium tabular-nums ${t.type === "income" ? "text-success" : ""}`}>
                       {t.type === "expense" ? "-" : ""}
@@ -221,15 +256,21 @@ export function TransactionsView() {
                             <FileCheck2 className="size-4" />
                           </button>
                         )}
-                        {writable && (
-                          <button
-                            onClick={() => void voidTxn(t)}
-                            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                            title="ยกเลิกรายการ"
-                            aria-label="ยกเลิกรายการ"
-                          >
-                            <Ban className="size-4" />
-                          </button>
+                        {t.source === "sale" ? (
+                          <span className="grid size-8 place-items-center text-muted-foreground" title="ดูรายละเอียดออร์เดอร์">
+                            <ChevronRight className="size-4" />
+                          </span>
+                        ) : (
+                          writable && (
+                            <button
+                              onClick={() => void voidTxn(t)}
+                              className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                              title="ยกเลิกรายการ"
+                              aria-label="ยกเลิกรายการ"
+                            >
+                              <Ban className="size-4" />
+                            </button>
+                          )
                         )}
                       </div>
                     </td>
@@ -242,12 +283,15 @@ export function TransactionsView() {
         {list.data && <Pagination {...list.data.meta} onChange={setPage} />}
       </Card>
       <p className="mt-3 text-xs text-muted-foreground">
-        ยอดขายจาก POS และออร์เดอร์ออนไลน์ลงบัญชีอัตโนมัติ ดูได้ที่{" "}
+        ยอดขายแต่ละออร์เดอร์ขึ้นที่นี่และลงบัญชีอัตโนมัติทันทีที่ขาย (คลิกเพื่อดูสินค้าที่ลูกค้าซื้อ) · งบการเงินดูได้ที่{" "}
         <Link href="/accounting/reports" className="text-primary hover:underline">
           รายงานการเงิน
         </Link>
       </p>
 
+      <Dialog open={saleId !== null} onOpenChange={(o) => !o && setSaleId(null)}>
+        {saleId !== null && <SaleDetailDialog id={saleId} />}
+      </Dialog>
       <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         {dialog !== null && <TransactionDialog prefill={dialog} onDone={() => setDialog(null)} />}
       </Dialog>

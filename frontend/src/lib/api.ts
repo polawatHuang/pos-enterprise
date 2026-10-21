@@ -59,6 +59,10 @@ async function parse<T>(res: Response): Promise<T> {
   }
   if (!res.ok) {
     const err = body?.error;
+    // The frontend (Vercel) is newer than the backend (Plesk): say so instead of "Route ... not found"
+    if (res.status === 404 && (err?.code === "ROUTE_NOT_FOUND" || /^Route \S+ \S+ not found$/.test(err?.message ?? ""))) {
+      throw new ApiError(404, "ROUTE_NOT_FOUND", `เซิร์ฟเวอร์ backend ยังเป็นเวอร์ชันเก่า ไม่มีฟีเจอร์นี้ — อัปเดตโค้ด backend บน Plesk แล้วกด Restart App (${err?.message})`);
+    }
     if (err?.message) throw new ApiError(res.status, err.code ?? "HTTP_ERROR", err.message, err.details);
     // The backend always answers errors as JSON, so anything else was produced in front of it
     // (hosting firewall such as ModSecurity/Imunify360, web server, or the Vercel proxy).
