@@ -25,7 +25,7 @@ const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8B
 const RUN = Date.now().toString(36);
 const originalFetch = global.fetch;
 const originalCreate = minimax.createMessage;
-const ENV_KEYS = ['MINIMAX_API_KEY', 'MINIMAX_VOICE_ID', 'AI_PROVIDER', 'SHOTSTACK_API_KEY', 'SHOTSTACK_ENV', 'R2_ACCOUNT_ID'];
+const ENV_KEYS = ['VIDEO_SCENE_AI', 'MINIMAX_API_KEY', 'MINIMAX_VOICE_ID', 'AI_PROVIDER', 'SHOTSTACK_API_KEY', 'SHOTSTACK_ENV', 'R2_ACCOUNT_ID'];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 const savedPublic = env.PUBLIC_API_URL;
 const created = [];
@@ -106,6 +106,11 @@ before(async () => {
     if (u.includes('/v1/query/video_generation')) return json({ status: 'Success', file_id: new URL(u).searchParams.get('task_id'), base_resp: { status_code: 0 } });
     if (u.includes('/v1/files/retrieve')) return json({ file: { download_url: `https://cdn.minimax.test/${new URL(u).searchParams.get('file_id')}.mp4` }, base_resp: { status_code: 0 } });
     if (u === 'https://img.example.com/p16.jpg') return new Response(Buffer.from(PNG_B64, 'base64'), { headers: { 'content-type': 'image/png' } });
+    if (u.includes('api.shotstack.io/create/stage/assets/'))
+      return json({ data: { type: 'asset', id: u.split('/').pop(), attributes: { status: 'done', url: `https://shotstack.test/${u.split('/').pop()}.png` } } });
+    if (u.includes('api.shotstack.io/create/stage/assets'))
+      return json({ data: { type: 'asset', id: `img${calls.filter((c) => c.url.endsWith('/create/stage/assets')).length}`, attributes: { status: 'queued' } } }, 201);
+    if (u.startsWith('https://shotstack.test/img')) return new Response(Buffer.from(PNG_B64, 'base64'), { headers: { 'content-type': 'image/png' } });
     if (u.includes('/v1/get_voice'))
       return json({
         system_voice: [
@@ -124,6 +129,7 @@ before(async () => {
   for (const k of ENV_KEYS) delete process.env[k];
   process.env.MINIMAX_API_KEY = 'mm-key';
   process.env.MINIMAX_VOICE_ID = 'Thai_female_1';
+  process.env.VIDEO_SCENE_AI = 'minimax'; // the Shotstack path has its own test
   marketer = as(await cookie('marketer@example.com'));
   viewer = as(await cookie('viewer@example.com'));
 });
@@ -488,6 +494,52 @@ describe('scene pictures → AI video', () => {
       assert.equal(calls.filter((c) => c.url.includes('/v1/video_generation') || c.url.includes('/v1/image_generation')).length, 0);
     } finally {
       await db.query('UPDATE products SET image_url = :u WHERE id = 16', { u: before });
+      delete process.env.SHOTSTACK_API_KEY;
+    }
+  });
+});
+
+describe('scene pictures → AI video with Shotstack (VIDEO_SCENE_AI=shotstack)', () => {
+  test('missing pictures drawn by Shotstack text-to-image; the render animates each picture with image-to-video; no MiniMax media models', async () => {
+    mockScript();
+    env.PUBLIC_API_URL = 'https://api.example.com';
+    process.env.SHOTSTACK_API_KEY = 'ss-key';
+    process.env.VIDEO_SCENE_AI = 'shotstack';
+    try {
+      const res = await marketer.post('/api/videos', { productId: 16, tone: 'friendly', lengthSec: 15, visualMode: 'my_footage' });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      const id = res.body.data.id;
+      created.push(id);
+      calls.length = 0;
+      assert.equal((await marketer.post(`/api/videos/${id}/generate`)).status, 202);
+      for (let i = 0; i < 15 && (await db.one('SELECT status FROM video_projects WHERE id = :id', { id })).status !== 'ready'; i += 1) await drain();
+      const v = await db.one('SELECT status, error FROM video_projects WHERE id = :id', { id });
+      assert.equal(v.status, 'ready', v.error);
+
+      assert.equal(calls.filter((c) => c.url.includes('/v1/image_generation') || c.url.includes('/v1/video_generation')).length, 0);
+      const created3 = calls.filter((c) => c.url.endsWith('/create/stage/assets'));
+      assert.equal(created3.length, 3);
+      const opt = JSON.parse(created3[0].init.body);
+      assert.equal(opt.provider, 'shotstack');
+      assert.deepEqual([opt.options.type, opt.options.width, opt.options.height], ['text-to-image', 768, 1280]);
+      assert.equal(created3[0].init.headers['x-api-key'], 'ss-key');
+      const files = await db.query('SELECT label FROM video_media WHERE video_project_id = :id ORDER BY sort_order, id', { id });
+      assert.deepEqual(
+        files.map((f) => f.label),
+        ['AI · ฉาก 1', 'AI · ฉาก 2', 'AI · ฉาก 3'],
+      );
+      assert.equal(await db.one("SELECT COUNT(*) AS n FROM video_assets WHERE video_project_id = :id AND kind = 'thumbnail'", { id }).then((r) => Number(r.n)), 0);
+
+      // One image-to-video per scene, in scene order, from the signed picture URLs
+      const edit = JSON.parse(calls.find((x) => x.url.endsWith('/edit/stage/render')).init.body);
+      const ai = edit.timeline.tracks
+        .flatMap((t) => t.clips)
+        .filter((x) => x.asset.type === 'image-to-video')
+        .sort((a, b) => a.start - b.start);
+      assert.equal(ai.length, 3);
+      assert.ok(ai.every((x) => x.asset.src.startsWith('https://api.example.com/api/media/') && x.asset.prompt && x.length <= 5));
+    } finally {
+      process.env.VIDEO_SCENE_AI = 'minimax';
       delete process.env.SHOTSTACK_API_KEY;
     }
   });

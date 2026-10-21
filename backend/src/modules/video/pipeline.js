@@ -8,6 +8,7 @@ const minimaxMedia = require('../../integrations/minimax-media');
 const elevenlabs = require('../../integrations/elevenlabs');
 const shotstack = require('../../integrations/shotstack');
 const r2 = require('../../integrations/r2');
+const runtime = require('../../config/runtime');
 const { sceneTimings, buildSrt, buildShotstackEdit } = require('./timeline');
 const media = require('./media');
 
@@ -83,11 +84,11 @@ async function missingSceneImages(p) {
     .filter((i) => i !== null);
 }
 
-/** The product's own photo, when it can be downloaded as a supported image. */
-async function productPhoto(url) {
+/** Download a picture (product photo, generated image) when it is a supported image type. */
+async function downloadImage(url) {
   if (!/^https?:\/\//.test(url ?? '')) return null;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
     const mime = String(res.headers.get('content-type') || '')
       .split(';')[0]
       .trim();
@@ -99,12 +100,19 @@ async function productPhoto(url) {
   }
 }
 
+/** Who animates scene pictures and draws missing ones (VIDEO_SCENE_AI): Shotstack credits by default, or MiniMax. */
+const sceneAi = () => (runtime.get('VIDEO_SCENE_AI') === 'minimax' ? 'minimax' : 'shotstack');
+const IMAGE_POLL_MS = 10_000;
+const MAX_IMAGE_POLLS = 30;
+const scenePrompt = (scene) =>
+  `${scene.visual || scene.caption || scene.voiceover}. Vertical 9:16 realistic smartphone photo for a product review video. No text, letters, logos or watermarks.`;
+
 /**
- * One missing scene picture per run (each image takes a while), appended to the project's files so
- * it plays at that scene's position and the user can see or replace it. Product scenes use the real
- * product photo; the rest are drawn by MiniMax image-01 from the scene's visual prompt.
+ * One missing scene picture at a time, appended to the project's files so it plays at that scene's
+ * position and the user can see or replace it. Product scenes use the real product photo; the rest
+ * are drawn from the scene prompt (Shotstack text-to-image, polled, or MiniMax image-01).
  */
-const images = step(async ({ projectId }) => {
+const images = step(async ({ projectId, polls = 0 }) => {
   const p = await loadProject(projectId);
   if (!p || p.status !== 'generating_clips' || p.visual_mode !== 'my_footage') return { status: 'skipped' };
   const missing = await missingSceneImages(p);
@@ -119,14 +127,36 @@ const images = step(async ({ projectId }) => {
     id: p.id,
     d: `กำลังสร้างภาพฉาก ${i + 1} (เหลือ ${missing.length} ภาพ)`,
   });
-  let file = scene.showProduct ? await productPhoto(p.product_image) : null;
+  const pending = (await assets(p.id, 'thumbnail')).find((a) => a.scene_index === i && a.status === 'processing');
+  let file = !pending && scene.showProduct ? await downloadImage(p.product_image) : null;
   let label = `รูปสินค้า · ฉาก ${i + 1}`;
-  if (!file) {
-    const img = await minimaxMedia.generateImage({
-      prompt: `${scene.visual || scene.caption || scene.voiceover}. Vertical 9:16 realistic smartphone photo for a product review video. No text, letters, logos or watermarks.`,
-      aspectRatio: '9:16',
-    });
+  if (!file && sceneAi() === 'minimax') {
+    const img = await minimaxMedia.generateImage({ prompt: scenePrompt(scene), aspectRatio: '9:16' });
     file = { buffer: img.buffer, mime: media.TYPES[img.mime] ? img.mime : 'image/jpeg' };
+    label = `AI · ฉาก ${i + 1}`;
+  } else if (!file) {
+    const later = (n) =>
+      enqueue('video.images', { projectId: p.id, polls: n }, { orgId: p.org_id, runAt: new Date(Date.now() + IMAGE_POLL_MS), maxAttempts: 1 });
+    if (!pending) {
+      const { assetId } = await shotstack.createImage(scenePrompt(scene));
+      await db.query(
+        `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status)
+         VALUES (:id, 'thumbnail', :i, 'shotstack', :assetId, 'processing')`,
+        { id: p.id, i, assetId },
+      );
+      await later(1);
+      return { status: 'waiting', scene: i };
+    }
+    const r = await shotstack.getAsset(pending.external_id);
+    if (r.status === 'failed') throw new Error(`Shotstack สร้างภาพฉาก ${i + 1} ไม่สำเร็จ: ${r.error}`);
+    if (r.status === 'processing') {
+      if (polls >= MAX_IMAGE_POLLS) throw new Error(`Shotstack สร้างภาพฉาก ${i + 1} นานเกินไป`);
+      await later(polls + 1);
+      return { status: 'waiting', scene: i };
+    }
+    file = await downloadImage(r.url);
+    if (!file) throw new Error(`ดาวน์โหลดภาพฉาก ${i + 1} จาก Shotstack ไม่สำเร็จ`);
+    await db.query('DELETE FROM video_assets WHERE id = :id', { id: pending.id });
     label = `AI · ฉาก ${i + 1}`;
   }
   const key = media.saveFile(file.buffer, file.mime);
@@ -164,7 +194,8 @@ const voice = step(async ({ projectId }) => {
       { id: p.id, i, provider: p.voice_provider ?? 'minimax', ms: durationMs, url },
     );
   }
-  if (p.visual_mode === 'ai_clips' || p.visual_mode === 'my_footage') {
+  // Shotstack animates scene pictures during the render itself, so there is no clip step for it
+  if (p.visual_mode === 'ai_clips' || (p.visual_mode === 'my_footage' && sceneAi() === 'minimax')) {
     await setStage(p.id, 'generating_clips', 'กำลังสั่งสร้างคลิป AI');
     await enqueue('video.clips_start', { projectId: p.id }, { orgId: p.org_id, maxAttempts: 1 });
   } else {
@@ -300,11 +331,13 @@ const compose = step(async ({ projectId }) => {
   const single = p.visual_mode === 'my_footage';
   if (single) {
     // Scenes in order: the AI clip made from the scene's picture, else the picture / own video itself
-    visuals = media
-      .sceneMediaIndex(p.scenes, own.length)
-      .map((k, i) =>
-        clips[i] ? { type: 'video', url: clips[i].external_url, durationSec: clipSeconds(voiceRows[i]?.duration_ms) } : k === null ? productImage : own[k],
-      );
+    // (Shotstack: the picture is animated by an image-to-video asset inside the render)
+    const animate = sceneAi() === 'shotstack';
+    visuals = media.sceneMediaIndex(p.scenes, own.length).map((k, i) => {
+      if (clips[i]) return { type: 'video', url: clips[i].external_url, durationSec: clipSeconds(voiceRows[i]?.duration_ms) };
+      const pic = k === null ? productImage : own[k];
+      return pic && animate && pic.type === 'image' ? { ...pic, animate: p.scenes[i].visual || p.scenes[i].caption || 'subtle natural motion' } : pic;
+    });
     pool = [];
   } else {
     visuals = p.scenes.map((_, i) => (clips[i] ? { type: 'video', url: clips[i].external_url } : productImage));
@@ -370,4 +403,4 @@ const composePoll = step(async ({ projectId, polls = 1 }) => {
   return { status: 'ready', url: stored.url };
 });
 
-module.exports = { images, missingSceneImages, voice, clipsStart, clipsPoll, compose, composePoll, VOICE_PROVIDERS, loadProject };
+module.exports = { images, missingSceneImages, sceneAi, voice, clipsStart, clipsPoll, compose, composePoll, VOICE_PROVIDERS, loadProject };
