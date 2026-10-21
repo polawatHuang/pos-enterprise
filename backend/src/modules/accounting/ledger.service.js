@@ -39,6 +39,7 @@ const PREFIX = {
   purchase_order: 'PO',
   expense_voucher: 'EX',
   journal: 'JV',
+  sales_return: 'RT',
 };
 
 /**

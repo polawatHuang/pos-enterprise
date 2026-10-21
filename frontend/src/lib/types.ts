@@ -616,8 +616,58 @@ export interface PosOrder {
   total: number;
   orderedAt: string;
   change?: number;
-  items: { productId: number; name: string; unitName: string | null; quantity: number; unitPrice: number; discount: number; lineTotal: number }[];
+  items: {
+    id: number;
+    productId: number;
+    name: string;
+    unitName: string | null;
+    quantity: number;
+    returnedQty: number;
+    unitPrice: number;
+    discount: number;
+    lineTotal: number;
+  }[];
   payments: { method: string; amount: number; reference: string | null; paidAt: string }[];
+  codeDiscount: number;
+  discountCode: string | null;
+  refundedAmount: number;
+  returns: SalesReturn[];
+}
+
+export interface SalesReturn {
+  id: number;
+  returnNo: string;
+  reason: string;
+  refundMethod: string;
+  refundAmount: number;
+  restocked: boolean;
+  userName: string | null;
+  createdAt: string;
+  items: { name: string; unitName: string | null; quantity: number; amount: number }[];
+}
+
+export interface DiscountCode {
+  id: number;
+  code: string;
+  description: string | null;
+  type: "percent" | "fixed";
+  value: number;
+  minSpend: number;
+  maxUses: number | null;
+  usedCount: number;
+  remaining: number | null;
+  customerId: number | null;
+  customerName: string | null;
+  issuedBy: string;
+  expiresAt: string | null;
+  isActive: boolean;
+}
+
+export interface DiscountCheck {
+  valid: boolean;
+  reason: string | null;
+  amount: number;
+  code: DiscountCode | null;
 }
 
 export interface PosOrderRow {
@@ -625,6 +675,7 @@ export interface PosOrderRow {
   orderNo: string;
   status: string;
   total: number;
+  refundedAmount: number;
   orderedAt: string;
   cashierName: string | null;
   method: string | null;

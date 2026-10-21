@@ -2,7 +2,8 @@
 
 /**
  * Thai PromptPay QR payload (EMVCo Merchant-Presented Mode, BOT spec).
- * Accepts a mobile number (10 digits), national/tax ID (13 digits) or e-wallet ID (15 digits).
+ * Accepts a mobile number (10 digits), national/tax ID (13 digits) or e-wallet ID (15 digits, e.g. the
+ * "เลขที่อ้างอิง" 004… printed on a K PLUS / bank "QR รับเงิน" — the first 3 digits are the bank code).
  * Pure function — render the returned string as a QR code on the client.
  */
 const AID = 'A000000677010111';
@@ -38,9 +39,10 @@ function promptPayPayload(id, amount) {
     tlv('00', '01'),
     tlv('01', amount ? '12' : '11'), // 12 = single-use (with amount), 11 = reusable
     tlv('29', tlv('00', AID) + tlv(target.tag, target.value)),
+    // Same field order as the widely used promptpay-qr library (any order is valid EMVCo)
+    tlv('58', 'TH'),
     tlv('53', '764'),
     ...(amount ? [tlv('54', Number(amount).toFixed(2))] : []),
-    tlv('58', 'TH'),
   ];
   const body = `${parts.join('')}6304`;
   return body + crc16(body);

@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -582,6 +582,9 @@ CREATE TABLE sales_orders (
   platform_fee     DECIMAL(14,2) NOT NULL DEFAULT 0,
   points_earned    INT NOT NULL DEFAULT 0,
   points_used      INT NOT NULL DEFAULT 0,
+  discount_code_id BIGINT UNSIGNED NULL,
+  code_discount    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  refunded_amount  DECIMAL(14,2) NOT NULL DEFAULT 0,
   ordered_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by       BIGINT UNSIGNED NULL,
   conversation_id  BIGINT UNSIGNED NULL COMMENT 'set when closed by AI agent',
@@ -605,6 +608,7 @@ CREATE TABLE sales_order_items (
   unit_name   VARCHAR(30) NULL COMMENT 'pack/carton name when sold by unit',
   unit_factor DECIMAL(12,3) NOT NULL DEFAULT 1 COMMENT 'base units per sold unit',
   quantity    DECIMAL(14,3) NOT NULL,
+  returned_qty DECIMAL(14,3) NOT NULL DEFAULT 0,
   unit_price  DECIMAL(14,2) NOT NULL,
   unit_cost   DECIMAL(14,2) NOT NULL DEFAULT 0,
   discount    DECIMAL(14,2) NOT NULL DEFAULT 0,
@@ -683,6 +687,7 @@ CREATE TABLE discount_codes (
   id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   org_id         BIGINT UNSIGNED NOT NULL,
   code           VARCHAR(50) NOT NULL,
+  description    VARCHAR(191) NULL,
   type           ENUM('percent','fixed') NOT NULL,
   value          DECIMAL(14,2) NOT NULL,
   min_spend      DECIMAL(14,2) NOT NULL DEFAULT 0,
@@ -691,10 +696,45 @@ CREATE TABLE discount_codes (
   customer_id    BIGINT UNSIGNED NULL COMMENT 'single-customer code (e.g. issued by AI)',
   issued_by      ENUM('user','ai_agent') NOT NULL DEFAULT 'user',
   expires_at     DATETIME NULL,
+  is_active      TINYINT(1) NOT NULL DEFAULT 1,
   created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_discount_code (org_id, code),
   CONSTRAINT fk_dc_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_dc_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE sales_orders ADD CONSTRAINT fk_so_dcode FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id) ON DELETE SET NULL;
+
+CREATE TABLE sales_returns (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id         BIGINT UNSIGNED NOT NULL,
+  order_id       BIGINT UNSIGNED NOT NULL,
+  return_no      VARCHAR(40) NOT NULL,
+  reason         VARCHAR(255) NOT NULL,
+  refund_method  ENUM('cash','promptpay','card','transfer','ewallet','platform','cod','other') NOT NULL,
+  refund_amount  DECIMAL(14,2) NOT NULL,
+  vat_amount     DECIMAL(14,2) NOT NULL DEFAULT 0,
+  cost_amount    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  restocked      TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 = damaged goods, not put back on the shelf',
+  shift_id       BIGINT UNSIGNED NULL COMMENT 'shift that paid the refund',
+  aftersales_return_id BIGINT UNSIGNED NULL COMMENT 'returns row from the chat after-sales flow',
+  created_by     BIGINT UNSIGNED NULL,
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_sales_return_no (org_id, return_no),
+  KEY idx_sret_order (order_id),
+  CONSTRAINT fk_sret_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sret_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE sales_return_items (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  return_id      BIGINT UNSIGNED NOT NULL,
+  order_item_id  BIGINT UNSIGNED NOT NULL,
+  product_id     BIGINT UNSIGNED NOT NULL,
+  quantity       DECIMAL(14,3) NOT NULL COMMENT 'in the units sold on the bill',
+  amount         DECIMAL(14,2) NOT NULL COMMENT 'refunded for this line incl. VAT',
+  CONSTRAINT fk_sreti_return FOREIGN KEY (return_id) REFERENCES sales_returns(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sreti_item FOREIGN KEY (order_item_id) REFERENCES sales_order_items(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================
@@ -1296,6 +1336,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns');
 
 SET FOREIGN_KEY_CHECKS = 1;

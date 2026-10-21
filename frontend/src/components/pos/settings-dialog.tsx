@@ -50,8 +50,8 @@ export function PosSettingsDialog({ settings, onDone }: { settings: PosSettings;
       <div className="grid gap-4">
         <div className="space-y-2">
           <Label htmlFor="pp">หมายเลข PromptPay ของร้าน</Label>
-          <Input id="pp" inputMode="numeric" value={promptpayId} onChange={(e) => setPromptpayId(e.target.value)} placeholder="เบอร์มือถือ 10 หลัก หรือเลขผู้เสียภาษี 13 หลัก" />
-          <p className="text-xs text-muted-foreground">ใช้สร้าง QR พร้อมยอดเงินตอนลูกค้าเลือกจ่ายด้วย PromptPay</p>
+          <Input id="pp" inputMode="numeric" value={promptpayId} onChange={(e) => setPromptpayId(e.target.value)} placeholder="เบอร์มือถือ 10 หลัก · เลขผู้เสียภาษี 13 หลัก · เลขอ้างอิง K PLUS 15 หลัก" />
+          <p className="text-xs text-muted-foreground">ใช้สร้าง QR พร้อมยอดเงินตอนลูกค้าเลือกจ่ายด้วย PromptPay · ใช้ “เลขที่อ้างอิง” 15 หลักใต้ QR รับเงินในแอป K PLUS ได้ — ลองสแกนจ่าย 1 บาทเพื่อตรวจว่าขึ้นชื่อบัญชีร้านถูกต้อง</p>
         </div>
         <fieldset className="grid grid-cols-2 gap-3 rounded-xl border border-border p-3">
           <legend className="px-1 text-sm font-medium">บัญชีรับโอนของร้าน</legend>
