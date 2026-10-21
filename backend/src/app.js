@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const env = require('./config/env');
 const db = require('./db/pool');
 const runtime = require('./config/runtime');
+const { queueHealth } = require('./jobs/queue');
 const { notFoundHandler, errorHandler } = require('./core/http');
 
 /** "https://*.vercel.app" -> /^https:\/\/[^.]+\.vercel\.app$/ */
@@ -70,10 +71,13 @@ function createApp() {
       // Error code only (no host, user or message), so a misconfigured deploy can be fixed from this page
       dbError = typeof err?.code === 'string' ? err.code : 'UNKNOWN';
     }
+    // Background queue: due jobs waiting > 3 min = the Plesk Scheduled Task (cron tick) is not running
+    const jobs = database === 'ok' ? await queueHealth().catch(() => null) : null;
     res.status(database === 'ok' ? 200 : 503).json({
       data: {
         status: database === 'ok' ? 'ok' : 'degraded',
         database,
+        ...(jobs ? { jobs } : {}),
         ...(dbError ? { databaseError: dbError, hint: DB_HINTS[dbError] ?? DB_HINTS.UNKNOWN } : {}),
         time: new Date().toISOString(),
         version: '0.1.0',

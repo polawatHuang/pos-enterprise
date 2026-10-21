@@ -24,4 +24,18 @@ async function enqueue(type, payload = {}, opts = {}) {
   return rows.insertId;
 }
 
-module.exports = { enqueue };
+/**
+ * Is anything running the queue? Jobs are executed only when the cron tick (Plesk Scheduled
+ * Task -> /internal/cron/tick) or the in-process worker runs, so a due job waiting minutes means
+ * neither is working. Returns how long the oldest due job has waited.
+ */
+async function queueHealth() {
+  const r = await db.one(
+    `SELECT COUNT(*) AS due, TIMESTAMPDIFF(SECOND, MIN(run_at), UTC_TIMESTAMP()) AS oldest
+       FROM jobs WHERE status = 'queued' AND run_at <= UTC_TIMESTAMP()`,
+  );
+  const waitingSec = Number(r?.oldest ?? 0);
+  return { due: Number(r?.due ?? 0), waitingSec, stalled: waitingSec > 180 };
+}
+
+module.exports = { enqueue, queueHealth };

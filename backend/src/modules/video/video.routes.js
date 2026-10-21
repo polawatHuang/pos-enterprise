@@ -7,7 +7,7 @@ const { validate } = require('../../core/http');
 const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
 const { notFound, badRequest, conflict } = require('../../core/errors');
-const { enqueue } = require('../../jobs/queue');
+const { enqueue, queueHealth } = require('../../jobs/queue');
 const ai = require('../../integrations/ai');
 const minimaxMedia = require('../../integrations/minimax-media');
 const elevenlabs = require('../../integrations/elevenlabs');
@@ -130,6 +130,8 @@ router.get('/:id', validate({ params: idParam }), async (req, res) => {
     data: {
       ...mapProject(v),
       media: mediaRows.map(mapMedia),
+      // Lets the page say "the background worker is not running" instead of waiting forever
+      queue: IN_PROGRESS.includes(v.status) ? await queueHealth() : null,
       assets: assets.map((a) => ({
         id: a.id,
         kind: a.kind,
