@@ -9,6 +9,7 @@ import type { ProductUnit } from "@/lib/types";
 import { formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@/components/ui/primitives";
+import { ScanButton } from "@/components/ui/barcode-scanner";
 
 interface Row {
   name: string;
@@ -62,7 +63,16 @@ export function UnitsPanel({ productId, baseUnit, basePrice, writable }: { produ
           <div key={i} className="grid grid-cols-2 gap-2 rounded-lg border border-border p-2 sm:grid-cols-[1fr_110px_1.3fr_120px_auto]">
             <Input value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="ชื่อหน่วย เช่น แพ็ก" disabled={!writable} aria-label="ชื่อหน่วย" />
             <Input value={r.factor} onChange={(e) => set(i, { factor: e.target.value })} inputMode="decimal" placeholder={`กี่${baseUnit}`} disabled={!writable} aria-label="จำนวนต่อหน่วย" />
-            <Input value={r.barcode} onChange={(e) => set(i, { barcode: e.target.value })} placeholder="บาร์โค้ดของหน่วยนี้" disabled={!writable} aria-label="บาร์โค้ดหน่วย" />
+            <div className="col-span-2 flex gap-2 sm:col-span-1">
+              <Input
+                value={r.barcode}
+                onChange={(e) => set(i, { barcode: e.target.value })}
+                placeholder="บาร์โค้ดของหน่วยนี้"
+                disabled={!writable}
+                aria-label="บาร์โค้ดหน่วย"
+              />
+              {writable && <ScanButton title="สแกนบาร์โค้ดหน่วยนี้" onDetected={(code) => set(i, { barcode: code })} />}
+            </div>
             <Input
               value={r.price}
               onChange={(e) => set(i, { price: e.target.value })}

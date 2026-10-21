@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Product } from "@/lib/types";
 import { Input } from "@/components/ui/primitives";
+import { ScanButton } from "@/components/ui/barcode-scanner";
 import { cn, formatNumber } from "@/lib/utils";
 
 /** Search-as-you-type product selector used by inventory dialogs. */
@@ -19,16 +20,37 @@ export function ProductPicker({ onPick, exclude = [] }: { onPick: (p: Product) =
   });
   const results = (data ?? []).filter((p) => !exclude.includes(p.id));
 
+  /** Camera scan: pick straight away on an exact barcode/SKU match, otherwise show the matches as a search. */
+  const onScan = async (code: string) => {
+    try {
+      const found = await api.get<Product[]>("/products", { q: code, pageSize: 8, status: "active" });
+      const exact = found.filter((p) => !exclude.includes(p.id) && (p.barcode === code || p.sku === code));
+      if (exact.length === 1) {
+        onPick(exact[0]);
+        setQ("");
+        return;
+      }
+    } catch {
+      // fall through to a normal search
+    }
+    setQ(code);
+  };
+
   return (
     <div className="relative">
-      <Search className="absolute left-3 top-3 size-4 text-muted-foreground" />
-      <Input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="พิมพ์ชื่อสินค้า / SKU / บาร์โค้ด"
-        className="pl-9"
-        aria-label="ค้นหาสินค้า"
-      />
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="พิมพ์ชื่อสินค้า / SKU / บาร์โค้ด"
+            className="h-11 pl-9"
+            aria-label="ค้นหาสินค้า"
+          />
+        </div>
+        <ScanButton title="สแกนบาร์โค้ดเพื่อเลือกสินค้า" onDetected={(code) => void onScan(code)} />
+      </div>
       {q.trim() && (
         <ul className="mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-card shadow-sm">
           {results.length === 0 && (

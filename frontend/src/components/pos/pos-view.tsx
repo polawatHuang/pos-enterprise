@@ -32,6 +32,7 @@ import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, Skeleton } from "@/components/ui/primitives";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
+import { ScanButton } from "@/components/ui/barcode-scanner";
 import { useCategories } from "@/components/products/product-form";
 import { BillsDialog } from "./bills-dialog";
 import { baseQty, blockedNow, type CartLine, lineKey, lineMarkdown, lineTotal, nowHHMM, r2, totalsOf, unitName, unitPrice } from "./cart";
@@ -181,8 +182,8 @@ export function PosView() {
   };
 
   /** Barcode scanners type the code then Enter. "6*" first means the next scan counts 6. */
-  const onSearchEnter = async () => {
-    const code = search.trim();
+  const onSearchEnter = async (scanned?: string) => {
+    const code = (scanned ?? search).trim();
     if (!code) return;
     try {
       const item = await api.get<CatalogItem>("/pos/lookup", { code });
@@ -191,7 +192,7 @@ export function PosView() {
       setPendingQty(null);
     } catch (err) {
       if (!(err instanceof ApiError && err.status === 404)) toast.error(err instanceof Error ? err.message : "ค้นหาไม่สำเร็จ");
-      else if (catalog.data?.length === 1) {
+      else if (scanned === undefined && catalog.data?.length === 1) {
         add(catalog.data[0], null, pendingQty ?? 1);
         setSearch("");
         setPendingQty(null);
@@ -414,7 +415,7 @@ export function PosView() {
                 }
               }}
               placeholder="สแกนบาร์โค้ด หรือพิมพ์ชื่อ/SKU · พิมพ์ 6* ก่อนสแกน = 6 ชิ้น"
-              className="h-14 rounded-2xl pl-12 pr-24 text-lg shadow-sm"
+              className="h-14 rounded-2xl pl-12 pr-32 text-lg shadow-sm"
               aria-label="สแกนหรือค้นหาสินค้า"
               autoFocus
             />
@@ -430,6 +431,14 @@ export function PosView() {
                 </button>
               )}
               <kbd className="hidden rounded border border-border bg-muted px-1.5 text-[10px] text-muted-foreground sm:block">F2</kbd>
+              <ScanButton
+                mode="continuous"
+                beep={false}
+                variant="ghost"
+                title="สแกนสินค้าด้วยกล้อง"
+                className="-mr-1.5 rounded-xl text-primary"
+                onDetected={(code) => onSearchEnter(code)}
+              />
             </div>
           </div>
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">

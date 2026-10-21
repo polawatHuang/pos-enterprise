@@ -182,3 +182,14 @@
     background-color: transparent;
   }
 }
+
+/* Camera barcode scanner: the laser line sweeping the scan box */
+@keyframes scan-line {
+  0%,
+  100% {
+    top: 8%;
+  }
+  50% {
+    top: 92%;
+  }
+}
