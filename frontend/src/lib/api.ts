@@ -37,6 +37,9 @@ function buildUrl(path: string, query?: Query) {
   return qs ? `${url}?${qs}` : url;
 }
 
+/** API URL for plain links and downloads (e.g. a CSV export), honouring NEXT_PUBLIC_API_URL. */
+export const apiUrl = buildUrl;
+
 // One refresh at a time even when many queries hit 401 simultaneously.
 let refreshing: Promise<boolean> | null = null;
 function refreshSession(): Promise<boolean> {

@@ -28,6 +28,7 @@ import {
   Truck,
   Hourglass,
   Users,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -97,6 +98,7 @@ export const navGroups: NavGroup[] = [
       { href: "/settings/tax", label: "ภาษีมูลค่าเพิ่ม", icon: Percent, permission: "settings:manage", phase: 1 },
       { href: "/settings/branches", label: "สาขาและคลังสินค้า", icon: Store, permission: "settings:manage", phase: 1 },
       { href: "/settings/integrations", label: "การเชื่อมต่อ API", icon: PlugZap, permission: "integrations:manage", phase: 1 },
+      { href: "/settings/audit", label: "บันทึกการใช้งาน", icon: ScrollText, permission: "audit:read", phase: 1 },
       { href: "/settings/data", label: "จัดการข้อมูล", icon: DatabaseZap, permission: "settings:manage", phase: 1 },
     ],
   },
