@@ -12,7 +12,9 @@ function makeQueryClient() {
   const client: QueryClient = new QueryClient({
     // Runs only after every retry failed: one toast for the whole page, not one per query.
     queryCache: new QueryCache({
-      onError: (err) => {
+      onError: (err, query) => {
+        // Queries that explain their own failure inline opt out with meta: { silent: true }
+        if (query.meta?.silent) return;
         const upstream = err instanceof ApiError && err.code === "UPSTREAM";
         if (typeof window === "undefined" || !(isTransient(err) || upstream)) return;
         toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ", {

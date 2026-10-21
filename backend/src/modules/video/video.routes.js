@@ -90,6 +90,18 @@ router.get('/meta', (req, res) => {
   res.json({ data: { capabilities: capabilities(), tones: TONES, angles: ANGLES, voiceProviders: Object.keys(VOICE_PROVIDERS) } });
 });
 
+// get_voice is slow-ish and the list rarely changes; keyed by the API key so a new key refetches
+const VOICE_TTL_MS = 10 * 60_000;
+let voiceCache = null;
+
+router.get('/voices', validate({ query: z.object({ provider: z.enum(['minimax']).default('minimax') }) }), async (req, res) => {
+  const { MINIMAX_API_KEY: key } = minimaxMedia.requireConfig();
+  if (!voiceCache || voiceCache.key !== key || Date.now() - voiceCache.at > VOICE_TTL_MS) {
+    voiceCache = { key, at: Date.now(), data: await minimaxMedia.listVoices() };
+  }
+  res.json({ data: voiceCache.data });
+});
+
 const mapMedia = (m) => ({
   id: m.id,
   kind: m.kind,

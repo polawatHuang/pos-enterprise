@@ -105,6 +105,33 @@ const adapter = defineAdapter(
       return { url, durationMs: r?.extra_info?.audio_length ?? null };
     },
 
+    /**
+     * Every voice this account can use: MiniMax's system voices plus the account's cloned and
+     * designed ones. Field names vary between API versions, so read them loosely.
+     * Docs: https://platform.minimax.io/docs (Voice Management → Get Voice)
+     * @returns {Promise<{id:string, name:string, group:'system'|'cloned'|'generated', description:string}[]>}
+     */
+    async listVoices() {
+      const r = await adapter.call('/v1/get_voice', { method: 'POST', body: { voice_type: 'all' }, timeoutMs: 30_000 });
+      const groups = [
+        ['system', r?.system_voice],
+        ['cloned', r?.voice_cloning],
+        ['generated', r?.voice_generation],
+      ];
+      const seen = new Set();
+      const out = [];
+      for (const [group, list] of groups) {
+        for (const v of Array.isArray(list) ? list : []) {
+          const id = String(v?.voice_id ?? '').trim();
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          const description = (Array.isArray(v.description) ? v.description.join(' ') : String(v.description ?? '')).trim();
+          out.push({ id, name: String(v.voice_name || id).trim(), group, description: description.slice(0, 300) });
+        }
+      }
+      return out;
+    },
+
     /** Start a 6s clip. With an image the clip follows its aspect ratio (use a portrait image for 9:16). */
     async createVideo({ prompt, imageUrl = null, duration = 6, resolution = '768P' }) {
       const env = adapter.requireConfig();
