@@ -22,6 +22,9 @@ export interface Branch {
   /** Stock location the POS sells from at this branch */
   warehouseId: number | null;
   warehouseName: string | null;
+  /** This branch's own payment accounts; null = the shop-wide ones in POS settings */
+  promptpayId: string | null;
+  bankAccount: BankAccount | null;
 }
 
 export interface Role {
@@ -698,8 +701,12 @@ export interface PosSettings {
   pointsEarnBaht: number;
   pointValue: number;
   cashLimit: number;
+  /** What this till charges into: the branch's own account when it has one */
   bankAccount: BankAccount;
   promptpayEnabled: boolean;
+  paymentBranch: { id: number; name: string; ownPromptpay: boolean; ownBank: boolean } | null;
+  /** Shop-wide accounts (edited in POS settings) */
+  defaults: { promptpayId: string; bankAccount: BankAccount };
   org: { name: string; legalName: string | null; taxId: string | null; address: string | null; phone: string | null; vatRegistered: boolean };
 }
 

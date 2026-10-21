@@ -9,6 +9,8 @@ const { audit } = require('../../core/audit');
 const { badRequest, conflict, forbidden, notFound } = require('../../core/errors');
 const { resetOrgData, CONFIRM_PHRASE } = require('./reset');
 const { getTaxSettings, saveTaxSettings, VAT_TYPES } = require('./tax');
+const { parseAccount, promptpayIdSchema, bankAccountSchema } = require('../pos/payment-target');
+const { formatAccountNo } = require('../pos/pos.service');
 
 const router = express.Router();
 router.use(authenticate);
@@ -17,13 +19,18 @@ router.use(authenticate);
 
 router.get('/branches', async (req, res) => {
   const rows = await db.query(
-    `SELECT b.id, b.code, b.name, b.branch_no AS branchNo, b.address, b.is_active AS isActive,
+    `SELECT b.id, b.code, b.name, b.branch_no AS branchNo, b.address, b.promptpay_id, b.bank_account, b.is_active AS isActive,
             (SELECT w.id FROM warehouses w WHERE w.branch_id = b.id ORDER BY w.id LIMIT 1) AS warehouseId,
             (SELECT w.name FROM warehouses w WHERE w.branch_id = b.id ORDER BY w.id LIMIT 1) AS warehouseName
        FROM branches b WHERE b.org_id = :orgId ORDER BY b.code`,
     { orgId: req.user.orgId },
   );
-  res.json({ data: rows.map((r) => ({ ...r, isActive: Boolean(r.isActive) })) });
+  res.json({
+    data: rows.map(({ promptpay_id: promptpayId, bank_account: bank, ...r }) => {
+      const bankAccount = parseAccount(bank);
+      return { ...r, isActive: Boolean(r.isActive), promptpayId: promptpayId || null, bankAccount: bankAccount && { ...bankAccount, display: formatAccountNo(bankAccount.number) } };
+    }),
+  });
 });
 
 const branchBody = z.object({
@@ -38,6 +45,15 @@ const branchBody = z.object({
   // Revenue Department branch number on tax invoices: 00000 = head office
   branchNo: z.string().trim().regex(/^\d{5}$/, 'เลขที่สาขาต้องเป็นตัวเลข 5 หลัก (สำนักงานใหญ่ = 00000)'),
   address: z.string().trim().max(1000).nullable().optional(),
+  // This branch's own payment accounts; null / '' = use the shop-wide ones from POS settings
+  promptpayId: promptpayIdSchema.nullable().optional(),
+  bankAccount: bankAccountSchema.nullable().optional(),
+});
+const branchValues = (b) => ({
+  ...b,
+  address: b.address || null,
+  promptpayId: b.promptpayId || null,
+  bankAccount: b.bankAccount ? JSON.stringify(b.bankAccount) : null,
 });
 const branchId = z.object({ id: z.coerce.number().int().positive() });
 const duplicateCode = (err) => {
@@ -52,8 +68,9 @@ router.post('/branches', requirePermission('settings:manage'), validate({ body: 
   const id = await db
     .tx(async (conn) => {
       const [r] = await conn.query(
-        'INSERT INTO branches (org_id, code, name, branch_no, address) VALUES (:orgId, :code, :name, :branchNo, :address)',
-        { orgId, ...b, address: b.address || null },
+        `INSERT INTO branches (org_id, code, name, branch_no, address, promptpay_id, bank_account)
+         VALUES (:orgId, :code, :name, :branchNo, :address, :promptpayId, :bankAccount)`,
+        { orgId, ...branchValues(b) },
       );
       // Warehouse codes are unique per org too; add a suffix if WH-<code> is taken
       const [[taken]] = await conn.query('SELECT COUNT(*) AS n FROM warehouses WHERE org_id = :orgId AND code = :code', { orgId, code: `WH-${b.code}` });
@@ -89,11 +106,12 @@ router.patch(
     }
 
     // Only the fields that were sent
-    const cols = { code: 'code', name: 'name', branchNo: 'branch_no', address: 'address', isActive: 'is_active' };
+    const cols = { code: 'code', name: 'name', branchNo: 'branch_no', address: 'address', promptpayId: 'promptpay_id', bankAccount: 'bank_account', isActive: 'is_active' };
     const sets = Object.keys(cols).filter((k) => b[k] !== undefined);
     if (!sets.length) throw badRequest('ไม่มีข้อมูลที่จะแก้ไข');
+    const values = branchValues(b);
     const params = { id, orgId };
-    for (const k of sets) params[k] = k === 'isActive' ? (b[k] ? 1 : 0) : k === 'address' ? b[k] || null : b[k];
+    for (const k of sets) params[k] = k === 'isActive' ? (b[k] ? 1 : 0) : values[k];
     await db
       .query(`UPDATE branches SET ${sets.map((k) => `${cols[k]} = :${k}`).join(', ')} WHERE id = :id AND org_id = :orgId`, params)
       .catch(duplicateCode);

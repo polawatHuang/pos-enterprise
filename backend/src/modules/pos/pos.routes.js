@@ -12,6 +12,7 @@ const ai = require('../../integrations/ai');
 const service = require('./pos.service');
 const discounts = require('./discounts');
 const returns = require('./returns');
+const { paymentFor, promptpayIdSchema, bankAccountSchema } = require('./payment-target');
 const { SLIP_SCHEMA, SLIP_SYSTEM } = require('./slip');
 const { LOCAL_TODAY } = require('../inventory/analytics');
 
@@ -160,16 +161,30 @@ router.get('/lookup', validate({ query: z.object({ code: z.string().trim().min(1
 
 /* --------------------------------------------------------------- settings */
 
+/** The branch whose accounts take this user's payments: the open shift's, else the user's own. */
+async function payingBranch(user) {
+  const shift = await service.currentShift(user.id);
+  return shift?.branch_id ?? user.branchId ?? null;
+}
+
 router.get('/settings', async (req, res) => {
-  const [settings, org] = await Promise.all([
-    service.getSettings(req.user.orgId),
+  const [pay, org] = await Promise.all([
+    paymentFor(req.user.orgId, await payingBranch(req.user)),
     db.one('SELECT name, legal_name, tax_id, address, phone, vat_registered FROM organizations WHERE id = :orgId', { orgId: req.user.orgId }),
   ]);
   res.json({
     data: {
-      ...settings,
-      bankAccount: { ...settings.bankAccount, display: service.formatAccountNo(settings.bankAccount?.number) },
-      promptpayEnabled: isValidPromptPayId(settings.promptpayId),
+      ...pay.settings,
+      // what this till charges into (the branch's own account when it has one)
+      promptpayId: pay.promptpayId,
+      bankAccount: pay.bankAccount,
+      promptpayEnabled: isValidPromptPayId(pay.promptpayId),
+      paymentBranch: pay.branch,
+      // the shop-wide accounts edited in POS settings
+      defaults: {
+        promptpayId: pay.settings.promptpayId,
+        bankAccount: { ...pay.settings.bankAccount, display: service.formatAccountNo(pay.settings.bankAccount?.number) },
+      },
       org: {
         name: org.name,
         legalName: org.legal_name,
@@ -187,29 +202,13 @@ router.put(
   requirePermission('pos:manage'),
   validate({
     body: z.object({
-      promptpayId: z
-        .string()
-        .trim()
-        .max(20)
-        .refine((v) => v === '' || isValidPromptPayId(v), 'PromptPay ต้องเป็นเบอร์มือถือ 10 หลัก เลขผู้เสียภาษี 13 หลัก หรือเลขอ้างอิง e-Wallet/K PLUS 15 หลัก')
-        .optional(),
+      promptpayId: promptpayIdSchema.optional(),
       receiptFooter: z.string().trim().max(200).optional(),
       maxDiscountPct: z.coerce.number().min(0).max(100).optional(),
       pointsEarnBaht: z.coerce.number().min(0).max(100_000).optional(),
       pointValue: z.coerce.number().min(0).max(1000).optional(),
       cashLimit: money.optional(),
-      bankAccount: z
-        .object({
-          bank: z.string().trim().min(1).max(60),
-          type: z.string().trim().max(30).default('ออมทรัพย์'),
-          number: z
-            .string()
-            .trim()
-            .transform((v) => v.replace(/[\s-]/g, ''))
-            .refine((v) => /^\d{10,15}$/.test(v), 'เลขที่บัญชีต้องเป็นตัวเลข 10-15 หลัก'),
-          name: z.string().trim().min(1).max(100),
-        })
-        .optional(),
+      bankAccount: bankAccountSchema.optional(),
     }),
   }),
   async (req, res) => {
@@ -220,8 +219,8 @@ router.put(
 );
 
 router.get('/promptpay', validate({ query: z.object({ amount: z.coerce.number().positive().max(10_000_000) }) }), async (req, res) => {
-  const { promptpayId } = await service.getSettings(req.user.orgId);
-  if (!isValidPromptPayId(promptpayId)) throw badRequest('ยังไม่ได้ตั้งค่าหมายเลข PromptPay ของร้าน');
+  const { promptpayId } = await paymentFor(req.user.orgId, await payingBranch(req.user));
+  if (!isValidPromptPayId(promptpayId)) throw badRequest('ยังไม่ได้ตั้งค่าหมายเลข PromptPay ของร้าน/สาขา');
   res.json({ data: { payload: promptPayPayload(promptpayId, req.valid.query.amount), amount: req.valid.query.amount } });
 });
 
@@ -446,7 +445,7 @@ router.post(
     });
     const transRef = slip.transRef ? String(slip.transRef).replace(/\s+/g, '').slice(0, 64) : null;
     const used = transRef ? await db.one('SELECT order_id FROM payment_slips WHERE org_id = :orgId AND trans_ref = :ref', { orgId: req.user.orgId, ref: transRef }) : null;
-    const { promptpayId, bankAccount } = await service.getSettings(req.user.orgId);
+    const { promptpayId, bankAccount } = await paymentFor(req.user.orgId, await payingBranch(req.user));
     // Slips mask most digits (e.g. xxx-x-x5427-x): the visible digits must appear in one of the shop's numbers
     const ours = [String(promptpayId || '').replace(/\D/g, ''), String(bankAccount?.number ?? '').replace(/\D/g, '')].filter(Boolean);
     const receiverDigits = String(slip.receiverAccount ?? '').replace(/\D/g, '');
