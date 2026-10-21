@@ -8,6 +8,7 @@ import { ImagePlus, Loader2, RectangleHorizontal, RectangleVertical, Sparkles, X
 import { toast } from "sonner";
 import { api, apiBlob, ApiError } from "@/lib/api";
 import type { CoverOrientation, CoverProject } from "@/lib/types";
+import { downscaleToDataUrl } from "@/lib/image";
 import { cn, formatDateTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Input, Label, Skeleton } from "@/components/ui/primitives";
@@ -20,15 +21,8 @@ export const coverErrorText = (err: unknown) =>
   err instanceof ApiError && err.code === "INTEGRATION_NOT_CONFIGURED" ? `ยังไม่ได้ตั้งค่า MiniMax บนเซิร์ฟเวอร์: ${err.message}` : err instanceof Error ? err.message : "ทำรายการไม่สำเร็จ";
 
 /** Downscale in the browser (≤1600px) so uploads stay small; PNG keeps transparency for cut-out products. */
-async function fileToDataUrl(file: File): Promise<string> {
-  const bmp = await createImageBitmap(file);
-  const s = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
-  const c = document.createElement("canvas");
-  c.width = Math.round(bmp.width * s);
-  c.height = Math.round(bmp.height * s);
-  c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
-  return file.type === "image/png" ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", 0.88);
-}
+const fileToDataUrl = (file: File) =>
+  downscaleToDataUrl(file, { maxSide: MAX_SIDE, type: file.type === "image/png" ? "png" : "jpeg", quality: 0.88 });
 
 /** Thumbnail from an auth-protected API image URL. */
 export function ApiImage({ src, alt = "", className }: { src: string; alt?: string; className?: string }) {
@@ -123,12 +117,13 @@ function CreateForm() {
 
   const onFile = async (file: File | undefined) => {
     if (!file) return;
-    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) return toast.error("รองรับรูป PNG, JPEG หรือ WebP");
+    // HEIC (iPhone) is converted to JPEG when the browser can decode it (Safari)
+    if (!/^image\/(png|jpeg|webp|heic|heif)$/.test(file.type)) return toast.error("รองรับรูป PNG, JPEG, WebP หรือ HEIC");
     if (file.size > 20 * 1024 * 1024) return toast.error("รูปใหญ่เกิน 20 MB");
     try {
       setImage(await fileToDataUrl(file));
-    } catch {
-      toast.error("อ่านรูปไม่สำเร็จ");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "อ่านรูปไม่สำเร็จ");
     }
   };
 
@@ -271,7 +266,7 @@ function CreateForm() {
             <input
               id="cv-file"
               type="file"
-              accept="image/png,image/jpeg,image/webp"
+              accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
               className="sr-only"
               onChange={(e) => {
                 void onFile(e.target.files?.[0]);

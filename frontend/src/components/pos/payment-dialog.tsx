@@ -6,6 +6,7 @@ import QRCode from "qrcode";
 import { Banknote, CheckCircle2, CreditCard, Landmark, Loader2, QrCode, ScanLine, ShieldAlert, Wallet, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { base64Of, downscaleToDataUrl } from "@/lib/image";
 import type { PaymentMethod, PosSettings, SlipCheck } from "@/lib/types";
 import { cn, formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -37,13 +38,7 @@ export interface PaymentResult {
 
 /** Slip photos are re-encoded to a 1600px JPEG: phone photos are often 5–10 MB. */
 async function slipToBase64(file: File): Promise<string> {
-  const img = await createImageBitmap(file);
-  const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(img.width * scale);
-  canvas.height = Math.round(img.height * scale);
-  canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+  return base64Of(await downscaleToDataUrl(file, { maxSide: 1600, quality: 0.85 }));
 }
 
 export function PaymentDialog({
