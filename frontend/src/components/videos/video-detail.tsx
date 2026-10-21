@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -39,6 +39,17 @@ export function VideoDetailView({ id }: { id: number }) {
     queryFn: () => api.get<VideoDetail>(`/videos/${id}`),
     refetchInterval: (q) => (q.state.data && IN_PROGRESS.includes(q.state.data.status) ? 4000 : false),
   });
+  // Tell the user when a run they were watching finishes; the clip card then sits at the top of the side panel
+  const status = detail.data?.status;
+  const prevStatus = useRef(status);
+  useEffect(() => {
+    const was = prevStatus.current;
+    prevStatus.current = status;
+    if (was && IN_PROGRESS.includes(was) && status === "ready" && detail.data?.outputUrl) {
+      toast.success("คลิปเสร็จแล้ว ดูและดาวน์โหลดได้ที่แผงด้านขวา");
+      document.getElementById("finished-clip")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [status, detail.data?.outputUrl]);
   if (detail.isError) {
     return (
       <div className="py-16 text-center text-sm text-muted-foreground">
@@ -135,6 +146,7 @@ function Editor({ v }: { v: VideoDetail }) {
           ? "shotstack"
           : "";
   const composeReady = composeBlock === "";
+  const done = v.status === "ready" && Boolean(v.outputUrl);
   const compose = () =>
     run(
       "compose",
@@ -430,7 +442,8 @@ function Editor({ v }: { v: VideoDetail }) {
           </Card>
         </div>
 
-        <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+        <aside className={cn("space-y-4 lg:self-start", !v.outputUrl && "lg:sticky lg:top-24")}>
+          {v.outputUrl && <FinishedClip v={v} durable={Boolean(caps?.storage.configured)} />}
           <Progress v={v} visualMode={visualMode} />
           <Card>
             <CardContent className="space-y-3 p-4 text-sm">
@@ -444,9 +457,14 @@ function Editor({ v }: { v: VideoDetail }) {
                 />
               )}
               {composeBlock !== null && (
-                <Button className="w-full" disabled={!composeReady || locked || busy !== null} onClick={() => void compose()}>
+                <Button
+                  className="w-full"
+                  variant={done ? "outline" : undefined}
+                  disabled={!composeReady || locked || busy !== null}
+                  onClick={() => void compose()}
+                >
                   {busy === "compose" || locked ? <Loader2 className="animate-spin" /> : <Film />}
-                  ประกอบเป็นวิดีโอ (ใช้เสียงเดิม)
+                  {done ? "ประกอบใหม่ (ใช้เสียงเดิม)" : "ประกอบเป็นวิดีโอ (ใช้เสียงเดิม)"}
                 </Button>
               )}
               {composeBlock === "shotstack" ? (
@@ -461,13 +479,14 @@ function Editor({ v }: { v: VideoDetail }) {
               ) : null}
               <Button
                 className="w-full"
-                variant={composeReady ? "outline" : undefined}
+                variant={composeReady || done ? "outline" : undefined}
                 disabled={locked || busy !== null || !scenes.length || scenes.some((s) => !s.voiceover.trim()) || (caps !== undefined && !hasVoice)}
                 onClick={() => void generate()}
               >
                 {busy === "gen" || locked ? <Loader2 className="animate-spin" /> : <Sparkles />}
                 {v.status === "ready" || v.status === "parts_ready" ? "สร้างวิดีโอใหม่" : "สร้างวิดีโอ"}
               </Button>
+              {done && <p className="text-xs text-warning">คลิปเสร็จแล้ว — กดปุ่มด้านบนเฉพาะเมื่อต้องการทำใหม่ (ใช้เครดิต Shotstack อีกครั้ง)</p>}
               <p className="text-xs text-muted-foreground">
                 ใช้เสียงพากย์ {scenes.length} ช่วง ({scenes.reduce((n, s) => n + s.voiceover.length, 0)} ตัวอักษร)
                 {visualMode === "ai_clips" ? ` และคลิป AI ${scenes.length} คลิป (มีค่าใช้จ่ายต่อคลิป)` : ""} — ระบบมีป้าย &quot;สร้างด้วย AI&quot; ในคลิปตามข้อกำหนดของแพลตฟอร์ม
@@ -576,31 +595,55 @@ function Progress({ v, visualMode }: { v: VideoDetail; visualMode: VideoVisualMo
   );
 }
 
+/** The finished video, first thing in the side panel so nobody has to scroll to find it. */
+function FinishedClip({ v, durable }: { v: VideoDetail; durable: boolean }) {
+  return (
+    <Card id="finished-clip" className="border-success/40">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Check className="size-4 text-success" /> คลิปของคุณพร้อมแล้ว
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0 text-sm">
+        <video src={v.outputUrl!} controls playsInline className="mx-auto aspect-[9/16] w-full max-w-[240px] rounded-lg bg-black" />
+        <Button asChild className="w-full">
+          <a href={v.outputUrl!} target="_blank" rel="noreferrer noopener" download>
+            <Download /> ดาวน์โหลด MP4
+          </a>
+        </Button>
+        <Button asChild variant="outline" className="w-full">
+          <Link href={`/social?video=${v.id}`}>
+            <Send /> ตั้งเวลาโพสต์คลิปนี้
+          </Link>
+        </Button>
+        {!durable && (
+          <p className="flex gap-1.5 rounded-lg bg-warning-soft px-2.5 py-2 text-xs text-warning">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              ลิงก์นี้หมดอายุในประมาณ 24 ชม. ดาวน์โหลดเก็บไว้ หรือ{" "}
+              <Link href="/settings/integrations" className="font-medium underline">
+                ตั้งค่า R2
+              </Link>{" "}
+              ให้ระบบเก็บไฟล์ถาวร
+            </span>
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function Outputs({ v }: { v: VideoDetail }) {
   const voices = v.assets.filter((a) => a.kind === "voice" && a.url);
   const clips = v.assets.filter((a) => a.kind === "broll");
-  if (!v.outputUrl && !voices.length && !clips.length && !v.hasSubtitles) return null;
+  if (!voices.length && !clips.length && !v.hasSubtitles && !(v.status === "ready" && !v.outputUrl)) return null;
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">ไฟล์ผลลัพธ์</CardTitle>
+        <CardTitle className="text-base">{v.outputUrl ? "ชิ้นส่วนสำหรับตัดต่อเอง" : "ไฟล์ผลลัพธ์"}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 pt-0 text-sm">
-        {v.outputUrl ? (
-          <>
-            <Button asChild className="w-full">
-              <Link href={`/social?video=${v.id}`}>
-                <Send /> ตั้งเวลาโพสต์คลิปนี้
-              </Link>
-            </Button>
-            <video src={v.outputUrl} controls playsInline className="mx-auto aspect-[9/16] w-full max-w-[240px] rounded-lg bg-black" />
-            <Button asChild variant="outline" className="w-full">
-              <a href={v.outputUrl} target="_blank" rel="noreferrer noopener" download>
-                <Download /> ดาวน์โหลด MP4
-              </a>
-            </Button>
-          </>
-        ) : v.status === "ready" ? (
+        {!v.outputUrl && v.status === "ready" ? (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <Clapperboard className="size-4" /> ข้อมูลเดโม — ไม่มีไฟล์วิดีโอจริง
           </p>
