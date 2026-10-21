@@ -133,6 +133,50 @@
   scrollbar-color: color-mix(in oklch, var(--sidebar-muted) 40%, transparent) transparent;
 }
 
+/* Phones: a list table (<table class="table-cards">) shows each row as a card instead of a
+   sideways-scrolling grid. The first cell is the card title; other cells show their column name
+   from data-label. Unlayered, so it wins over the Tailwind utilities on the same elements. */
+@media (max-width: 639.98px) {
+  table.table-cards {
+    min-width: 0;
+  }
+  .table-cards thead {
+    display: none;
+  }
+  .table-cards tbody,
+  .table-cards tr,
+  .table-cards td {
+    display: block;
+  }
+  .table-cards tr {
+    padding: 0.75rem 1rem;
+  }
+  .table-cards td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.125rem 0;
+    text-align: right;
+  }
+  .table-cards td[data-label]::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
+    text-align: left;
+  }
+  .table-cards td:first-child {
+    display: block;
+    padding-bottom: 0.375rem;
+    text-align: left;
+  }
+  .table-cards td:empty,
+  .table-cards td.cards-hide {
+    display: none;
+  }
+}
+
 /* Printing: only the element marked for print is visible. Named pages keep the 80mm receipt
    and A4 documents on their own paper sizes (Chrome/Edge 85+, Safari 18+). */
 @page receipt {

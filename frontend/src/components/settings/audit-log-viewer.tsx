@@ -356,7 +356,7 @@ function AuditRow({
                   </span>
                 )}
                 {r.entityId && !entityFiltered && (
-                  <button onClick={onEntityFilter} className="rounded px-1 hover:bg-accent hover:text-foreground" title="ดูประวัติทั้งหมดของรายการนี้">
+                  <button onClick={onEntityFilter} className="-my-2 rounded p-2 hover:bg-accent hover:text-foreground" title="ดูประวัติทั้งหมดของรายการนี้">
                     <History className="size-3.5" />
                     <span className="sr-only">ดูประวัติทั้งหมดของรายการนี้</span>
                   </button>

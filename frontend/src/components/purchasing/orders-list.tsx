@@ -16,7 +16,7 @@ export function OrdersList() {
   if (!orders.data?.length) return <p className="p-12 text-center text-sm text-muted-foreground">ยังไม่มีใบสั่งซื้อ — สร้างจากแท็บ &quot;สั่งของ&quot;</p>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-sm">
+      <table className="table-cards w-full min-w-[760px] text-sm">
         <thead>
           <tr className="border-b border-border text-left text-xs text-muted-foreground">
             <th className="px-4 py-3 font-medium">เลขที่</th>
@@ -37,16 +37,16 @@ export function OrdersList() {
                 </Link>
                 {po.source === "suggestion" && <span className="ml-1.5 text-[10px] text-muted-foreground">จากคำแนะนำ</span>}
               </td>
-              <td className="px-4 py-3">{po.supplierName ?? "–"}</td>
-              <td className="px-4 py-3">{po.warehouseName}</td>
-              <td className="px-4 py-3 text-muted-foreground">{po.expectedDate ? formatThaiDate(po.expectedDate) : "–"}</td>
-              <td className="px-4 py-3">
+              <td data-label="ผู้ขาย" className="px-4 py-3">{po.supplierName ?? "–"}</td>
+              <td data-label="เข้าคลัง" className="px-4 py-3">{po.warehouseName}</td>
+              <td data-label="ส่งของ" className="px-4 py-3 text-muted-foreground">{po.expectedDate ? formatThaiDate(po.expectedDate) : "–"}</td>
+              <td data-label="รับแล้ว" className="px-4 py-3">
                 <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
                   <div className="h-full bg-success" style={{ width: `${po.receivedPct ?? 0}%` }} />
                 </div>
               </td>
-              <td className="px-4 py-3 text-right tabular-nums">{formatMoney(po.total)}</td>
-              <td className="px-4 py-3">
+              <td data-label="มูลค่า" className="px-4 py-3 text-right tabular-nums">{formatMoney(po.total)}</td>
+              <td data-label="สถานะ" className="px-4 py-3">
                 <Badge tone={PO_STATUS[po.status].tone}>{PO_STATUS[po.status].label}</Badge>
               </td>
             </tr>

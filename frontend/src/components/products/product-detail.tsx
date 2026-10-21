@@ -59,7 +59,7 @@ export function ProductDetail({ id }: { id: number }) {
 
   return (
     <>
-      <Link href="/products" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <Link href="/products" className="mb-2 inline-flex min-h-10 items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> สินค้าทั้งหมด
       </Link>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -152,7 +152,7 @@ export function ProductDetail({ id }: { id: number }) {
             <CardTitle>ความเคลื่อนไหวล่าสุด</CardTitle>
           </CardHeader>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="table-cards w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-y border-border text-left text-xs text-muted-foreground">
                   <th className="px-5 py-2.5 font-medium">เวลา</th>
@@ -173,15 +173,15 @@ export function ProductDetail({ id }: { id: number }) {
                 {movements.data?.map((m) => (
                   <tr key={m.id} className="border-b border-border last:border-0">
                     <td className="px-5 py-2.5 text-muted-foreground">{formatDateTime(m.createdAt)}</td>
-                    <td className="px-5 py-2.5">
+                    <td data-label="ประเภท" className="px-5 py-2.5">
                       <MovementTypeBadge type={m.type} />
                     </td>
-                    <td className="px-5 py-2.5">{m.warehouseName}</td>
-                    <td className={`px-5 py-2.5 text-right font-medium tabular-nums ${m.quantity < 0 ? "text-danger" : "text-success"}`}>
+                    <td data-label="คลัง" className="px-5 py-2.5">{m.warehouseName}</td>
+                    <td data-label="จำนวน" className={`px-5 py-2.5 text-right font-medium tabular-nums ${m.quantity < 0 ? "text-danger" : "text-success"}`}>
                       {m.quantity > 0 ? "+" : ""}
                       {formatNumber(m.quantity)}
                     </td>
-                    <td className="max-w-64 truncate px-5 py-2.5 text-muted-foreground">{m.note ?? "–"}</td>
+                    <td data-label="หมายเหตุ" className="max-w-64 truncate px-5 py-2.5 text-muted-foreground">{m.note ?? "–"}</td>
                   </tr>
                 ))}
               </tbody>

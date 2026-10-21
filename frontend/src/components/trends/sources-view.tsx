@@ -122,7 +122,7 @@ export function SourcesView() {
           ) : !runs.data?.length ? (
             <p className="p-6 text-center text-sm text-muted-foreground">ยังไม่มีประวัติ</p>
           ) : (
-            <table className="w-full min-w-[600px] text-sm">
+            <table className="table-cards w-full min-w-[600px] text-sm">
               <thead className="border-y border-border bg-muted/40 text-left text-xs text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2 font-medium">เวลา</th>
@@ -136,8 +136,8 @@ export function SourcesView() {
                 {runs.data.map((r) => (
                   <tr key={r.id}>
                     <td className="whitespace-nowrap px-4 py-2.5">{formatDateTime(r.startedAt)}</td>
-                    <td className="px-4 py-2.5">{r.sourceName}</td>
-                    <td className="px-4 py-2.5">
+                    <td data-label="แหล่งข้อมูล" className="px-4 py-2.5">{r.sourceName}</td>
+                    <td data-label="ผล" className="px-4 py-2.5">
                       {r.status === "succeeded" ? (
                         <span className="inline-flex items-center gap-1 text-success">
                           <CheckCircle2 className="size-4" /> สำเร็จ
@@ -152,10 +152,10 @@ export function SourcesView() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">
+                    <td data-label="พบ / ใหม่" className="px-4 py-2.5 text-right tabular-nums">
                       {r.itemsFound} / {r.itemsNew}
                     </td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{r.triggeredBy}</td>
+                    <td data-label="สั่งโดย" className="px-4 py-2.5 text-muted-foreground">{r.triggeredBy}</td>
                   </tr>
                 ))}
               </tbody>

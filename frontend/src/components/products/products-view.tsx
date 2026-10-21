@@ -120,7 +120,7 @@ export function ProductsView() {
           <p className="py-16 text-center text-sm text-muted-foreground">ไม่พบสินค้าที่ตรงกับเงื่อนไข</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="table-cards w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground">
                   <th className="px-4 py-3 font-medium">สินค้า</th>
@@ -149,15 +149,15 @@ export function ProductsView() {
                           {p.barcode ? ` · ${p.barcode}` : ""}
                         </p>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{p.categoryName ?? "–"}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{formatMoney(p.price)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{formatMoney(p.cost)}</td>
-                      <td className="px-4 py-3 text-right">
+                      <td data-label="หมวดหมู่" className="px-4 py-3 text-muted-foreground">{p.categoryName ?? "–"}</td>
+                      <td data-label="ราคาขาย" className="px-4 py-3 text-right tabular-nums">{formatMoney(p.price)}</td>
+                      <td data-label="ต้นทุน" className="px-4 py-3 text-right tabular-nums text-muted-foreground">{formatMoney(p.cost)}</td>
+                      <td data-label="คงเหลือ" className="px-4 py-3 text-right">
                         <Badge tone={p.onHand <= 0 ? "danger" : low ? "warning" : "neutral"}>
                           {formatNumber(p.onHand)} {p.unit}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3">
+                      <td data-label="สถานะ" className="px-4 py-3">
                         <Badge tone={STATUS_LABEL[p.status].tone}>{STATUS_LABEL[p.status].label}</Badge>
                       </td>
                     </tr>

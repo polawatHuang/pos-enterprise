@@ -102,7 +102,7 @@ function CreateCountDialog() {
 
   return (
     <DialogContent title="สร้างรอบตรวจนับ" description="ระบบบันทึกยอดในระบบ ณ ตอนนี้ ขายต่อได้ระหว่างนับ (ระบบหักยอดขายระหว่างนับให้)">
-      <div className="grid gap-4">
+      <div className="grid gap-4 [&>*]:min-w-0">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="c-wh">คลัง</Label>
           <NativeSelect id="c-wh" value={wh} onChange={(e) => setWarehouseId(e.target.value)}>

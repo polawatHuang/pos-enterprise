@@ -237,7 +237,7 @@ function Waste() {
         <p className="py-10 text-center text-sm text-muted-foreground">ไม่มีของเสียในเดือนนี้ 🎉</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[520px] text-sm">
+          <table className="table-cards w-full min-w-[520px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">สินค้า</th>
@@ -250,13 +250,13 @@ function Waste() {
               {d.items.map((i) => (
                 <tr key={`${i.productId}-${i.reason}`} className="border-b border-border last:border-0">
                   <td className="py-2 pr-3">{i.name}</td>
-                  <td className="py-2 pr-3">
+                  <td data-label="เหตุผล" className="py-2 pr-3">
                     <Badge tone={i.reason === "expired" ? "warning" : "neutral"}>{i.reasonLabel}</Badge>
                   </td>
-                  <td className="py-2 pr-3 text-right tabular-nums">
+                  <td data-label="จำนวน" className="py-2 pr-3 text-right tabular-nums">
                     {formatNumber(i.qty)} {i.unit}
                   </td>
-                  <td className="py-2 text-right tabular-nums">{formatMoney(i.value)}</td>
+                  <td data-label="มูลค่าทุน" className="py-2 text-right tabular-nums">{formatMoney(i.value)}</td>
                 </tr>
               ))}
             </tbody>

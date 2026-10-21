@@ -33,7 +33,7 @@ export function SuppliersList() {
         <p className="p-12 text-center text-sm text-muted-foreground">ยังไม่มีผู้ขาย — กด &quot;เพิ่มผู้ขาย&quot; เพื่อเริ่ม แล้วผูกกับสินค้าเพื่อสั่งซื้อได้เร็วขึ้น</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="table-cards w-full min-w-[640px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3 font-medium">ผู้ขาย</th>
@@ -53,10 +53,10 @@ export function SuppliersList() {
                     {!s.isActive && <Badge className="ml-2">ปิดใช้</Badge>}
                     {s.taxId && <p className="text-xs text-muted-foreground">{s.taxId}</p>}
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">{[s.contact, s.phone].filter(Boolean).join(" · ") || "–"}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{s.leadTimeDays}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{s.productCount}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{s.openOrders}</td>
+                  <td data-label="ติดต่อ" className="px-4 py-3 text-muted-foreground">{[s.contact, s.phone].filter(Boolean).join(" · ") || "–"}</td>
+                  <td data-label="ส่งของ (วัน)" className="px-4 py-3 text-right tabular-nums">{s.leadTimeDays}</td>
+                  <td data-label="สินค้า" className="px-4 py-3 text-right tabular-nums">{s.productCount}</td>
+                  <td data-label="ใบที่รอของ" className="px-4 py-3 text-right tabular-nums">{s.openOrders}</td>
                 </tr>
               ))}
             </tbody>

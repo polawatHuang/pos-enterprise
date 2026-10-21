@@ -51,7 +51,7 @@ export function DocumentDetail({ id }: { id: number }) {
     <>
       <div className="mb-4 flex flex-col gap-3 print:hidden lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <Link href="/accounting/documents" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <Link href="/accounting/documents" className="inline-flex min-h-10 items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="size-4" /> เอกสารทั้งหมด
           </Link>
           <div className="mt-1 flex flex-wrap items-center gap-2">

@@ -242,7 +242,7 @@ function LevelsTable({
         <ErrorNote onRetry={() => levels.refetch()} />
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-sm">
+          <table className="table-cards w-full min-w-[900px] text-sm">
             <thead>
               <tr className="border-y border-border text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3 font-medium">สินค้า</th>
@@ -275,16 +275,16 @@ function LevelsTable({
                         {l.status !== "ok" && <Badge tone={meta.tone} className="px-1.5 py-0 text-[10px]">{meta.label}</Badge>}
                       </p>
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td data-label="คงเหลือ" className="px-4 py-3 text-right">
                       <Badge tone={l.status === "out" ? "danger" : l.status === "low" ? "warning" : "neutral"}>
                         {formatNumber(l.quantity)} {l.unit}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="ยอดขาย 14 วัน" className="px-4 py-3">
                       <Sparkline values={l.spark} />
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">{l.avgDaily ? l.avgDaily.toFixed(1) : "–"}</td>
-                    <td
+                    <td data-label="ขาย/วัน" className="px-4 py-3 text-right tabular-nums">{l.avgDaily ? l.avgDaily.toFixed(1) : "–"}</td>
+                    <td data-label="พอขายอีก"
                       className={cn(
                         "px-4 py-3 text-right font-medium tabular-nums",
                         l.daysCover !== null && l.daysCover < 3 ? "text-danger" : l.daysCover !== null && l.daysCover < 7 ? "text-warning" : "",
@@ -292,7 +292,7 @@ function LevelsTable({
                     >
                       {l.daysCover === null ? "–" : `${formatNumber(l.daysCover)} วัน`}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                    <td data-label="จุดสั่งซื้อ" className="px-4 py-3 text-right tabular-nums text-muted-foreground">
                       {editable && warehouseId ? (
                         <Input
                           key={`${l.productId}-${l.reorderPoint}`}
@@ -308,7 +308,7 @@ function LevelsTable({
                         formatNumber(l.reorderPoint)
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right font-medium tabular-nums">{formatMoney(l.value)}</td>
+                    <td data-label="มูลค่า" className="px-4 py-3 text-right font-medium tabular-nums">{formatMoney(l.value)}</td>
                   </tr>
                 );
               })}
@@ -342,7 +342,7 @@ function MovementsTable({ warehouseId }: { warehouseId: string }) {
         <p className="self-center text-xs text-muted-foreground">แสดง 100 รายการล่าสุด</p>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[820px] text-sm">
+        <table className="table-cards w-full min-w-[820px] text-sm">
           <thead>
             <tr className="border-y border-border text-left text-xs text-muted-foreground">
               <th className="px-4 py-3 font-medium">เวลา</th>
@@ -379,21 +379,21 @@ function MovementsTable({ warehouseId }: { warehouseId: string }) {
             {movements.data?.map((m) => (
               <tr key={m.id} className="border-b border-border last:border-0">
                 <td className="whitespace-nowrap px-4 py-2.5 text-muted-foreground">{formatDateTime(m.createdAt)}</td>
-                <td className="px-4 py-2.5">
+                <td data-label="ประเภท" className="px-4 py-2.5">
                   <MovementTypeBadge type={m.type} />
                 </td>
-                <td className="px-4 py-2.5">
+                <td data-label="สินค้า" className="px-4 py-2.5">
                   <Link href={`/products/${m.productId}`} className="hover:text-primary">
                     {m.productName}
                   </Link>
                 </td>
-                <td className="px-4 py-2.5">{m.warehouseName}</td>
-                <td className={`px-4 py-2.5 text-right font-medium tabular-nums ${m.quantity < 0 ? "text-danger" : "text-success"}`}>
+                <td data-label="คลัง" className="px-4 py-2.5">{m.warehouseName}</td>
+                <td data-label="จำนวน" className={`px-4 py-2.5 text-right font-medium tabular-nums ${m.quantity < 0 ? "text-danger" : "text-success"}`}>
                   {m.quantity > 0 ? "+" : ""}
                   {formatNumber(m.quantity)}
                 </td>
-                <td className="px-4 py-2.5 text-muted-foreground">{m.userName ?? "ระบบ"}</td>
-                <td className="max-w-56 truncate px-4 py-2.5 text-muted-foreground">{m.note ?? "–"}</td>
+                <td data-label="โดย" className="px-4 py-2.5 text-muted-foreground">{m.userName ?? "ระบบ"}</td>
+                <td data-label="หมายเหตุ" className="max-w-56 truncate px-4 py-2.5 text-muted-foreground">{m.note ?? "–"}</td>
               </tr>
             ))}
           </tbody>

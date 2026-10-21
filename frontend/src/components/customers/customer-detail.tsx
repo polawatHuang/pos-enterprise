@@ -368,7 +368,7 @@ export function CustomerDetail({ id }: { id: number }) {
 
 function BackLink() {
   return (
-    <Link href="/customers" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+    <Link href="/customers" className="inline-flex min-h-10 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
       <ArrowLeft className="size-4" /> ลูกค้าทั้งหมด
     </Link>
   );

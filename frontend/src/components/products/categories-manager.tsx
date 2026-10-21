@@ -50,7 +50,7 @@ export function CategoriesManager() {
         description="จัดกลุ่มสินค้าเพื่อค้นหา ทำรายงาน และตั้งกฎการขาย (ช่วงเวลาห้ามขาย / ยืนยันอายุ 20+)"
         actions={
           <>
-            <Link href="/products" className="text-sm text-muted-foreground hover:text-foreground">
+            <Link href="/products" className="inline-flex min-h-10 items-center text-sm text-muted-foreground hover:text-foreground">
               ← สินค้าทั้งหมด
             </Link>
             {canWrite && categories.data && categories.data.length > 0 && (

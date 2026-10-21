@@ -108,7 +108,7 @@ export function DocumentEditor({ initial, defaultType }: { initial?: AccDocument
 
   return (
     <>
-      <Link href="/accounting/documents" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <Link href="/accounting/documents" className="mb-2 inline-flex min-h-10 items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> เอกสารทั้งหมด
       </Link>
       <h1 className="mb-6 text-2xl font-semibold tracking-tight">{initial ? "แก้ไขฉบับร่าง" : `สร้าง${DOC_TYPE_LABEL[docType]}`}</h1>
