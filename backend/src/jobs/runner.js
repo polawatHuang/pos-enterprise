@@ -3,6 +3,7 @@
 const os = require('node:os');
 const db = require('../db/pool');
 const logger = require('../core/logger');
+const runtime = require('../config/runtime');
 const handlers = require('./handlers');
 
 const WORKER_ID = `${os.hostname()}:${process.pid}`;
@@ -66,6 +67,7 @@ async function runOne(job) {
  */
 async function runDue({ maxJobs = 20, timeBudgetMs = 45_000 } = {}) {
   const started = Date.now();
+  await runtime.load(); // keys saved from the web UI, also for the in-process worker that serves no requests
   await db.query(
     `UPDATE jobs SET status = 'queued', locked_at = NULL
       WHERE status = 'running' AND locked_at < UTC_TIMESTAMP() - INTERVAL :mins MINUTE`,

@@ -5,6 +5,7 @@ const logger = require('../../core/logger');
 const { localDate, localTime } = require('../../utils/dates');
 const { notify } = require('../notifications/notify');
 const { salesStats, daysCover, LOCAL_TODAY } = require('./analytics');
+const runtime = require('../../config/runtime');
 
 /** Days-of-cover below this counts as "running out" even before the reorder point. */
 const COVER_DAYS = 3;
@@ -38,7 +39,7 @@ async function saveSetting(orgId, key, value) {
 /** Token of the org's active LINE OA (saved in Inbox settings, or LINE_CHANNEL_ACCESS_TOKEN). */
 async function lineToken(orgId) {
   const ch = await db.one("SELECT * FROM channels WHERE org_id = :orgId AND platform = 'line' AND is_active = 1 ORDER BY id LIMIT 1", { orgId });
-  if (!ch) return process.env.LINE_CHANNEL_ACCESS_TOKEN || null;
+  if (!ch) return runtime.get('LINE_CHANNEL_ACCESS_TOKEN') || null;
   return require('../inbox/inbox.service').channelToken(ch);
 }
 

@@ -32,10 +32,10 @@ const adapter = defineAdapter(
     getClient() {
       const { MINIMAX_API_KEY, MINIMAX_BASE_URL } = adapter.requireConfig();
       // Re-create when the key changes (e.g. tests, key rotation without restart)
-      if (!client || clientKey !== MINIMAX_API_KEY) {
+      if (!client || clientKey !== `${MINIMAX_API_KEY}|${MINIMAX_BASE_URL}`) {
         const Anthropic = require('@anthropic-ai/sdk').default;
         client = new Anthropic({ apiKey: MINIMAX_API_KEY, baseURL: MINIMAX_BASE_URL, maxRetries: 2, timeout: 60_000 });
-        clientKey = MINIMAX_API_KEY;
+        clientKey = `${MINIMAX_API_KEY}|${MINIMAX_BASE_URL}`;
       }
       return client;
     },

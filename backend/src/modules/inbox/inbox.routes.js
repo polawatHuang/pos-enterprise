@@ -12,6 +12,7 @@ const { notFound, badRequest, conflict } = require('../../core/errors');
 const ai = require('../../integrations/ai');
 const inbox = require('./inbox.service');
 const { replyToConversation } = require('./agent.service');
+const runtime = require('../../config/runtime');
 
 const router = express.Router();
 router.use(authenticate);
@@ -355,7 +356,7 @@ router.get('/channels', requirePermission('inbox:read'), async (req, res) => {
       aiEnabled: Boolean(c.ai_enabled),
       isActive: Boolean(c.is_active),
       openCount: Number(c.open_count),
-      hasToken: Boolean(c.has_token) || (c.platform === 'line' && Boolean(process.env.LINE_CHANNEL_ACCESS_TOKEN)),
+      hasToken: Boolean(c.has_token) || (c.platform === 'line' && Boolean(runtime.get('LINE_CHANNEL_ACCESS_TOKEN'))),
       webhookUrl: WEBHOOK_PATH[c.platform] ? `${base}${WEBHOOK_PATH[c.platform]}` : null,
       supported: ['line', 'facebook', 'instagram', 'website'].includes(c.platform),
     })),
