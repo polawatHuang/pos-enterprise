@@ -153,3 +153,23 @@ test('categories: create, unique names, rename and delete leaves products uncate
   const p = await db.one('SELECT category_id FROM products WHERE id = :id', { id: t.productId });
   assert.equal(p.category_id, null);
 });
+
+test('every sale appears in รายรับ-รายจ่าย as one income row, with its items on click', async () => {
+  const res = await owner.get('/api/accounting/transactions?pageSize=50');
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  const sales = res.body.data.filter((r) => r.source === 'sale');
+  assert.equal(sales.length, 2, 'the two POS sales of this org');
+  const first = sales.find((s) => s.vatAmount === 10);
+  assert.deepEqual([first.type, first.category, first.amount, first.netAmount, first.itemCount], ['income', 'ยอดขาย', 100, 110, 1]);
+  assert.match(first.description, /^ขาย /);
+  assert.equal(res.body.meta.income, 210, 'summary includes sales (before VAT): 100 + 110');
+
+  const onlyManual = await owner.get('/api/accounting/transactions?source=txn');
+  assert.ok(onlyManual.body.data.every((r) => r.source === 'txn'));
+
+  const detail = await owner.get(`/api/accounting/transactions/sales/${first.id}`);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.data.items[0].name, 'สินค้าทดสอบภาษี');
+  assert.equal(detail.body.data.payments[0].method, 'cash');
+  assert.equal((await owner.get('/api/accounting/transactions/sales/1')).status, 404, 'another org order');
+});

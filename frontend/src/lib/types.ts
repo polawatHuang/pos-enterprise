@@ -627,6 +627,11 @@ export type VatMode = "none" | "exclusive" | "inclusive";
 
 export interface Transaction {
   id: number;
+  /** "txn" = entered in รายรับ-รายจ่าย; "sale" = a POS/online order shown here (id is the order id) */
+  source: "txn" | "sale";
+  orderNo: string | null;
+  channel: string | null;
+  itemCount: number | null;
   type: TxnType;
   category: string;
   amount: number;

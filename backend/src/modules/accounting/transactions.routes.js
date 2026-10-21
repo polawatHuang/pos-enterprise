@@ -9,6 +9,8 @@ const { audit } = require('../../core/audit');
 const { notFound, conflict, badRequest } = require('../../core/errors');
 const { r2, postJournal, reverseJournalsFor, transactionLines } = require('./ledger.service');
 const { getTaxSettings } = require('../org/tax');
+const env = require('../../config/env');
+const { getOrder } = require('../pos/pos.service');
 
 const router = express.Router();
 
@@ -93,6 +95,11 @@ const txnBody = z
 function mapTxn(r) {
   return {
     id: r.id,
+    // 'txn' = entered here; 'sale' = a POS/online order (read-only here, posted by the sale itself)
+    source: r.source ?? 'txn',
+    orderNo: r.order_no ?? null,
+    channel: r.channel ?? null,
+    itemCount: r.item_count == null ? null : Number(r.item_count),
     type: r.type,
     category: r.category,
     amount: Number(r.amount),
@@ -121,6 +128,26 @@ const SELECT_TXN = `
          (SELECT d.id FROM documents d WHERE d.transaction_id = t.id AND d.doc_type = 'wht_certificate' AND d.status <> 'void' LIMIT 1) AS wht_certificate_id
     FROM transactions t LEFT JOIN users u ON u.id = t.created_by`;
 
+/**
+ * Income/expense entries plus every sale (POS and online orders), one row per order, so the list
+ * shows all money in and out. Sales are already in the ledger via their own journal entries;
+ * this only merges them into the view (stored data and VAT reports are unchanged).
+ */
+const ENTRIES = `(
+  SELECT 'txn' AS source, t.id, t.type, t.category, t.amount, t.vat_amount, t.vat_claimable, t.wht_amount, t.wht_rate, t.wht_income_type,
+         t.txn_date, t.description, t.counterparty, t.counterparty_tax_id, t.counterparty_type, t.payment_method, t.status, t.ai_extracted,
+         t.created_by, t.created_at, NULL AS order_no, NULL AS channel, NULL AS item_count
+    FROM transactions t WHERE t.org_id = :orgId
+  UNION ALL
+  SELECT 'sale', so.id, 'income', 'ยอดขาย', so.total - so.vat_amount, so.vat_amount, 0, 0, NULL, NULL,
+         DATE(CONVERT_TZ(so.ordered_at, '+00:00', :tz)), CONCAT('ขาย ', so.order_no), c.name, NULL, NULL,
+         (SELECT p.method FROM payments p WHERE p.order_id = so.id ORDER BY p.amount DESC LIMIT 1),
+         CASE WHEN so.status IN ('cancelled', 'refunded') THEN 'void' ELSE 'posted' END, 0,
+         so.created_by, so.ordered_at, so.order_no, so.channel, (SELECT COUNT(*) FROM sales_order_items i WHERE i.order_id = so.id)
+    FROM sales_orders so LEFT JOIN customers c ON c.id = so.customer_id
+   WHERE so.org_id = :orgId AND so.status <> 'pending'
+) e`;
+
 router.get(
   '/',
   requirePermission('accounting:read'),
@@ -132,6 +159,7 @@ router.get(
       to: z.iso.date().optional(),
       q: z.string().trim().max(100).optional(),
       includeVoid: z.enum(['true', 'false']).optional(),
+      source: z.enum(['txn', 'sale']).optional(),
       page: z.coerce.number().int().min(1).default(1),
       pageSize: z.coerce.number().int().min(1).max(200).default(25),
     }),
@@ -140,6 +168,8 @@ router.get(
     const f = req.valid.query;
     const params = {
       orgId: req.user.orgId,
+      tz: env.APP_TZ_OFFSET,
+      source: f.source ?? null,
       type: f.type ?? null,
       category: f.category || null,
       from: f.from ?? null,
@@ -148,17 +178,23 @@ router.get(
       limit: f.pageSize,
       offset: (f.page - 1) * f.pageSize,
     };
-    const where = `t.org_id = :orgId
-      AND (:type IS NULL OR t.type = :type) AND (:category IS NULL OR t.category = :category)
-      AND (:from IS NULL OR t.txn_date >= :from) AND (:to IS NULL OR t.txn_date <= :to)
-      AND (:q IS NULL OR t.description LIKE :q OR t.counterparty LIKE :q)
-      ${f.includeVoid === 'true' ? '' : "AND t.status = 'posted'"}`;
-    const rows = await db.query(`${SELECT_TXN} WHERE ${where} ORDER BY t.txn_date DESC, t.id DESC LIMIT :limit OFFSET :offset`, params);
+    const where = `(:source IS NULL OR e.source = :source)
+      AND (:type IS NULL OR e.type = :type) AND (:category IS NULL OR e.category = :category)
+      AND (:from IS NULL OR e.txn_date >= :from) AND (:to IS NULL OR e.txn_date <= :to)
+      AND (:q IS NULL OR e.description LIKE :q OR e.counterparty LIKE :q)
+      ${f.includeVoid === 'true' ? '' : "AND e.status = 'posted'"}`;
+    const rows = await db.query(
+      `SELECT e.*, DATE_FORMAT(e.txn_date, '%Y-%m-%d') AS txn_date_str, u.full_name AS created_by_name,
+              CASE WHEN e.source = 'txn' THEN (SELECT d.id FROM documents d WHERE d.transaction_id = e.id AND d.doc_type = 'wht_certificate' AND d.status <> 'void' LIMIT 1) END AS wht_certificate_id
+         FROM ${ENTRIES} LEFT JOIN users u ON u.id = e.created_by
+        WHERE ${where} ORDER BY e.txn_date DESC, e.created_at DESC, e.id DESC LIMIT :limit OFFSET :offset`,
+      params,
+    );
     const sum = await db.one(
       `SELECT COUNT(*) AS n,
-              COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount END), 0) AS income,
-              COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount END), 0) AS expense
-         FROM transactions t WHERE ${where}`,
+              COALESCE(SUM(CASE WHEN e.type = 'income' THEN e.amount END), 0) AS income,
+              COALESCE(SUM(CASE WHEN e.type = 'expense' THEN e.amount END), 0) AS expense
+         FROM ${ENTRIES} WHERE ${where}`,
       params,
     );
     res.json({
@@ -167,6 +203,11 @@ router.get(
     });
   },
 );
+
+/** What a sale row contains (items, payments) for accounting users, who may not have POS access. */
+router.get('/sales/:id', requirePermission('accounting:read'), validate({ params: z.object({ id: z.coerce.number().int().positive() }) }), async (req, res) => {
+  res.json({ data: await getOrder(req.user.orgId, req.valid.params.id) });
+});
 
 router.post('/', requirePermission('accounting:write'), validate({ body: txnBody }), async (req, res) => {
   const b = req.valid.body;

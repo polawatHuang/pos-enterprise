@@ -5,7 +5,8 @@ const { AppError } = require('./errors');
 const logger = require('./logger');
 
 function notFoundHandler(req, res) {
-  res.status(404).json({ error: { code: 'NOT_FOUND', message: `Route ${req.method} ${req.path} not found` } });
+  // Usually a frontend newer than this backend: the message says which route is missing
+  res.status(404).json({ error: { code: 'ROUTE_NOT_FOUND', message: `Route ${req.method} ${req.path} not found` } });
 }
 
 function errorHandler(err, req, res, next) {
