@@ -120,6 +120,24 @@ function Editor({ v }: { v: VideoDetail }) {
       return next;
     });
 
+  // Finished speech can be assembled again without paying for it, as long as the spoken text is unchanged
+  const voicedScenes = new Set(v.assets.filter((a) => a.kind === "voice" && a.status === "ready" && a.url).map((a) => a.sceneIndex));
+  const canCompose =
+    ["parts_ready", "ready", "failed"].includes(v.status) &&
+    scenes.length > 0 &&
+    scenes.length === v.scenes.length &&
+    scenes.every((s, i) => s.voiceover === v.scenes[i].voiceover && voicedScenes.has(i));
+  const composeReady = canCompose && Boolean(caps?.compose.configured);
+  const compose = () =>
+    run(
+      "compose",
+      async () => {
+        if (dirty) await save();
+        await api.post(`/videos/${v.id}/compose`);
+      },
+      "เริ่มประกอบคลิปแล้ว ใช้เสียงพากย์เดิม ไม่มีค่าเสียงเพิ่ม",
+    );
+
   const generate = () =>
     run(
       "gen",
@@ -418,8 +436,24 @@ function Editor({ v }: { v: VideoDetail }) {
                   needsPublic={visualMode === "my_footage" || coverId !== null}
                 />
               )}
+              {composeReady && (
+                <Button className="w-full" disabled={locked || busy !== null} onClick={() => void compose()}>
+                  {busy === "compose" || locked ? <Loader2 className="animate-spin" /> : <Film />}
+                  ประกอบเป็นวิดีโอ (ใช้เสียงเดิม)
+                </Button>
+              )}
+              {canCompose && caps && !caps.compose.configured && (
+                <p className="rounded-lg bg-muted px-3 py-2 text-xs">
+                  เสียงพากย์พร้อมแล้ว ขาดแค่ Shotstack สำหรับประกอบเป็นไฟล์วิดีโอ ·{" "}
+                  <Link href="/settings/integrations" className="font-medium text-primary hover:underline">
+                    ตั้งค่า Shotstack
+                  </Link>{" "}
+                  แล้วกลับมากด &quot;ประกอบเป็นวิดีโอ&quot; ได้เลย ไม่ต้องสร้างเสียงใหม่
+                </p>
+              )}
               <Button
                 className="w-full"
+                variant={composeReady ? "outline" : undefined}
                 disabled={locked || busy !== null || !scenes.length || scenes.some((s) => !s.voiceover.trim()) || (caps !== undefined && !hasVoice)}
                 onClick={() => void generate()}
               >

@@ -370,6 +370,39 @@ router.post('/:id/generate', validate({ params: idParam }), async (req, res) => 
   res.status(202).json({ data: { status: 'voicing', estimate: estimate(v, scenes) } });
 });
 
+/**
+ * Assemble the finished parts into a video without paying for speech again: for a project that
+ * stopped at "parts ready" (no Shotstack yet) or whose render failed. Clips that failed are fine,
+ * compose falls back to the product image for those scenes.
+ */
+const DURABLE_FOR_HOURS = 20; // MiniMax/Hailuo links expire after ~24h unless copied to R2
+router.post('/:id/compose', validate({ params: idParam }), async (req, res) => {
+  const v = await getProject(req.user.orgId, req.valid.params.id);
+  if (!['parts_ready', 'ready', 'failed'].includes(v.status)) throw conflict('ประกอบคลิปได้เมื่อชิ้นส่วนพร้อมแล้วเท่านั้น');
+  shotstack.requireConfig();
+  const scenes = parseJson(v.script_json)?.scenes ?? [];
+  const voices = await db.query(
+    `SELECT scene_index, external_url, created_at < UTC_TIMESTAMP() - INTERVAL ${DURABLE_FOR_HOURS} HOUR AS old
+       FROM video_assets WHERE video_project_id = :id AND kind IN ('voice', 'broll') AND status = 'ready'`,
+    { id: v.id },
+  );
+  const voiced = new Set(voices.filter((a) => a.external_url).map((a) => a.scene_index));
+  if (!scenes.length || scenes.some((_, i) => !voiced.has(i))) {
+    throw conflict('เสียงพากย์ยังไม่ครบทุกฉาก — กด "สร้างวิดีโอใหม่" แทน');
+  }
+  const r2Base = r2.isConfigured() ? runtime.get('R2_PUBLIC_BASE_URL').replace(/\/+$/, '') : null;
+  if (voices.some((a) => Number(a.old) && !(r2Base && a.external_url?.startsWith(`${r2Base}/`)))) {
+    throw conflict('ไฟล์เสียง/คลิปจาก MiniMax หมดอายุแล้ว (เกิน 24 ชม.) — กด "สร้างวิดีโอใหม่" แทน');
+  }
+  if (v.visual_mode === 'my_footage' && !env.PUBLIC_API_URL) throw badRequest('ต้องตั้ง PUBLIC_API_URL (โดเมน HTTPS ของ backend) ก่อน เพื่อให้ระบบตัดต่อดึงฟุตเทจได้');
+  await db.query("UPDATE video_projects SET status = 'compositing', stage_detail = 'เข้าคิวประกอบคลิป', error = NULL, output_url = NULL WHERE id = :id", {
+    id: v.id,
+  });
+  await enqueue('video.compose', { projectId: v.id }, { orgId: req.user.orgId, maxAttempts: 1 });
+  audit(req, 'video.compose', 'video_project', v.id);
+  res.status(202).json({ data: { status: 'compositing' } });
+});
+
 router.get('/:id/subtitles.srt', validate({ params: idParam }), async (req, res) => {
   const v = await getProject(req.user.orgId, req.valid.params.id);
   if (!v.subtitle_srt) throw notFound('ยังไม่มีไฟล์ซับ (สร้างวิดีโอก่อน)');
