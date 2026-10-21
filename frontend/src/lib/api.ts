@@ -7,9 +7,6 @@
  */
 const API_BASE = `${(process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/+$/, "")}/api`;
 
-/** Absolute URL of an API path for links and downloads (<a href>), honouring NEXT_PUBLIC_API_URL. */
-export const apiUrl = (path: string) => `${API_BASE}${path}`;
-
 export class ApiError extends Error {
   constructor(
     public status: number,
