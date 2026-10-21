@@ -171,6 +171,31 @@
     border: 0 !important;
     padding: 0 !important;
   }
+  /* Accounting reports: the report card alone, black on white (also from dark mode), full width */
+  .print-report,
+  .print-report * {
+    visibility: visible;
+  }
+  .print-report {
+    page: a4;
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    max-width: none;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+  .print-report * {
+    color: #000 !important;
+    background: transparent !important;
+    border-color: #999 !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+  }
+  .print-report .overflow-x-auto {
+    overflow: visible !important;
+  }
 }
 
 /* POS: a line flashes when it is scanned into the cart */

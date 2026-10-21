@@ -123,6 +123,27 @@ export async function apiBlob(apiPath: string): Promise<Blob> {
   return res.blob();
 }
 
+/**
+ * Download an API file (e.g. a CSV export) through the same base URL and auth cookie as every
+ * other call, refreshing an expired session once. A plain <a href="/api/..."> would break in
+ * direct mode (NEXT_PUBLIC_API_URL) and after the 15-minute access token expires.
+ */
+export async function apiDownload(path: string, query: Query | undefined, filename: string): Promise<void> {
+  const doFetch = () => fetch(buildUrl(path, query), { credentials: "include", headers: { Accept: "text/csv, application/octet-stream, */*" } });
+  let res = await doFetch().catch(networkError);
+  if (res.status === 401 && (await refreshSession())) res = await doFetch().catch(networkError);
+  if (!res.ok) await parse(res); // throws the backend's error message
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export const api = {
   get: <T>(path: string, query?: Query) => apiFetch<{ data: T }>(path, { query }).then((r) => r.data),
   post: <T>(path: string, json?: unknown) => apiFetch<{ data: T }>(path, { method: "POST", json }).then((r) => r.data),
