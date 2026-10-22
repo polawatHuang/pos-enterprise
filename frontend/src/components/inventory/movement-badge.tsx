@@ -11,6 +11,7 @@ export const MOVEMENT_META: Record<MovementType, { label: string; tone: "success
   opening: { label: "ยอดยกมา", tone: "neutral" },
   count: { label: "ตรวจนับ", tone: "warning" },
   waste: { label: "ของเสีย", tone: "danger" },
+  welfare: { label: "เบิกสวัสดิการ", tone: "warning" },
 };
 
 export function MovementTypeBadge({ type }: { type: MovementType }) {
