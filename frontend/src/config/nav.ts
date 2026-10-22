@@ -1,4 +1,5 @@
 import {
+  BadgePercent,
   BarChart3,
   Bot,
   Boxes,
@@ -67,6 +68,7 @@ export const navGroups: NavGroup[] = [
     label: "ขายและสต๊อก",
     items: [
       { href: "/pos", label: "ขายหน้าร้าน (POS)", icon: ShoppingCart, permission: "pos:sell", phase: 1 },
+      { href: "/promotions", label: "โปรโมชั่น", icon: BadgePercent, permission: "pos:sell", phase: 1 },
       { href: "/products", label: "สินค้า", icon: Package, permission: "products:read", phase: 1 },
       { href: "/products/categories", label: "หมวดหมู่สินค้า", icon: Tags, permission: "products:read", phase: 1 },
       { href: "/inventory", label: "สต๊อกสินค้า", icon: Boxes, permission: "inventory:read", phase: 1 },

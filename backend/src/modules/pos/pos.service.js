@@ -8,6 +8,7 @@ const { postJournal, reverseJournalsFor, saleLines } = require('../accounting/le
 const { localDate, localTime } = require('../../utils/dates');
 const { getTaxSettings, lineRate } = require('../org/tax');
 const discounts = require('./discounts');
+const promotions = require('./promotions');
 // returns.js needs warehouseForBranch from this module: load it lazily to avoid a require cycle
 const listForOrder = (orderId) => require('./returns').listForOrder(orderId);
 
@@ -160,7 +161,8 @@ async function shiftReport(shiftId) {
     { shiftId },
   );
   const disc = await db.one(
-    `SELECT COALESCE(SUM(discount), 0) AS discount, COALESCE(SUM(vat_amount), 0) AS vat, COALESCE(SUM(points_used), 0) AS points
+    `SELECT COALESCE(SUM(discount), 0) AS discount, COALESCE(SUM(promo_discount), 0) AS promo, COALESCE(SUM(vat_amount), 0) AS vat,
+            COALESCE(SUM(points_used), 0) AS points
        FROM sales_orders WHERE shift_id = :shiftId AND status = 'completed'`,
     { shiftId },
   );
@@ -170,6 +172,7 @@ async function shiftReport(shiftId) {
     kind: s.closed_at ? 'Z' : 'X',
     difference: s.closing_cash == null ? null : r2(Number(s.closing_cash) - Number(s.expected_cash)),
     discount: Number(disc.discount),
+    promoDiscount: Number(disc.promo),
     vat: Number(disc.vat),
     pointsUsed: Number(disc.points),
     cashMovements: moves.map((m) => ({ type: m.type, amount: Number(m.amount), reason: m.reason, createdAt: m.created_at })),
@@ -287,6 +290,7 @@ async function checkout(user, input) {
   const tax = await getTaxSettings(user.orgId);
   const canOverride = user.permissions.includes('pos:manage');
   const now = localTime();
+  const promos = await promotions.activePromotions(user.orgId, shift.branch_id);
 
   return db.tx(async (conn) => {
     const warehouseId = await warehouseForBranch(conn, user.orgId, shift.branch_id);
@@ -296,7 +300,7 @@ async function checkout(user, input) {
     let needsAge = false;
     for (const item of input.items) {
       const [[p]] = await conn.query(
-        `SELECT p.id, p.name, p.price, p.cost, p.vat_type, p.status, c.sale_block, c.age_restricted
+        `SELECT p.id, p.name, p.price, p.cost, p.vat_type, p.status, p.category_id, c.sale_block, c.age_restricted
            FROM products p LEFT JOIN product_categories c ON c.id = p.category_id
           WHERE p.id = :id AND p.org_id = :orgId`,
         { id: item.productId, orgId: user.orgId },
@@ -326,10 +330,13 @@ async function checkout(user, input) {
       // Expiry-tracked items leave first-expiry-first-out; near-expiry lots carry their markdown
       const lotAllocations = await consumeFefo(conn, { warehouseId, productId: p.id, qty: r2(item.quantity * factor), forSale: true });
       const markdown = r2(lotAllocations.reduce((s, a) => s + (a.qty * (unitPrice / factor) * a.markdownPct) / 100, 0));
-      const discount = r2((item.discount ?? 0) + markdown);
-      if (discount > gross) throw badRequest(`ส่วนลดของ ${p.name} มากกว่าราคา`);
       lines.push({
         productId: p.id,
+        categoryId: p.category_id == null ? null : Number(p.category_id),
+        manualDiscount: r2(item.discount ?? 0),
+        gross,
+        // promotions are priced per piece: packs/cartons and manager price overrides stay out of them
+        promoEligible: !unit && unitPrice === listPrice,
         name: p.name,
         unitName: unit?.name ?? null,
         unitFactor: factor,
@@ -337,20 +344,33 @@ async function checkout(user, input) {
         listPrice,
         unitPrice,
         unitCost: r2(Number(p.cost) * factor),
-        discount,
-        lineTotal: r2(gross - discount),
         vatType: p.vat_type,
         markdown,
         lotAllocations,
       });
     }
+    // Promotions stack in layers: time discount, then the near-expiry markdown, then bundle/multi-buy sets
+    const priced = promotions.priceCart(
+      lines.map((l) => ({ productId: l.productId, categoryId: l.categoryId, price: l.unitPrice, quantity: l.quantity, markdown: l.markdown, eligible: l.promoEligible })),
+      promos,
+    );
+    lines.forEach((l, i) => {
+      const pl = priced.lines[i];
+      l.markdown = pl.markdownKept;
+      l.promoDiscount = pl.promoDiscount;
+      l.promotionId = pl.promotionId;
+      l.discount = r2(l.manualDiscount + pl.markdownKept + pl.promoDiscount);
+      if (l.discount > l.gross + 1e-9) throw badRequest(`ส่วนลดของ ${l.name} มากกว่าราคา`);
+      l.lineTotal = r2(l.gross - l.discount);
+    });
+    const promoDiscount = priced.total;
     if (needsAge && !input.ageConfirmed) throw badRequest('มีสินค้าจำกัดอายุ กรุณายืนยันว่าลูกค้าอายุ 20 ปีขึ้นไป');
 
     // Cashier discount limit is checked before points: redeeming points is the customer's right.
     const beforePoints = computeTotals(lines, input.discount ?? 0, tax);
     const listGross = lines.reduce((s, l) => s + l.listPrice * l.quantity, 0);
-    // Near-expiry markdowns are the shop's own price cut, not the cashier's discount
-    const markdownTotal = lines.reduce((s, l) => s + l.markdown, 0);
+    // Near-expiry markdowns and promotions are the shop's own price cuts, not the cashier's discount
+    const markdownTotal = lines.reduce((s, l) => s + l.markdown + l.promoDiscount, 0);
     const discountPct = listGross ? ((listGross - beforePoints.total - markdownTotal) / listGross) * 100 : 0;
     if (discountPct > settings.maxDiscountPct + 1e-9 && !canOverride) {
       throw forbidden(`ส่วนลดรวมเกิน ${settings.maxDiscountPct}% ต้องให้ผู้จัดการอนุมัติ`);
@@ -387,9 +407,9 @@ async function checkout(user, input) {
     const [ins] = await conn.query(
       `INSERT INTO sales_orders (org_id, branch_id, customer_id, shift_id, order_no, channel, status, subtotal, discount,
                                  shipping_fee, vat_amount, total, cost_total, platform_fee, points_earned, points_used,
-                                 discount_code_id, code_discount, ordered_at, created_by)
+                                 discount_code_id, code_discount, promo_discount, ordered_at, created_by)
        VALUES (:orgId, :branchId, :customerId, :shiftId, :tmpNo, 'pos', 'completed', :subtotal, :discount,
-               0, :vat, :total, :cost, 0, :pointsEarned, :pointsUsed, :codeId, :codeDiscount, UTC_TIMESTAMP(), :userId)`,
+               0, :vat, :total, :cost, 0, :pointsEarned, :pointsUsed, :codeId, :codeDiscount, :promoDiscount, UTC_TIMESTAMP(), :userId)`,
       {
         orgId: user.orgId,
         branchId: shift.branch_id,
@@ -401,6 +421,7 @@ async function checkout(user, input) {
         pointsUsed,
         codeId,
         codeDiscount,
+        promoDiscount,
         userId: user.id,
       },
     );
@@ -411,8 +432,10 @@ async function checkout(user, input) {
 
     for (const l of lines) {
       await conn.query(
-        `INSERT INTO sales_order_items (order_id, product_id, variant_id, name, unit_name, unit_factor, quantity, unit_price, unit_cost, discount, line_total, lot_allocations)
-         VALUES (:orderId, :productId, 0, :name, :unitName, :unitFactor, :quantity, :unitPrice, :unitCost, :discount, :lineTotal, :alloc)`,
+        `INSERT INTO sales_order_items (order_id, product_id, variant_id, name, unit_name, unit_factor, quantity, unit_price, unit_cost, discount,
+                                        promo_discount, promotion_id, line_total, lot_allocations)
+         VALUES (:orderId, :productId, 0, :name, :unitName, :unitFactor, :quantity, :unitPrice, :unitCost, :discount,
+                 :promoDiscount, :promotionId, :lineTotal, :alloc)`,
         { orderId, ...l, alloc: l.lotAllocations.length ? JSON.stringify(l.lotAllocations) : null },
       );
       await applyMovement(conn, {
@@ -462,7 +485,7 @@ async function checkout(user, input) {
       userId: user.id,
       lines: saleLines({ total: totals.total, vat: totals.vat, cost: totals.cost, payments: payRows }),
     });
-    return { orderId, orderNo, ...totals, change, pointsEarned, pointsUsed, codeDiscount, warehouseId };
+    return { orderId, orderNo, ...totals, change, pointsEarned, pointsUsed, codeDiscount, promoDiscount, warehouseId };
   });
 }
 
@@ -482,7 +505,8 @@ async function getOrder(orgId, orderId) {
   );
   if (!o) throw notFound('ไม่พบบิล');
   const items = await db.query(
-    'SELECT id, product_id, name, unit_name, quantity, returned_qty, unit_price, discount, line_total FROM sales_order_items WHERE order_id = :orderId ORDER BY id',
+    `SELECT i.id, i.product_id, i.name, i.unit_name, i.quantity, i.returned_qty, i.unit_price, i.discount, i.promo_discount, i.line_total, pr.name AS promotion_name
+       FROM sales_order_items i LEFT JOIN pos_promotions pr ON pr.id = i.promotion_id WHERE i.order_id = :orderId ORDER BY i.id`,
     { orderId },
   );
   const payments = await db.query('SELECT method, amount, reference, paid_at FROM payments WHERE order_id = :orderId ORDER BY id', {
@@ -508,6 +532,7 @@ async function getOrder(orgId, orderId) {
     total: Number(o.total),
     orderedAt: o.ordered_at,
     codeDiscount: Number(o.code_discount ?? 0),
+    promoDiscount: Number(o.promo_discount ?? 0),
     discountCode: o.discount_code ?? null,
     refundedAmount: Number(o.refunded_amount ?? 0),
     returns: await listForOrder(o.id),
@@ -520,6 +545,8 @@ async function getOrder(orgId, orderId) {
       quantity: Number(i.quantity),
       unitPrice: Number(i.unit_price),
       discount: Number(i.discount),
+      promoDiscount: Number(i.promo_discount ?? 0),
+      promotionName: i.promotion_name ?? null,
       lineTotal: Number(i.line_total),
     })),
     payments: payments.map((p) => ({ method: p.method, amount: Number(p.amount), reference: p.reference, paidAt: p.paid_at })),

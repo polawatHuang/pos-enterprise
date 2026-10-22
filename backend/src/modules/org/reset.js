@@ -67,6 +67,8 @@ const STEPS = [
   ['product_knowledge', 'DELETE FROM product_knowledge WHERE org_id = :orgId'],
   ['product_units', 'DELETE FROM product_units WHERE org_id = :orgId'],
   ['product_variants', 'DELETE v FROM product_variants v JOIN products p ON p.id = v.product_id WHERE p.org_id = :orgId'],
+  // promotion items and branches cascade from pos_promotions
+  ['pos_promotions', 'DELETE FROM pos_promotions WHERE org_id = :orgId'],
   ['products', 'DELETE FROM products WHERE org_id = :orgId'],
   ['product_categories', 'DELETE FROM product_categories WHERE org_id = :orgId'],
   ['suppliers', 'DELETE FROM suppliers WHERE org_id = :orgId'],

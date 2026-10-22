@@ -524,6 +524,69 @@ export interface CatalogItem {
   trackExpiry: boolean;
   /** Next lot to sell is marked down (near expiry): pct off for its qty base units */
   markdown: { pct: number; qty: number; expiry: string | null } | null;
+  /** promotions running now at this branch that include the item */
+  promos?: PromoTag[];
+  /** price after the best time discount running now, if any */
+  promoPrice?: number | null;
+}
+
+export type PromotionKind = "time_discount" | "bundle" | "multi_buy";
+export type PromotionDiscountType = "percent" | "amount_off" | "set_price";
+
+export interface PromoTag {
+  id: number;
+  kind: PromotionKind;
+  label: string;
+}
+
+export interface PromotionSlot {
+  qty: number;
+  productIds: number[];
+  categoryIds: number[];
+  products: { id: number; name: string; price: number }[];
+  categories: { id: number; name: string }[];
+}
+
+export interface Promotion {
+  id: number;
+  name: string;
+  kind: PromotionKind;
+  discountType: PromotionDiscountType;
+  value: number;
+  startsOn: string | null;
+  endsOn: string | null;
+  /** bit 0 = Sunday ... bit 6 = Saturday */
+  daysMask: number;
+  timeFrom: string | null;
+  timeTo: string | null;
+  isActive: boolean;
+  /** empty = every branch */
+  branches: number[];
+  branchNames: string[];
+  slots: PromotionSlot[];
+  label: string;
+  status: "running" | "scheduled" | "ended" | "off";
+  editable: boolean;
+  orders: number;
+  discountTotal: number;
+}
+
+export interface PromoSuggestion {
+  promotionId: number;
+  name: string;
+  label: string;
+  need: number;
+  saving: number;
+  message: string;
+  /** each with the baht it saves when added */
+  items: (CatalogItem & { saving?: number })[];
+}
+
+export interface CartQuote {
+  lines: { promoDiscount: number; markdownKept: number; promotionId: number | null; promotionName: string | null }[];
+  applied: { promotionId: number; name: string; discount: number }[];
+  total: number;
+  suggestions: PromoSuggestion[];
 }
 
 export type PaymentMethod = "cash" | "promptpay" | "card" | "transfer" | "ewallet";
@@ -555,6 +618,7 @@ export interface ShiftReport extends Shift {
   kind: "X" | "Z";
   cashierName: string;
   discount: number;
+  promoDiscount: number;
   vat: number;
   pointsUsed: number;
   cashMovements: { type: CashMoveType; amount: number; reason: string; createdAt: string }[];
@@ -628,10 +692,13 @@ export interface PosOrder {
     returnedQty: number;
     unitPrice: number;
     discount: number;
+    promoDiscount: number;
+    promotionName: string | null;
     lineTotal: number;
   }[];
   payments: { method: string; amount: number; reference: string | null; paidAt: string }[];
   codeDiscount: number;
+  promoDiscount: number;
   discountCode: string | null;
   refundedAmount: number;
   returns: SalesReturn[];

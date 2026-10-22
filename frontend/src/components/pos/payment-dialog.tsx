@@ -7,12 +7,13 @@ import { Banknote, CheckCircle2, CreditCard, Landmark, Loader2, QrCode, ScanLine
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { base64Of, downscaleToDataUrl } from "@/lib/image";
-import type { PaymentMethod, PosSettings, SlipCheck } from "@/lib/types";
+import type { CatalogItem, PaymentMethod, PosSettings, PromoSuggestion, SlipCheck } from "@/lib/types";
 import { cn, formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
 import { r2 } from "./cart";
+import { Upsell } from "./upsell";
 import { isUnreadable, readFileNow, UNREADABLE_HELP } from "@/lib/files";
 
 const METHODS: { value: PaymentMethod; label: string; icon: typeof Banknote; key: string }[] = [
@@ -52,6 +53,8 @@ export function PaymentDialog({
   initialMethod = "cash",
   needsAge,
   ageConfirmedByCustomer,
+  suggestions = [],
+  onAddSuggestion,
   onQr,
   onConfirm,
 }: {
@@ -61,6 +64,9 @@ export function PaymentDialog({
   initialMethod?: PaymentMethod;
   needsAge: boolean;
   ageConfirmedByCustomer: boolean;
+  /** up-sell hints from the cart quote; adding is offered until a partial payment is taken */
+  suggestions?: PromoSuggestion[];
+  onAddSuggestion?: (item: CatalogItem, qty: number) => void;
   onQr: (payload: string | null, method: PaymentMethod, amount: number) => void;
   onConfirm: (p: PaymentResult) => void;
 }) {
@@ -163,6 +169,8 @@ export function PaymentDialog({
           {!tenders.length && <li className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">แบ่งจ่ายได้: เลือกวิธีอื่นแล้วใส่ยอดบางส่วน ส่วนที่เหลือรับเป็นเงินสด</li>}
         </ul>
       </div>
+
+      {onAddSuggestion && !tenders.length && <Upsell suggestions={suggestions} onAdd={onAddSuggestion} disabled={busy} className="mt-3" />}
 
       {needsAge && (
         <label className={cn("mt-3 flex items-center gap-2 rounded-xl p-3 text-sm", ageOk ? "bg-success-soft text-success" : "bg-warning-soft text-warning")}>

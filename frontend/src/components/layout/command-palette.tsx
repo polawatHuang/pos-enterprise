@@ -6,6 +6,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   ArrowRight,
+  BadgePercent,
   Boxes,
   ClipboardList,
   Clock,
@@ -51,6 +52,7 @@ const ACTIONS: { label: string; href: string; icon: LucideIcon; permission: stri
   { label: "สั่งของ (ยอดแนะนำแบบ 7-Eleven)", href: "/purchasing", icon: Truck, permission: "inventory:read", keywords: "สั่งซื้อ po ใบสั่งซื้อ order" },
   { label: "รับสินค้าเข้า / ปรับสต๊อก", href: "/inventory", icon: PackagePlus, permission: "inventory:write", keywords: "รับของ สต๊อก stock" },
   { label: "เริ่มตรวจนับสต๊อก", href: "/inventory/counts", icon: ClipboardList, permission: "inventory:count", keywords: "นับ count stocktake" },
+  { label: "สร้างโปรโมชั่น / ลดราคาตามเวลา", href: "/promotions", icon: BadgePercent, permission: "pos:manage", keywords: "โปร promotion ซื้อคู่ 2 ชิ้น ลดราคา bundle" },
   { label: "ดูสินค้าใกล้หมดอายุ", href: "/inventory/expiry", icon: Hourglass, permission: "inventory:read", keywords: "หมดอายุ expiry ของเสีย" },
   { label: "สร้างเอกสาร (ใบเสนอราคา/ใบกำกับภาษี)", href: "/accounting/documents/new", icon: FilePlus2, permission: "accounting:write", keywords: "เอกสาร invoice ใบเสร็จ" },
   { label: "สร้างวิดีโอ AI", href: "/videos", icon: Video, permission: "video:create", keywords: "วิดีโอ video คลิป" },

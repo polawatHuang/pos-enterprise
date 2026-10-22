@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -586,6 +586,7 @@ CREATE TABLE sales_orders (
   points_used      INT NOT NULL DEFAULT 0,
   discount_code_id BIGINT UNSIGNED NULL,
   code_discount    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  promo_discount   DECIMAL(14,2) NOT NULL DEFAULT 0,
   refunded_amount  DECIMAL(14,2) NOT NULL DEFAULT 0,
   ordered_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by       BIGINT UNSIGNED NULL,
@@ -614,9 +615,12 @@ CREATE TABLE sales_order_items (
   unit_price  DECIMAL(14,2) NOT NULL,
   unit_cost   DECIMAL(14,2) NOT NULL DEFAULT 0,
   discount    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  promo_discount DECIMAL(14,2) NOT NULL DEFAULT 0 COMMENT 'part of discount that came from a promotion',
+  promotion_id BIGINT UNSIGNED NULL,
   line_total  DECIMAL(14,2) NOT NULL,
   lot_allocations JSON NULL COMMENT '[{lotId, qty}] taken FEFO, restored on void',
   KEY idx_soi_product (product_id),
+  KEY idx_soi_promo (promotion_id),
   CONSTRAINT fk_soi_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE CASCADE,
   CONSTRAINT fk_soi_product FOREIGN KEY (product_id) REFERENCES products(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -683,6 +687,51 @@ CREATE TABLE promotions (
   ends_at      DATETIME NULL,
   is_active    TINYINT(1) NOT NULL DEFAULT 1,
   CONSTRAINT fk_promo_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- POS promotions (time_discount / bundle / multi_buy), per branch; see migration 018
+CREATE TABLE pos_promotions (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id         BIGINT UNSIGNED NOT NULL,
+  name           VARCHAR(191) NOT NULL,
+  kind           ENUM('time_discount','bundle','multi_buy') NOT NULL,
+  discount_type  ENUM('percent','amount_off','set_price') NOT NULL,
+  value          DECIMAL(12,2) NOT NULL,
+  starts_on      DATE NULL,
+  ends_on        DATE NULL,
+  days_mask      TINYINT UNSIGNED NOT NULL DEFAULT 127 COMMENT 'bit 0 = Sunday ... bit 6 = Saturday',
+  time_from      CHAR(5) NULL COMMENT 'HH:MM local; with time_to may wrap past midnight',
+  time_to        CHAR(5) NULL,
+  is_active      TINYINT(1) NOT NULL DEFAULT 1,
+  created_by     BIGINT UNSIGNED NULL,
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_promo_org (org_id, is_active),
+  CONSTRAINT fk_ppromo_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- No rows = every branch
+CREATE TABLE pos_promotion_branches (
+  promotion_id   BIGINT UNSIGNED NOT NULL,
+  branch_id      BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (promotion_id, branch_id),
+  CONSTRAINT fk_ppb_promo FOREIGN KEY (promotion_id) REFERENCES pos_promotions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ppb_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- slot 1 = the products in the deal (bundle: item A); slot 2 = bundle item B.
+-- A row names one product or a whole category; qty = pieces needed from that slot.
+CREATE TABLE pos_promotion_items (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  promotion_id   BIGINT UNSIGNED NOT NULL,
+  slot           TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  product_id     BIGINT UNSIGNED NULL,
+  category_id    BIGINT UNSIGNED NULL,
+  qty            INT UNSIGNED NOT NULL DEFAULT 1,
+  KEY idx_ppi_promo (promotion_id, slot),
+  CONSTRAINT fk_ppi_promo FOREIGN KEY (promotion_id) REFERENCES pos_promotions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ppi_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ppi_category FOREIGN KEY (category_id) REFERENCES product_categories(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE discount_codes (
@@ -1338,6 +1387,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions');
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -12,12 +12,14 @@ const ai = require('../../integrations/ai');
 const service = require('./pos.service');
 const discounts = require('./discounts');
 const returns = require('./returns');
+const promotions = require('./promotions');
 const { paymentFor, promptpayIdSchema, bankAccountSchema } = require('./payment-target');
 const { SLIP_SCHEMA, SLIP_SYSTEM } = require('./slip');
 const { LOCAL_TODAY } = require('../inventory/analytics');
 
 const router = express.Router();
 router.use(authenticate, requirePermission('pos:sell'));
+router.use('/promotions', require('./promotions.routes').router);
 
 const positiveQty = z.coerce.number().positive().max(100_000);
 const money = z.coerce.number().min(0).max(99_999_999);
@@ -84,9 +86,26 @@ async function withUnits(items) {
   return items;
 }
 
-async function sellingWarehouse(req) {
+/** Branch the till sells for: the open shift's, else the user's own. */
+async function sellingBranch(req) {
   const shift = await service.currentShift(req.user.id);
-  const branchId = shift?.branch_id ?? req.user.branchId ?? null;
+  return shift?.branch_id ?? req.user.branchId ?? null;
+}
+
+/** Promotion tags (and a time-discounted price) on catalog items, for the branch that sells. */
+async function withPromos(req, items) {
+  if (!items.length) return items;
+  const promos = await promotions.activePromotions(req.user.orgId, await sellingBranch(req));
+  for (const i of items) {
+    const { tags, promoPrice } = promotions.catalogTags(i, promos);
+    i.promos = tags;
+    i.promoPrice = promoPrice;
+  }
+  return items;
+}
+
+async function sellingWarehouse(req) {
+  const branchId = await sellingBranch(req);
   const wh = await db.one(
     `SELECT id FROM warehouses WHERE org_id = :orgId ORDER BY (branch_id <=> :branchId) DESC, id LIMIT 1`,
     { orgId: req.user.orgId, branchId },
@@ -128,7 +147,7 @@ router.get(
         limit: f.limit,
       },
     );
-    res.json({ data: await withUnits(rows.map(mapCatalog)) });
+    res.json({ data: await withPromos(req, await withUnits(rows.map(mapCatalog))) });
   },
 );
 
@@ -155,9 +174,57 @@ router.get('/lookup', validate({ query: z.object({ code: z.string().trim().min(1
     }
   }
   if (!row) throw notFound(`ไม่พบสินค้ารหัส ${code}`);
-  const [item] = await withUnits([mapCatalog(row)]);
+  const [item] = await withPromos(req, await withUnits([mapCatalog(row)]));
   res.json({ data: { ...item, matchedUnitId: unitId } });
 });
+
+/**
+ * Live price of a cart at this branch: promotion discount per line, the deals applied, and
+ * up-sell hints (deals started but not complete). Checkout prices the same way with priceCart().
+ */
+router.post(
+  '/quote',
+  validate({
+    body: z.object({
+      items: z
+        .array(z.object({ productId: z.number().int().positive(), unitId: z.number().int().positive().nullable().optional(), quantity: z.coerce.number().positive().max(100_000) }))
+        .max(300),
+    }),
+  }),
+  async (req, res) => {
+    const { items } = req.valid.body;
+    const branchId = await sellingBranch(req);
+    const promos = await promotions.activePromotions(req.user.orgId, branchId);
+    if (!items.length || !promos.length) return res.json({ data: { lines: items.map(() => ({ promoDiscount: 0, markdownKept: 0, promotionId: null, promotionName: null })), applied: [], total: 0, suggestions: [] } });
+    const warehouseId = await sellingWarehouse(req);
+    const ids = [...new Set(items.map((i) => i.productId))];
+    const rows = await db.query(`${CATALOG_SELECT} WHERE p.org_id = :orgId AND p.id IN (:ids)`, { orgId: req.user.orgId, warehouseId, ids });
+    const byId = new Map(rows.map((r) => [r.id, mapCatalog(r)]));
+    const lines = items.map((i) => {
+      const p = byId.get(i.productId);
+      if (!p) return { productId: i.productId, categoryId: null, price: 0, quantity: i.quantity, markdown: 0, eligible: false };
+      // estimate of the near-expiry markdown (checkout takes it from the actual lots)
+      const md = !i.unitId && p.markdown ? (Math.min(i.quantity, p.markdown.qty) * p.price * p.markdown.pct) / 100 : 0;
+      return { productId: p.id, categoryId: p.categoryId, price: p.price, quantity: i.quantity, markdown: Math.round(md * 100) / 100, eligible: !i.unitId };
+    });
+    const priced = promotions.priceCart(lines, promos);
+    const candidates = async (slot) => {
+      if (!slot.productIds.length && !slot.categoryIds.length) return [];
+      const found = await db.query(
+        `${CATALOG_SELECT}
+          WHERE p.org_id = :orgId AND p.status = 'active' AND COALESCE(sl.quantity, 0) > 0
+            AND (p.id IN (:pids) OR p.category_id IN (:cids))
+          ORDER BY p.price DESC LIMIT 8`,
+        { orgId: req.user.orgId, warehouseId, pids: slot.productIds.length ? slot.productIds : [0], cids: slot.categoryIds.length ? slot.categoryIds : [0] },
+      );
+      // suggestions() ranks them by the exact saving each one brings
+      return found.map(mapCatalog);
+    };
+    const hints = await promotions.suggestions(lines, promos, candidates);
+    for (const h of hints) h.items = await withPromos(req, await withUnits(h.items));
+    res.json({ data: { ...priced, suggestions: hints } });
+  },
+);
 
 /* --------------------------------------------------------------- settings */
 
