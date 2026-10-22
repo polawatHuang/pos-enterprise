@@ -1,4 +1,5 @@
 import {
+  BadgePercent,
   BarChart3,
   Bot,
   Boxes,
@@ -27,6 +28,7 @@ import {
   TrendingUp,
   Truck,
   Hourglass,
+  HeartHandshake,
   Users,
   ScrollText,
   Contact,
@@ -53,6 +55,9 @@ export const CUSTOMERS_READ = ["pos:sell", "inbox:read", "accounting:read"];
 /** Who may add or edit a customer. */
 export const CUSTOMERS_WRITE = ["pos:sell", "inbox:reply"];
 
+/** Welfare withdrawals: staff who request them, and managers who approve them. */
+export const WELFARE_ACCESS = ["welfare:request", "inventory:approve", "inventory:write"];
+
 /** True when `permissions` satisfies a nav permission (a string, or any one of an array). */
 export function hasPermission(permissions: readonly string[], required: string | readonly string[]) {
   return typeof required === "string" ? permissions.includes(required) : required.some((p) => permissions.includes(p));
@@ -67,6 +72,7 @@ export const navGroups: NavGroup[] = [
     label: "ขายและสต๊อก",
     items: [
       { href: "/pos", label: "ขายหน้าร้าน (POS)", icon: ShoppingCart, permission: "pos:sell", phase: 1 },
+      { href: "/promotions", label: "โปรโมชั่น", icon: BadgePercent, permission: "pos:sell", phase: 1 },
       { href: "/products", label: "สินค้า", icon: Package, permission: "products:read", phase: 1 },
       { href: "/products/categories", label: "หมวดหมู่สินค้า", icon: Tags, permission: "products:read", phase: 1 },
       { href: "/inventory", label: "สต๊อกสินค้า", icon: Boxes, permission: "inventory:read", phase: 1 },
@@ -74,6 +80,7 @@ export const navGroups: NavGroup[] = [
       { href: "/purchasing", label: "สั่งซื้อ & รับของ", icon: Truck, permission: "inventory:read", phase: 1 },
       { href: "/purchasing/suppliers", label: "ผู้ขาย", icon: Factory, permission: "inventory:read", phase: 1 },
       { href: "/inventory/expiry", label: "ใกล้หมดอายุ", icon: Hourglass, permission: "inventory:read", phase: 1 },
+      { href: "/inventory/welfare", label: "เบิกสวัสดิการพนักงาน", icon: HeartHandshake, permission: WELFARE_ACCESS, phase: 1 },
     ],
   },
   {

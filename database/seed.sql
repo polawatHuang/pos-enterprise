@@ -44,7 +44,8 @@ INSERT INTO permissions (id, code, module, description) VALUES
   (23, 'scraping:run', 'scraping', 'ตั้งค่าและสั่งดึงข้อมูล'),
   (24, 'inventory:count', 'inventory', 'ตรวจนับสต๊อก (สแกนนับ)'),
   (25, 'inventory:approve', 'inventory', 'อนุมัติผลตรวจนับและส่วนต่าง'),
-  (26, 'purchasing:write', 'inventory', 'สั่งซื้อ รับของ และโอนย้ายระหว่างสาขา');
+  (26, 'purchasing:write', 'inventory', 'สั่งซื้อ รับของ และโอนย้ายระหว่างสาขา'),
+  (27, 'welfare:request', 'inventory', 'ขอเบิกสินค้าสวัสดิการพนักงาน');
 INSERT INTO roles (id, code, name, description) VALUES
   (1, 'owner', 'เจ้าของกิจการ', 'สิทธิ์ทั้งหมด'),
   (2, 'admin', 'ผู้ดูแลระบบ', 'สิทธิ์ทั้งหมด ยกเว้นจัดการบัญชี owner'),
@@ -56,6 +57,7 @@ INSERT INTO roles (id, code, name, description) VALUES
   (8, 'viewer', 'ผู้ดูรายงาน', 'ดูได้อย่างเดียว');
 INSERT INTO role_permissions (role_id, permission_id) VALUES
   (1, 24), (1, 25), (1, 26), (2, 24), (2, 25), (2, 26), (3, 24), (3, 25), (3, 26), (5, 24),
+  (1, 27), (2, 27), (3, 27), (4, 27), (5, 27), (6, 27), (7, 27),
   (1, 1),
   (1, 2),
   (1, 3),
@@ -196,7 +198,8 @@ INSERT INTO chart_of_accounts (id, org_id, code, name, type) VALUES
   (26, 1, '5600', 'ค่าธรรมเนียมแพลตฟอร์ม', 'expense'),
   (27, 1, '5700', 'ค่าสาธารณูปโภค', 'expense'),
   (28, 1, '5800', 'ค่าบริการซอฟต์แวร์/AI', 'expense'),
-  (29, 1, '5900', 'ค่าใช้จ่ายอื่น', 'expense');
+  (29, 1, '5900', 'ค่าใช้จ่ายอื่น', 'expense'),
+  (30, 1, '5250', 'ค่าสวัสดิการพนักงาน', 'expense');
 INSERT INTO settings (org_id, setting_key, value) VALUES
   (1, 'pos.receipt_footer', '"ขอบคุณที่อุดหนุนค่ะ"'),
   (1, 'tax.vat_rate', '7'),

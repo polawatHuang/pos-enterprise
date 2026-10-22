@@ -18,6 +18,7 @@ import {
   ReceiptText,
   ScanBarcode,
   Settings2,
+  Sparkles,
   ShoppingCart,
   Star,
   TicketPercent,
@@ -27,7 +28,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import type { CatalogItem, DiscountCheck, DiscountCode, HeldBill, PaymentMethod, PosMember, PosOrder, PosSettings, Shift, ShiftReport } from "@/lib/types";
+import type { CartQuote, CatalogItem, DiscountCheck, DiscountCode, HeldBill, PaymentMethod, PosMember, PosOrder, PosSettings, Shift, ShiftReport } from "@/lib/types";
 import { cn, formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ import { LineDialog } from "./line-dialog";
 import { MemberDialog } from "./member-dialog";
 import { METHOD_NAME, PaymentDialog, type PaymentResult } from "./payment-dialog";
 import { Receipt } from "./receipt";
+import { Upsell } from "./upsell";
 import { POS_SETTINGS_KEY, PosSettingsDialog } from "./settings-dialog";
 import { CashDialog, CloseShiftDialog, OpenShiftCard, SHIFT_KEY, ShiftReportView } from "./shift";
 import { ShortcutsDialog } from "./shortcuts";
@@ -100,17 +102,39 @@ export function PosView() {
     placeholderData: keepPreviousData,
   });
 
+  // Promotions are priced by the server (same code as checkout); lines keep the quote for their key
+  // while it matches their quantity, so totals don't flicker while the next quote loads.
+  const quoteItems = cart.map((l) => ({ productId: l.item.id, unitId: l.unitId, quantity: l.quantity }));
+  const quote = useQuery({
+    queryKey: ["pos", "quote", JSON.stringify(quoteItems)],
+    queryFn: async () => ({ ...(await api.post<CartQuote>("/pos/quote", { items: quoteItems })), keys: cart.map((l) => `${l.key}@${l.quantity}`) }),
+    enabled: !!shift.data && cart.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 20_000,
+    refetchInterval: 60_000, // time-window deals start and end while a bill is open
+  });
+  const priced = useMemo<CartLine[]>(() => {
+    const q = cart.length ? quote.data : undefined;
+    if (!q) return cart;
+    return cart.map((l) => {
+      const i = q.keys.indexOf(`${l.key}@${l.quantity}`);
+      const ql = i >= 0 ? q.lines[i] : null;
+      return ql ? { ...l, promo: { discount: ql.promoDiscount, markdown: ql.markdownKept, name: ql.promotionName } } : l;
+    });
+  }, [cart, quote.data]);
+  const suggestions = cart.length ? (quote.data?.suggestions ?? []) : [];
+
   const pointValue = settings.data?.pointValue ?? 0;
   const discountNum = Math.max(Number(discount) || 0, 0);
-  const lines = useMemo(() => totalsOf(cart, 0, 0, tax), [cart, tax]);
+  const lines = useMemo(() => totalsOf(priced, 0, 0, tax), [priced, tax]);
   // A code applies to the subtotal after line discounts, never more than what is left after the bill discount
   const codeIssue = code ? codeProblem(code, lines.subtotal, member?.id ?? null) : null;
   const codeOff = code && !codeIssue ? Math.min(codeAmount(code, lines.subtotal), Math.max(r2(lines.subtotal - discountNum), 0)) : 0;
   const billOff = r2(discountNum + codeOff);
-  const base = useMemo(() => totalsOf(cart, billOff, 0, tax), [cart, billOff, tax]);
+  const base = useMemo(() => totalsOf(priced, billOff, 0, tax), [priced, billOff, tax]);
   const maxPoints = member && pointValue > 0 ? Math.min(member.points, Math.floor(base.total / pointValue)) : 0;
   const points = Math.min(pointsUse, maxPoints);
-  const totals = useMemo(() => totalsOf(cart, billOff, r2(points * pointValue), tax), [cart, billOff, points, pointValue, tax]);
+  const totals = useMemo(() => totalsOf(priced, billOff, r2(points * pointValue), tax), [priced, billOff, points, pointValue, tax]);
   const needsAge = cart.some((l) => l.item.ageRestricted);
   const selectedLine = cart.find((l) => l.key === selected) ?? null;
 
@@ -118,7 +142,7 @@ export function PosView() {
   const post = (m: DisplayMessage) => channel.current?.postMessage(m);
   const cartMessage = (): DisplayMessage => ({
     type: "cart",
-    lines: cart.map((l) => ({ name: l.item.name, unit: unitName(l), quantity: l.quantity, total: lineTotal(l) })),
+    lines: priced.map((l) => ({ name: l.item.name, unit: unitName(l), quantity: l.quantity, total: lineTotal(l) })),
     total: totals.total,
     discount: r2(totals.gross - totals.total),
     member: member ? { name: member.name, points: member.points } : null,
@@ -560,7 +584,7 @@ export function PosView() {
                   สแกนหรือแตะสินค้าเพื่อเริ่มขาย
                 </li>
               )}
-              {cart.map((l) => (
+              {priced.map((l) => (
                 <li
                   key={l.key}
                   onClick={() => setSelected(l.key)}
@@ -577,7 +601,13 @@ export function PosView() {
                       {l.unitId && <Badge tone="primary" className="mr-1 px-1.5 py-0 text-[10px]">{unitName(l)}</Badge>}
                       {formatMoney(unitPrice(l))}
                       {l.discount > 0 && <span className="text-danger"> · ลด {formatMoney(l.discount)}</span>}
-                      {lineMarkdown(l) > 0 && <span className="text-success"> · ลดใกล้หมดอายุ {l.item.markdown?.pct}%</span>}
+                      {(l.promo ? l.promo.markdown : lineMarkdown(l)) > 0 && <span className="text-success"> · ลดใกล้หมดอายุ {l.item.markdown?.pct}%</span>}
+                      {!!l.promo?.discount && (
+                        <span className="text-success">
+                          {" "}
+                          · <Sparkles className="inline size-3" /> {l.promo.name} −{formatMoney(l.promo.discount)}
+                        </span>
+                      )}
                       {l.item.ageRestricted && <span className="text-warning"> · 20+</span>}
                     </p>
                   </div>
@@ -596,9 +626,11 @@ export function PosView() {
                 </li>
               ))}
             </ul>
+            <Upsell suggestions={suggestions} onAdd={(item, qty) => add(item, null, qty)} className="mx-3 mb-3" />
             <div className="space-y-1.5 border-t border-border bg-muted/30 p-4 text-sm">
               <Row label="รวม" value={formatMoney(totals.gross)} />
-              {totals.lineDiscounts > 0 && <Row label="ส่วนลดรายการ" value={`−${formatMoney(totals.lineDiscounts)}`} danger />}
+              {totals.promo > 0 && <Row label="ส่วนลดโปรโมชั่น" value={`−${formatMoney(totals.promo)}`} danger />}
+              {r2(totals.lineDiscounts - totals.promo) > 0 && <Row label="ส่วนลดรายการ" value={`−${formatMoney(r2(totals.lineDiscounts - totals.promo))}`} danger />}
               <div className="flex items-center justify-between gap-3">
                 <label htmlFor="discount" className="text-muted-foreground">
                   ส่วนลดท้ายบิล <kbd className="rounded border border-border bg-muted px-1 text-[10px]">F6</kbd>
@@ -713,6 +745,8 @@ export function PosView() {
             initialMethod={payMethod}
             needsAge={needsAge}
             ageConfirmedByCustomer={ageByCustomer}
+            suggestions={suggestions}
+            onAddSuggestion={(item, qty) => add(item, null, qty)}
             onQr={(qr, method, amount) => {
               const acc = settings.data?.bankAccount;
               post({
@@ -860,18 +894,30 @@ function ProductTile({
       >
         <Star className={cn("size-4", favorite ? "fill-warning text-warning" : "text-muted-foreground")} />
       </button>
-      {item.markdown && !out && (
-        <span className="pointer-events-none absolute -top-2 left-3 rounded-full bg-success px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
-          ลด {item.markdown.pct}% ใกล้หมดอายุ
+      {!out && (item.markdown || item.promos?.length) ? (
+        <span className="pointer-events-none absolute -top-2 left-3 right-8 flex gap-1 overflow-hidden">
+          {item.promos?.slice(0, 2).map((t) => (
+            <span key={t.id} className="shrink-0 rounded-full bg-danger px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
+              {t.label}
+            </span>
+          ))}
+          {item.markdown && <span className="shrink-0 rounded-full bg-success px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">ลด {item.markdown.pct}% ใกล้หมดอายุ</span>}
         </span>
-      )}
+      ) : null}
       {inCart > 0 && (
         <span className="absolute right-2 top-2 grid min-w-6 place-items-center rounded-full bg-primary px-1.5 py-0.5 text-xs font-semibold text-primary-foreground">
           {formatNumber(inCart)}
         </span>
       )}
       <span className="pointer-events-none line-clamp-2 pr-6 text-sm font-medium leading-snug">{item.name}</span>
-      <span className="pointer-events-none mt-auto pt-2 text-lg font-bold text-primary tabular-nums">{formatMoney(item.price)}</span>
+      {item.promoPrice != null && item.promoPrice < item.price ? (
+        <span className="pointer-events-none mt-auto flex items-baseline gap-1.5 pt-2">
+          <span className="text-lg font-bold text-danger tabular-nums">{formatMoney(item.promoPrice)}</span>
+          <span className="text-xs text-muted-foreground line-through tabular-nums">{formatMoney(item.price)}</span>
+        </span>
+      ) : (
+        <span className="pointer-events-none mt-auto pt-2 text-lg font-bold text-primary tabular-nums">{formatMoney(item.price)}</span>
+      )}
       <span className={cn("pointer-events-none flex items-center gap-1 pr-5 text-[11px]", out || low ? "text-danger" : "text-muted-foreground")}>
         {blocked ? (
           <>

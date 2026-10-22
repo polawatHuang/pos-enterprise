@@ -19,6 +19,7 @@ const ACC = {
   AFFILIATE: '4200',
   OTHER_INCOME: '4900',
   COGS: '5100',
+  WELFARE: '5250', // goods given to staff as welfare, at cost
   PLATFORM_FEES: '5600',
   OTHER_EXPENSE: '5900',
 };

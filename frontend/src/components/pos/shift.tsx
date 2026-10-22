@@ -240,7 +240,8 @@ export function ShiftReportView({ report }: { report: ShiftReport }) {
       <Hr />
       <R label="จำนวนบิล" value={String(report.stats.orders)} />
       <R label="ยอดขายสุทธิ" value={formatMoney(report.stats.sales)} />
-      <R label="ส่วนลดรวม" value={formatMoney(report.discount)} />
+      <R label="ส่วนลดท้ายบิล" value={formatMoney(report.discount)} />
+      {report.promoDiscount > 0 && <R label="ส่วนลดโปรโมชั่น" value={formatMoney(report.promoDiscount)} />}
       <R label="VAT" value={formatMoney(report.vat)} />
       {report.stats.voided > 0 && <R label="บิลยกเลิก" value={String(report.stats.voided)} />}
       {report.pointsUsed > 0 && <R label="แต้มที่ใช้" value={String(report.pointsUsed)} />}

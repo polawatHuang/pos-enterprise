@@ -292,7 +292,7 @@ export interface StockLevel {
 
 export type StockStatus = "out" | "low" | "slow" | "ok";
 
-export type MovementType = "purchase" | "sale" | "return" | "adjustment" | "transfer_in" | "transfer_out" | "opening" | "count" | "waste";
+export type MovementType = "purchase" | "sale" | "return" | "adjustment" | "transfer_in" | "transfer_out" | "opening" | "count" | "waste" | "welfare";
 
 export type StockCountStatus = "counting" | "review" | "approved" | "cancelled";
 
@@ -524,6 +524,69 @@ export interface CatalogItem {
   trackExpiry: boolean;
   /** Next lot to sell is marked down (near expiry): pct off for its qty base units */
   markdown: { pct: number; qty: number; expiry: string | null } | null;
+  /** promotions running now at this branch that include the item */
+  promos?: PromoTag[];
+  /** price after the best time discount running now, if any */
+  promoPrice?: number | null;
+}
+
+export type PromotionKind = "time_discount" | "bundle" | "multi_buy";
+export type PromotionDiscountType = "percent" | "amount_off" | "set_price";
+
+export interface PromoTag {
+  id: number;
+  kind: PromotionKind;
+  label: string;
+}
+
+export interface PromotionSlot {
+  qty: number;
+  productIds: number[];
+  categoryIds: number[];
+  products: { id: number; name: string; price: number }[];
+  categories: { id: number; name: string }[];
+}
+
+export interface Promotion {
+  id: number;
+  name: string;
+  kind: PromotionKind;
+  discountType: PromotionDiscountType;
+  value: number;
+  startsOn: string | null;
+  endsOn: string | null;
+  /** bit 0 = Sunday ... bit 6 = Saturday */
+  daysMask: number;
+  timeFrom: string | null;
+  timeTo: string | null;
+  isActive: boolean;
+  /** empty = every branch */
+  branches: number[];
+  branchNames: string[];
+  slots: PromotionSlot[];
+  label: string;
+  status: "running" | "scheduled" | "ended" | "off";
+  editable: boolean;
+  orders: number;
+  discountTotal: number;
+}
+
+export interface PromoSuggestion {
+  promotionId: number;
+  name: string;
+  label: string;
+  need: number;
+  saving: number;
+  message: string;
+  /** each with the baht it saves when added */
+  items: (CatalogItem & { saving?: number })[];
+}
+
+export interface CartQuote {
+  lines: { promoDiscount: number; markdownKept: number; promotionId: number | null; promotionName: string | null }[];
+  applied: { promotionId: number; name: string; discount: number }[];
+  total: number;
+  suggestions: PromoSuggestion[];
 }
 
 export type PaymentMethod = "cash" | "promptpay" | "card" | "transfer" | "ewallet";
@@ -555,6 +618,7 @@ export interface ShiftReport extends Shift {
   kind: "X" | "Z";
   cashierName: string;
   discount: number;
+  promoDiscount: number;
   vat: number;
   pointsUsed: number;
   cashMovements: { type: CashMoveType; amount: number; reason: string; createdAt: string }[];
@@ -628,10 +692,13 @@ export interface PosOrder {
     returnedQty: number;
     unitPrice: number;
     discount: number;
+    promoDiscount: number;
+    promotionName: string | null;
     lineTotal: number;
   }[];
   payments: { method: string; amount: number; reference: string | null; paidAt: string }[];
   codeDiscount: number;
+  promoDiscount: number;
   discountCode: string | null;
   refundedAmount: number;
   returns: SalesReturn[];
@@ -1700,4 +1767,82 @@ export interface CustomerInput {
   address: string | null;
   tags: string[];
   consentMarketing: boolean;
+}
+
+/* ------------------------------------------------- employee welfare withdrawal */
+export type WelfareStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export interface WelfareEmployee {
+  id: number;
+  name: string;
+  branchName: string | null;
+  /** Effective monthly limit at cost; 0 = unlimited */
+  limit: number;
+  limitOverride: number | null;
+  usedThisMonth: number;
+  /** null when unlimited */
+  remaining: number | null;
+}
+
+export interface WelfareWarehouse {
+  id: number;
+  name: string;
+  branchId: number | null;
+  branchName: string | null;
+}
+
+export interface WelfareItem {
+  id: number;
+  productId: number;
+  sku: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitCost: number;
+  lineCost: number;
+  lots: { lotId: number; qty: number; expiry: string | null }[];
+}
+
+export interface WelfareRequest {
+  id: number;
+  requestNo: string;
+  status: WelfareStatus;
+  warehouseId: number;
+  warehouseName: string;
+  employeeId: number;
+  employeeName: string;
+  note: string | null;
+  totalCost: number;
+  requestedBy: number | null;
+  requestedByName: string | null;
+  requestedAt: string;
+  approvedBy: number | null;
+  approvedByName: string | null;
+  approvedAt: string | null;
+  rejectReason: string | null;
+  items: WelfareItem[];
+}
+
+export interface WelfareSummary {
+  month: string;
+  defaultLimit: number;
+  totalApproved: number;
+  totalPending: number;
+  employees: {
+    employeeId: number;
+    name: string;
+    branchName: string | null;
+    limit: number;
+    approved: number;
+    pending: number;
+    used: number;
+    requests: number;
+    remaining: number | null;
+    overLimit: boolean;
+  }[];
+}
+
+export interface WelfareSettings {
+  defaultLimit: number;
+  users: { userId: number; name: string; email: string; branchName: string | null; limit: number | null }[];
 }

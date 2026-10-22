@@ -54,8 +54,13 @@ export function Receipt({ order, settings }: { order: PosOrder; settings?: PosSe
                 <span className="text-[11px]">
                   {i.quantity}
                   {i.unitName ? ` ${i.unitName}` : ""} x {i.unitPrice.toFixed(2)}
-                  {i.discount > 0 ? ` ลด ${i.discount.toFixed(2)}` : ""}
+                  {i.discount - (i.promoDiscount ?? 0) > 0.004 ? ` ลด ${(i.discount - (i.promoDiscount ?? 0)).toFixed(2)}` : ""}
                 </span>
+                {(i.promoDiscount ?? 0) > 0 && (
+                  <span className="block text-[11px]">
+                    โปร {i.promotionName ?? ""} -{i.promoDiscount.toFixed(2)}
+                  </span>
+                )}
               </td>
               <td className="text-right">{i.lineTotal.toFixed(2)}</td>
             </tr>
