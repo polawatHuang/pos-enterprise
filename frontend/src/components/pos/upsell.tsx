@@ -21,7 +21,8 @@ export function Upsell({
 }) {
   if (!suggestions.length) return null;
   return (
-    <div className={cn("space-y-2 rounded-xl border border-success/30 bg-success-soft/40 p-3", className)} data-testid="upsell">
+    // contain inline-size: the sideways-scrolling product row must not widen the cart on phones
+    <div className={cn("space-y-2 rounded-xl border border-success/30 bg-success-soft/40 p-3 [contain:inline-size]", className)} data-testid="upsell">
       <p className="flex items-center gap-1.5 text-xs font-semibold text-success">
         <Sparkles className="size-3.5" /> แนะนำลูกค้าซื้อเพิ่ม
       </p>
