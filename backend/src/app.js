@@ -94,6 +94,7 @@ function createApp() {
   app.use('/api/products', require('./modules/products/products.routes').router);
   app.use('/api/inventory/expiry', require('./modules/inventory/expiry.routes').router);
   app.use('/api/inventory/counts', require('./modules/inventory/counts.routes').router);
+  app.use('/api/inventory/welfare', require('./modules/inventory/welfare.routes').router);
   app.use('/api/inventory', require('./modules/inventory/inventory.routes').router);
   app.use('/api/purchasing', require('./modules/purchasing/purchasing.routes').router);
   app.use('/api/search', require('./modules/search/search.routes').router);

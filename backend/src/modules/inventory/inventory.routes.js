@@ -151,7 +151,7 @@ router.get(
     query: z.object({
       productId: z.coerce.number().int().positive().optional(),
       warehouseId: z.coerce.number().int().positive().optional(),
-      type: z.enum(['purchase', 'sale', 'return', 'adjustment', 'transfer_in', 'transfer_out', 'opening', 'count', 'waste']).optional(),
+      type: z.enum(['purchase', 'sale', 'return', 'adjustment', 'transfer_in', 'transfer_out', 'opening', 'count', 'waste', 'welfare']).optional(),
       limit: z.coerce.number().int().min(1).max(200).default(50),
     }),
   }),

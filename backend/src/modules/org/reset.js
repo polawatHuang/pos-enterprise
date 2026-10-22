@@ -55,6 +55,8 @@ const STEPS = [
   ['scrape_sources', 'DELETE FROM scrape_sources WHERE org_id = :orgId'],
   ['trend_category_benchmarks', 'DELETE FROM trend_category_benchmarks WHERE org_id = :orgId'],
   ['channel_profiles', 'DELETE FROM channel_profiles WHERE org_id = :orgId'],
+  ['welfare_request_items', 'DELETE i FROM welfare_request_items i JOIN welfare_requests r ON r.id = i.request_id WHERE r.org_id = :orgId'],
+  ['welfare_requests', 'DELETE FROM welfare_requests WHERE org_id = :orgId'],
   ['stock_count_items', 'DELETE i FROM stock_count_items i JOIN stock_counts c ON c.id = i.count_id WHERE c.org_id = :orgId'],
   ['stock_counts', 'DELETE FROM stock_counts WHERE org_id = :orgId'],
   ['stock_transfer_items', 'DELETE i FROM stock_transfer_items i JOIN stock_transfers t ON t.id = i.transfer_id WHERE t.org_id = :orgId'],

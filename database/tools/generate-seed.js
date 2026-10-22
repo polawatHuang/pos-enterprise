@@ -94,6 +94,10 @@ const permissions = [
   ['video:create', 'video', 'สร้างวิดีโอ AI'],
   ['scraping:read', 'scraping', 'ดูสินค้าเทรนด์'],
   ['scraping:run', 'scraping', 'ตั้งค่าและสั่งดึงข้อมูล'],
+  ['inventory:count', 'inventory', 'ตรวจนับสต๊อก (สแกนนับ)'],
+  ['inventory:approve', 'inventory', 'อนุมัติผลตรวจนับและส่วนต่าง'],
+  ['purchasing:write', 'inventory', 'สั่งซื้อ รับของ และโอนย้ายระหว่างสาขา'],
+  ['welfare:request', 'inventory', 'ขอเบิกสินค้าสวัสดิการพนักงาน'],
 ];
 out.push('\n-- Roles & permissions (RBAC)');
 insert('permissions', ['id', 'code', 'module', 'description'], permissions.map((p, i) => [i + 1, ...p]));
@@ -104,13 +108,13 @@ const roles = [
   ['manager', 'ผู้จัดการ', 'ดูแลการขาย สต๊อก การตลาด และทีม', [
     'dashboard:view', 'users:read', 'products:read', 'products:write', 'inventory:read', 'inventory:write', 'pos:sell', 'pos:manage',
     'accounting:read', 'inbox:read', 'inbox:reply', 'inbox:manage_ai', 'social:read', 'social:publish', 'video:create',
-    'scraping:read', 'scraping:run', 'audit:read']],
+    'scraping:read', 'scraping:run', 'audit:read', 'inventory:count', 'inventory:approve', 'purchasing:write', 'welfare:request']],
   ['accountant', 'นักบัญชี', 'รายรับรายจ่าย เอกสาร และภาษี', [
-    'dashboard:view', 'accounting:read', 'accounting:write', 'tax:file', 'products:read', 'inventory:read']],
-  ['cashier', 'พนักงานขาย/แคชเชียร์', 'ขายหน้าร้าน', ['pos:sell', 'products:read', 'inventory:read']],
+    'dashboard:view', 'accounting:read', 'accounting:write', 'tax:file', 'products:read', 'inventory:read', 'welfare:request']],
+  ['cashier', 'พนักงานขาย/แคชเชียร์', 'ขายหน้าร้าน', ['pos:sell', 'products:read', 'inventory:read', 'inventory:count', 'welfare:request']],
   ['marketer', 'การตลาด/คอนเทนต์', 'วิดีโอ AI โพสต์ และสินค้าเทรนด์', [
-    'dashboard:view', 'products:read', 'social:read', 'social:publish', 'video:create', 'scraping:read', 'scraping:run']],
-  ['support', 'แอดมินแชต', 'ดูแลแชตลูกค้าและการคืนสินค้า', ['inbox:read', 'inbox:reply', 'products:read', 'inventory:read']],
+    'dashboard:view', 'products:read', 'social:read', 'social:publish', 'video:create', 'scraping:read', 'scraping:run', 'welfare:request']],
+  ['support', 'แอดมินแชต', 'ดูแลแชตลูกค้าและการคืนสินค้า', ['inbox:read', 'inbox:reply', 'products:read', 'inventory:read', 'welfare:request']],
   ['viewer', 'ผู้ดูรายงาน', 'ดูได้อย่างเดียว', [
     'dashboard:view', 'products:read', 'inventory:read', 'accounting:read', 'social:read', 'scraping:read', 'inbox:read']],
 ];
@@ -144,6 +148,7 @@ const coa = [
   ['5000', 'ค่าใช้จ่าย', 'expense'], ['5100', 'ต้นทุนขาย', 'expense'], ['5200', 'เงินเดือนและค่าแรง', 'expense'], ['5300', 'ค่าเช่า', 'expense'],
   ['5400', 'ค่าโฆษณาและการตลาด', 'expense'], ['5500', 'ค่าขนส่ง', 'expense'], ['5600', 'ค่าธรรมเนียมแพลตฟอร์ม', 'expense'],
   ['5700', 'ค่าสาธารณูปโภค', 'expense'], ['5800', 'ค่าบริการซอฟต์แวร์/AI', 'expense'], ['5900', 'ค่าใช้จ่ายอื่น', 'expense'],
+  ['5250', 'ค่าสวัสดิการพนักงาน', 'expense'], // appended last so the ids of the accounts above stay the same
 ];
 insert('chart_of_accounts', ['id', 'org_id', 'code', 'name', 'type'], coa.map((c, i) => [i + 1, 1, ...c]));
 const acct = (code) => coa.findIndex((c) => c[0] === code) + 1;

@@ -292,7 +292,7 @@ export interface StockLevel {
 
 export type StockStatus = "out" | "low" | "slow" | "ok";
 
-export type MovementType = "purchase" | "sale" | "return" | "adjustment" | "transfer_in" | "transfer_out" | "opening" | "count" | "waste";
+export type MovementType = "purchase" | "sale" | "return" | "adjustment" | "transfer_in" | "transfer_out" | "opening" | "count" | "waste" | "welfare";
 
 export type StockCountStatus = "counting" | "review" | "approved" | "cancelled";
 
@@ -1700,4 +1700,82 @@ export interface CustomerInput {
   address: string | null;
   tags: string[];
   consentMarketing: boolean;
+}
+
+/* ------------------------------------------------- employee welfare withdrawal */
+export type WelfareStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export interface WelfareEmployee {
+  id: number;
+  name: string;
+  branchName: string | null;
+  /** Effective monthly limit at cost; 0 = unlimited */
+  limit: number;
+  limitOverride: number | null;
+  usedThisMonth: number;
+  /** null when unlimited */
+  remaining: number | null;
+}
+
+export interface WelfareWarehouse {
+  id: number;
+  name: string;
+  branchId: number | null;
+  branchName: string | null;
+}
+
+export interface WelfareItem {
+  id: number;
+  productId: number;
+  sku: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitCost: number;
+  lineCost: number;
+  lots: { lotId: number; qty: number; expiry: string | null }[];
+}
+
+export interface WelfareRequest {
+  id: number;
+  requestNo: string;
+  status: WelfareStatus;
+  warehouseId: number;
+  warehouseName: string;
+  employeeId: number;
+  employeeName: string;
+  note: string | null;
+  totalCost: number;
+  requestedBy: number | null;
+  requestedByName: string | null;
+  requestedAt: string;
+  approvedBy: number | null;
+  approvedByName: string | null;
+  approvedAt: string | null;
+  rejectReason: string | null;
+  items: WelfareItem[];
+}
+
+export interface WelfareSummary {
+  month: string;
+  defaultLimit: number;
+  totalApproved: number;
+  totalPending: number;
+  employees: {
+    employeeId: number;
+    name: string;
+    branchName: string | null;
+    limit: number;
+    approved: number;
+    pending: number;
+    used: number;
+    requests: number;
+    remaining: number | null;
+    overLimit: boolean;
+  }[];
+}
+
+export interface WelfareSettings {
+  defaultLimit: number;
+  users: { userId: number; name: string; email: string; branchName: string | null; limit: number | null }[];
 }
