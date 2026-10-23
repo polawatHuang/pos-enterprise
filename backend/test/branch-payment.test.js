@@ -32,13 +32,16 @@ const target = (payload) => {
 before(async () => {
   admin = as(await cookie('admin@example.com'));
   cashier = as(await cookie('cashier@example.com')); // branch 2, no open shift needed
-  original = await db.one('SELECT promptpay_id, bank_account FROM branches WHERE id = 2');
+  original = await db.one(
+    'SELECT b.name, b.promptpay_id, b.bank_account, w.id AS wh_id, w.name AS wh_name FROM branches b JOIN warehouses w ON w.branch_id = b.id WHERE b.id = 2 ORDER BY w.id LIMIT 1',
+  );
   await db.query("DELETE FROM settings WHERE org_id = 1 AND setting_key IN ('pos.promptpay_id', 'org.bank_account')");
   await db.query('UPDATE pos_shifts SET closed_at = UTC_TIMESTAMP() WHERE user_id = 4 AND closed_at IS NULL');
 });
 
 after(async () => {
-  await db.query('UPDATE branches SET promptpay_id = :p, bank_account = :b WHERE id = 2', { p: original.promptpay_id, b: original.bank_account });
+  await db.query('UPDATE branches SET name = :n, promptpay_id = :p, bank_account = :b WHERE id = 2', { n: original.name, p: original.promptpay_id, b: original.bank_account });
+  await db.query('UPDATE warehouses SET name = :n WHERE id = :id', { n: original.wh_name, id: original.wh_id });
   await db.query("DELETE FROM settings WHERE org_id = 1 AND setting_key IN ('pos.promptpay_id', 'org.bank_account')");
   await db.pool.end();
 });
@@ -89,4 +92,23 @@ test('a branch with its own accounts charges into them; clearing them falls back
   assert.equal((await cashier.get('/api/pos/settings')).body.data.bankAccount.name, 'ร้านหลัก');
 
   assert.equal((await cashier.patch('/api/org/branches/2', { promptpayId: '0812345678' })).status, 403);
+});
+
+test("renaming a branch can rename its warehouse; an automatic warehouse name follows the branch", async () => {
+  const whName = async () => (await admin.get('/api/inventory/warehouses')).body.data.find((w) => w.id === original.wh_id)?.name;
+  // explicit warehouse name
+  assert.equal((await admin.patch('/api/org/branches/2', { name: 'คลังสินค้าฟ้า', warehouseName: 'คลังสินค้าฟ้า' })).status, 200);
+  assert.equal(await whName(), 'คลังสินค้าฟ้า');
+  assert.equal((await admin.get('/api/inventory/welfare/warehouses')).body.data.find((w) => w.id === original.wh_id)?.name, 'คลังสินค้าฟ้า');
+  assert.equal((await admin.get('/api/org/branches')).body.data.find((b) => b.id === 2).warehouseName, 'คลังสินค้าฟ้า');
+  // the warehouse still carries the branch's name -> a rename follows as "คลัง <new name>"
+  assert.equal((await admin.patch('/api/org/branches/2', { name: 'สาขาริมน้ำ' })).status, 200);
+  assert.equal(await whName(), 'คลัง สาขาริมน้ำ');
+  assert.equal((await admin.patch('/api/org/branches/2', { name: 'สาขาภูเขา' })).status, 200);
+  assert.equal(await whName(), 'คลัง สาขาภูเขา');
+  // a warehouse named by hand keeps its name when only the branch is renamed
+  assert.equal((await admin.patch('/api/org/branches/2', { warehouseName: 'โกดังหลังร้าน' })).status, 200);
+  assert.equal((await admin.patch('/api/org/branches/2', { name: 'สาขาทะเล' })).status, 200);
+  assert.equal(await whName(), 'โกดังหลังร้าน');
+  assert.equal((await admin.patch('/api/org/branches/2', { warehouseName: '' })).status, 400);
 });

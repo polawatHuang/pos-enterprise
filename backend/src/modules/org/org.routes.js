@@ -48,7 +48,11 @@ const branchBody = z.object({
   // This branch's own payment accounts; null / '' = use the shop-wide ones from POS settings
   promptpayId: promptpayIdSchema.nullable().optional(),
   bankAccount: bankAccountSchema.nullable().optional(),
+  // Name of the branch's stock location (warehouse); shown in stock, transfers, counts and welfare
+  warehouseName: z.string().trim().min(1, 'ใส่ชื่อคลังสินค้า').max(191).optional(),
 });
+/** Default name of a branch's warehouse; renaming the branch renames a warehouse still named so. */
+const defaultWarehouseName = (branchName) => `คลัง ${branchName}`.slice(0, 191);
 const branchValues = (b) => ({
   ...b,
   address: b.address || null,
@@ -78,7 +82,7 @@ router.post('/branches', requirePermission('settings:manage'), validate({ body: 
         orgId,
         branchId: r.insertId,
         code: Number(taken.n) ? `WH-${b.code}-${r.insertId}` : `WH-${b.code}`,
-        name: `คลัง ${b.name}`.slice(0, 191),
+        name: b.warehouseName || defaultWarehouseName(b.name),
       });
       return r.insertId;
     })
@@ -95,7 +99,7 @@ router.patch(
     const orgId = req.user.orgId;
     const { id } = req.valid.params;
     const b = req.valid.body;
-    const current = await db.one('SELECT id, is_active FROM branches WHERE id = :id AND org_id = :orgId', { id, orgId });
+    const current = await db.one('SELECT id, name, is_active FROM branches WHERE id = :id AND org_id = :orgId', { id, orgId });
     if (!current) throw notFound('ไม่พบสาขา');
 
     if (b.isActive === false && current.is_active) {
@@ -108,14 +112,27 @@ router.patch(
     // Only the fields that were sent
     const cols = { code: 'code', name: 'name', branchNo: 'branch_no', address: 'address', promptpayId: 'promptpay_id', bankAccount: 'bank_account', isActive: 'is_active' };
     const sets = Object.keys(cols).filter((k) => b[k] !== undefined);
-    if (!sets.length) throw badRequest('ไม่มีข้อมูลที่จะแก้ไข');
+    if (!sets.length && b.warehouseName === undefined) throw badRequest('ไม่มีข้อมูลที่จะแก้ไข');
     const values = branchValues(b);
     const params = { id, orgId };
     for (const k of sets) params[k] = k === 'isActive' ? (b[k] ? 1 : 0) : values[k];
-    await db
-      .query(`UPDATE branches SET ${sets.map((k) => `${cols[k]} = :${k}`).join(', ')} WHERE id = :id AND org_id = :orgId`, params)
+    const renamed = await db
+      .tx(async (conn) => {
+        if (sets.length) await conn.query(`UPDATE branches SET ${sets.map((k) => `${cols[k]} = :${k}`).join(', ')} WHERE id = :id AND org_id = :orgId`, params);
+        // The branch's warehouse: an explicit new name, or follow a branch rename while it still has
+        // the automatic name ("คลัง <old branch name>" or the old branch name itself)
+        const [[wh]] = await conn.query('SELECT id, name FROM warehouses WHERE branch_id = :id AND org_id = :orgId ORDER BY id LIMIT 1 FOR UPDATE', { id, orgId });
+        if (!wh) return null;
+        let name = b.warehouseName;
+        if (name === undefined && b.name && b.name !== current.name && [defaultWarehouseName(current.name), current.name].includes(wh.name)) {
+          name = defaultWarehouseName(b.name);
+        }
+        if (!name || name === wh.name) return null;
+        await conn.query('UPDATE warehouses SET name = :name WHERE id = :whId', { name, whId: wh.id });
+        return name;
+      })
       .catch(duplicateCode);
-    audit(req, 'branch.update', 'branch', id, { fields: sets });
+    audit(req, 'branch.update', 'branch', id, { fields: renamed ? [...sets, 'warehouseName'] : sets, ...(renamed ? { warehouseName: renamed } : {}) });
     res.json({ data: { id } });
   },
 );
