@@ -68,7 +68,10 @@ test('only an owner/admin with the exact phrase can reset', async () => {
   assert.equal((await request(app).post('/api/org/reset-data').set('Cookie', staff).send({ confirm: 'ลบข้อมูลทั้งหมด' })).status, 403);
   const summary = await request(app).get('/api/org/data-summary').set('Cookie', owner);
   assert.equal(summary.status, 200, JSON.stringify(summary.body));
-  assert.deepEqual([summary.body.data.products, summary.body.data.customers, summary.body.data.otherUsers], [1, 1, 1]);
+  const n = Object.fromEntries(summary.body.data.groups.flatMap((g) => g.items.map((i) => [i.key, i.count])));
+  assert.deepEqual([n.products, n.customers, n.otherUsers], [1, 1, 1]);
+  // newer features are listed too
+  for (const k of ['promotions', 'discountCodes', 'salesReturns', 'welfareRequests', 'stockMovements', 'purchaseOrders', 'journalEntries']) assert.ok(k in n, k);
   assert.equal((await request(app).post('/api/org/reset-data').set('Cookie', owner).send({ confirm: 'ลบ' })).status, 400);
   const still = await db.one('SELECT COUNT(*) AS n FROM products WHERE org_id = :o', { o: t.orgId });
   assert.equal(Number(still.n), 1, 'a wrong phrase deletes nothing');

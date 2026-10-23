@@ -241,25 +241,61 @@ const onlyOwner = (req) => {
   if (!req.user.roles.some((r) => OWNER_ROLES.includes(r))) throw forbidden('เฉพาะเจ้าของกิจการหรือผู้ดูแลระบบเท่านั้น');
 };
 
-/** What a reset would remove, so the confirmation dialog can show real numbers. */
+/**
+ * What a reset would remove, so the confirmation dialog can show real numbers. Grouped like the
+ * menu; a table from a migration that is not imported yet counts as 0.
+ */
+const SUMMARY = [
+  ['ขายหน้าร้าน', [
+    ['salesOrders', 'บิลขาย/ออร์เดอร์', 'SELECT COUNT(*) AS n FROM sales_orders WHERE org_id = :orgId'],
+    ['salesReturns', 'คืนสินค้า', 'SELECT COUNT(*) AS n FROM sales_returns WHERE org_id = :orgId'],
+    ['shifts', 'กะขาย', 'SELECT COUNT(*) AS n FROM pos_shifts WHERE org_id = :orgId'],
+    ['heldBills', 'บิลพัก', 'SELECT COUNT(*) AS n FROM held_bills WHERE org_id = :orgId'],
+    ['promotions', 'โปรโมชั่น', 'SELECT COUNT(*) AS n FROM pos_promotions WHERE org_id = :orgId'],
+    ['discountCodes', 'โค้ดส่วนลด', 'SELECT COUNT(*) AS n FROM discount_codes WHERE org_id = :orgId'],
+  ]],
+  ['สินค้าและสต๊อก', [
+    ['products', 'สินค้า', 'SELECT COUNT(*) AS n FROM products WHERE org_id = :orgId'],
+    ['categories', 'หมวดหมู่สินค้า', 'SELECT COUNT(*) AS n FROM product_categories WHERE org_id = :orgId'],
+    ['stockMovements', 'ประวัติเคลื่อนไหวสต๊อก', 'SELECT COUNT(*) AS n FROM stock_movements WHERE org_id = :orgId'],
+    ['stockCounts', 'รอบตรวจนับ', 'SELECT COUNT(*) AS n FROM stock_counts WHERE org_id = :orgId'],
+    ['purchaseOrders', 'ใบสั่งซื้อ', 'SELECT COUNT(*) AS n FROM purchase_orders WHERE org_id = :orgId'],
+    ['transfers', 'ใบโอนย้าย', 'SELECT COUNT(*) AS n FROM stock_transfers WHERE org_id = :orgId'],
+    ['suppliers', 'ผู้ขาย', 'SELECT COUNT(*) AS n FROM suppliers WHERE org_id = :orgId'],
+    ['welfareRequests', 'เบิกสวัสดิการ', 'SELECT COUNT(*) AS n FROM welfare_requests WHERE org_id = :orgId'],
+  ]],
+  ['บัญชี', [
+    ['documents', 'เอกสารบัญชี', 'SELECT COUNT(*) AS n FROM documents WHERE org_id = :orgId'],
+    ['transactions', 'รายรับ-รายจ่าย', 'SELECT COUNT(*) AS n FROM transactions WHERE org_id = :orgId'],
+    ['journalEntries', 'รายการบัญชีแยกประเภท', 'SELECT COUNT(*) AS n FROM journal_entries WHERE org_id = :orgId'],
+  ]],
+  ['ลูกค้าและการตลาด', [
+    ['customers', 'ลูกค้า/สมาชิก', 'SELECT COUNT(*) AS n FROM customers WHERE org_id = :orgId'],
+    ['conversations', 'แชตลูกค้า', 'SELECT COUNT(*) AS n FROM conversations WHERE org_id = :orgId'],
+    ['trends', 'สินค้าเทรนด์', 'SELECT COUNT(*) AS n FROM trending_products WHERE org_id = :orgId'],
+    ['videos', 'วิดีโอ AI', 'SELECT COUNT(*) AS n FROM video_projects WHERE org_id = :orgId'],
+    ['covers', 'ปกคลิป', 'SELECT COUNT(*) AS n FROM cover_projects WHERE org_id = :orgId'],
+    ['posts', 'โพสต์ที่ตั้งเวลา', 'SELECT COUNT(*) AS n FROM scheduled_posts WHERE org_id = :orgId'],
+    ['socialAccounts', 'บัญชีโซเชียลที่เชื่อม', 'SELECT COUNT(*) AS n FROM social_accounts WHERE org_id = :orgId'],
+  ]],
+  ['ผู้ใช้', [['otherUsers', 'ผู้ใช้อื่น', 'SELECT COUNT(*) AS n FROM users WHERE org_id = :orgId AND id <> :me']]],
+];
+
 router.get('/data-summary', requirePermission('settings:manage'), async (req, res) => {
   onlyOwner(req);
-  const orgId = req.user.orgId;
-  const count = async (sql) => Number((await db.one(sql, { orgId, me: req.user.id })).n);
-  res.json({
-    data: {
-      products: await count('SELECT COUNT(*) AS n FROM products WHERE org_id = :orgId'),
-      salesOrders: await count('SELECT COUNT(*) AS n FROM sales_orders WHERE org_id = :orgId'),
-      customers: await count('SELECT COUNT(*) AS n FROM customers WHERE org_id = :orgId'),
-      documents: await count('SELECT COUNT(*) AS n FROM documents WHERE org_id = :orgId'),
-      transactions: await count('SELECT COUNT(*) AS n FROM transactions WHERE org_id = :orgId'),
-      conversations: await count('SELECT COUNT(*) AS n FROM conversations WHERE org_id = :orgId'),
-      trends: await count('SELECT COUNT(*) AS n FROM trending_products WHERE org_id = :orgId'),
-      videos: await count('SELECT COUNT(*) AS n FROM video_projects WHERE org_id = :orgId'),
-      otherUsers: await count('SELECT COUNT(*) AS n FROM users WHERE org_id = :orgId AND id <> :me'),
-      confirmPhrase: CONFIRM_PHRASE,
-    },
-  });
+  const params = { orgId: req.user.orgId, me: req.user.id };
+  const count = (sql) =>
+    db.one(sql, params).then(
+      (r) => Number(r.n),
+      (err) => {
+        if (err.code === 'ER_NO_SUCH_TABLE') return 0;
+        throw err;
+      },
+    );
+  const groups = await Promise.all(
+    SUMMARY.map(async ([label, items]) => ({ label, items: await Promise.all(items.map(async ([key, name, sql]) => ({ key, label: name, count: await count(sql) }))) })),
+  );
+  res.json({ data: { groups, confirmPhrase: CONFIRM_PHRASE } });
 });
 
 /** Delete all demo/business data of the org; only the caller's account survives. */

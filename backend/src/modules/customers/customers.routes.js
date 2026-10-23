@@ -474,4 +474,27 @@ router.patch('/:id', requireAny(WRITE), validate({ params: idParams, body: patch
   res.json({ data: mapProfile(await loadCustomer(orgId, c.id)) });
 });
 
+/**
+ * Delete a customer entered by mistake. One with bills, documents or a personal discount code keeps
+ * its history (and points) — edit it instead; chats and after-sales cases just lose the link.
+ */
+router.delete('/:id', requireAny(['pos:manage', 'inbox:manage_ai']), validate({ params: idParams }), async (req, res) => {
+  const orgId = req.user.orgId;
+  const c = await loadCustomer(orgId, req.valid.params.id);
+  const used = await db.one(
+    `SELECT (SELECT COUNT(*) FROM sales_orders WHERE customer_id = :id) AS orders,
+            (SELECT COUNT(*) FROM documents WHERE customer_id = :id) AS docs,
+            (SELECT COUNT(*) FROM discount_codes WHERE customer_id = :id) AS codes`,
+    { id: c.id },
+  );
+  if (Number(used.orders) || Number(used.docs) || Number(used.codes)) {
+    throw conflict(
+      `ลบไม่ได้: ลูกค้านี้มี${[Number(used.orders) && `บิลขาย ${used.orders} ใบ`, Number(used.docs) && `เอกสาร ${used.docs} ฉบับ`, Number(used.codes) && `โค้ดส่วนลดส่วนตัว ${used.codes} โค้ด`].filter(Boolean).join(', ')} — แก้ไขข้อมูลแทนเพื่อเก็บประวัติไว้`,
+    );
+  }
+  await db.query('DELETE FROM customers WHERE id = :id AND org_id = :orgId', { id: c.id, orgId });
+  audit(req, 'customer.delete', 'customer', c.id, { name: c.name });
+  res.json({ data: { id: c.id } });
+});
+
 module.exports = { router };

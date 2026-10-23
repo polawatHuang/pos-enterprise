@@ -32,6 +32,7 @@ const as = (c) => ({
   get: (url) => request(app).get(url).set('Cookie', c),
   post: (url, body) => request(app).post(url).set('Cookie', c).send(body),
   patch: (url, body) => request(app).patch(url).set('Cookie', c).send(body),
+  del: (url) => request(app).delete(url).set('Cookie', c),
 });
 
 /** Unique 10-digit mobile number per run. */
@@ -295,5 +296,24 @@ describe('customers CRM', () => {
     assert.ok(text.includes(`"'=HYPERLINK(""http://evil"")"`), 'formula is neutralised');
     const tagged = await viewer.get(`/api/customers/export.csv?q=${encodeURIComponent(RUN)}&tag=VIP`);
     assert.equal(tagged.text.trim().split('\r\n').length, 2);
+  });
+});
+
+describe('delete', () => {
+  test('a customer entered by mistake can be deleted; one with history cannot', async () => {
+    const plain = await createCustomer({ name: `ลบได้ ${RUN}`, phone: phone() });
+    assert.equal((await cashier.del(`/api/customers/${plain.id}`)).status, 403);
+    assert.equal((await manager.del(`/api/customers/${plain.id}`)).status, 200);
+    assert.equal((await manager.get(`/api/customers/${plain.id}`)).status, 404);
+
+    const kept = await createCustomer({ name: `มีโค้ด ${RUN}`, phone: phone() });
+    await db.query("INSERT INTO discount_codes (org_id, code, type, value, customer_id, issued_by) VALUES (1, :code, 'fixed', 10, :id, 'user')", {
+      code: `DEL${RUN}`.toUpperCase().slice(0, 20),
+      id: kept.id,
+    });
+    const r = await manager.del(`/api/customers/${kept.id}`);
+    assert.equal(r.status, 409);
+    assert.match(r.body.error.message, /โค้ดส่วนลด/);
+    await db.query('DELETE FROM discount_codes WHERE customer_id = :id', { id: kept.id });
   });
 });

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -12,6 +13,7 @@ import {
   MapPin,
   MessageCircle,
   Pencil,
+  Trash2,
   Phone,
   ReceiptText,
   ShieldCheck,
@@ -20,6 +22,7 @@ import {
   Sparkles,
   Wallet,
 } from "lucide-react";
+import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { CustomerDetail as Detail, CustomerSummary } from "@/lib/types";
 import { formatDateTime, formatMoney, formatNumber, formatRelativeTime } from "@/lib/utils";
@@ -49,6 +52,25 @@ export function CustomerDetail({ id }: { id: number }) {
     enabled: canWrite,
   });
   const [editing, setEditing] = useState(false);
+  // only a customer without bills/documents/personal codes can go (the API says why otherwise)
+  const canDelete = can("pos:manage") || can("inbox:manage_ai");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const router = useRouter();
+  const remove = async () => {
+    if (!confirmDelete) return setConfirmDelete(true);
+    setDeleting(true);
+    try {
+      await api.del(`/customers/${id}`);
+      toast.success("ลบลูกค้าแล้ว");
+      void qc.invalidateQueries({ queryKey: ["customers"] });
+      router.push("/customers");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "ลบไม่สำเร็จ", { duration: 10_000 });
+      setConfirmDelete(false);
+      setDeleting(false);
+    }
+  };
   const [orderId, setOrderId] = useState<number | null>(null);
 
   if (detail.isPending) return <DetailSkeleton />;
@@ -98,11 +120,18 @@ export function CustomerDetail({ id }: { id: number }) {
             </div>
           </div>
         </div>
-        {canWrite && (
-          <Button variant="outline" onClick={() => setEditing(true)}>
-            <Pencil /> แก้ไขข้อมูล
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {canWrite && (
+            <Button variant="outline" onClick={() => setEditing(true)}>
+              <Pencil /> แก้ไขข้อมูล
+            </Button>
+          )}
+          {canDelete && (
+            <Button variant={confirmDelete ? "danger" : "ghost"} className={confirmDelete ? "" : "text-danger"} onClick={() => void remove()} disabled={deleting}>
+              <Trash2 /> {confirmDelete ? "ยืนยันลบลูกค้านี้" : "ลบ"}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Stats */}

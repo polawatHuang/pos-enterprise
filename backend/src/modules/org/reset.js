@@ -43,6 +43,8 @@ const STEPS = [
   ['post_results', 'DELETE r FROM post_results r JOIN scheduled_posts p ON p.id = r.scheduled_post_id WHERE p.org_id = :orgId'],
   ['scheduled_posts', 'DELETE FROM scheduled_posts WHERE org_id = :orgId'],
   ['affiliate_links', 'DELETE FROM affiliate_links WHERE org_id = :orgId'],
+  // tokens of connected social accounts (the shop's own API keys stay)
+  ['integration_credentials', 'DELETE c FROM integration_credentials c JOIN social_accounts s ON s.credential_id = c.id WHERE s.org_id = :orgId'],
   ['social_accounts', 'DELETE FROM social_accounts WHERE org_id = :orgId'],
   ['video_media', 'DELETE m FROM video_media m JOIN video_projects v ON v.id = m.video_project_id WHERE v.org_id = :orgId'],
   ['video_assets', 'DELETE a FROM video_assets a JOIN video_projects v ON v.id = a.video_project_id WHERE v.org_id = :orgId'],
