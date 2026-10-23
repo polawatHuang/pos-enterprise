@@ -149,7 +149,8 @@ export async function apiDownload(path: string, query: Query | undefined, filena
 
 export const api = {
   get: <T>(path: string, query?: Query) => apiFetch<{ data: T }>(path, { query }).then((r) => r.data),
-  post: <T>(path: string, json?: unknown) => apiFetch<{ data: T }>(path, { method: "POST", json }).then((r) => r.data),
+  post: <T>(path: string, json?: unknown, headers?: Record<string, string>) =>
+    apiFetch<{ data: T }>(path, { method: "POST", json, headers }).then((r) => r.data),
   patch: <T>(path: string, json?: unknown) => apiFetch<{ data: T }>(path, { method: "PATCH", json }).then((r) => r.data),
   put: <T>(path: string, json?: unknown) => apiFetch<{ data: T }>(path, { method: "PUT", json }).then((r) => r.data),
   del: <T>(path: string) => apiFetch<{ data: T }>(path, { method: "DELETE" }).then((r) => r.data),

@@ -55,7 +55,10 @@ async function createReturn(user, orderId, { items, reason, refundMethod, restoc
     const [[o]] = await conn.query('SELECT * FROM sales_orders WHERE id = :orderId AND org_id = :orgId FOR UPDATE', { orderId, orgId: user.orgId });
     if (!o) throw notFound('ไม่พบบิล');
     if (o.status !== 'completed') throw conflict(o.status === 'refunded' ? 'บิลนี้คืนสินค้าครบแล้ว' : 'บิลนี้ถูกยกเลิกแล้ว คืนสินค้าไม่ได้');
-    const [lines] = await conn.query('SELECT * FROM sales_order_items WHERE order_id = :orderId FOR UPDATE', { orderId });
+    const [lines] = await conn.query(
+      'SELECT i.*, p.open_price FROM sales_order_items i JOIN products p ON p.id = i.product_id WHERE i.order_id = :orderId FOR UPDATE',
+      { orderId },
+    );
     const byId = new Map(lines.map((l) => [Number(l.id), l]));
 
     const subtotal = Number(o.subtotal);
@@ -120,14 +123,16 @@ async function createReturn(user, orderId, { items, reason, refundMethod, restoc
       const factor = Number(p.line.unit_factor ?? 1);
       const base = r3(p.qty * factor);
       // The lots this return puts back are kept on the line, so voiding it takes exactly those again
-      const lots = restock ? lotsFor(parseAlloc(p.line.lot_allocations), r3(Number(p.line.returned_qty) * factor), base) : [];
+      // open-price items kept no stock, so nothing goes back on the shelf
+      const backOnShelf = restock && !p.line.open_price;
+      const lots = backOnShelf ? lotsFor(parseAlloc(p.line.lot_allocations), r3(Number(p.line.returned_qty) * factor), base) : [];
       await conn.query(
         `INSERT INTO sales_return_items (return_id, order_item_id, product_id, quantity, amount, lot_allocations)
          VALUES (:returnId, :itemId, :productId, :qty, :amount, :lots)`,
         { returnId, itemId: p.line.id, productId: p.line.product_id, qty: p.qty, amount: p.amount, lots: lots.length ? JSON.stringify(lots) : null },
       );
       await conn.query('UPDATE sales_order_items SET returned_qty = returned_qty + :qty WHERE id = :id', { qty: p.qty, id: p.line.id });
-      if (restock) {
+      if (backOnShelf) {
         await restoreLots(conn, lots);
         await applyMovement(conn, {
           orgId: user.orgId,
@@ -250,13 +255,15 @@ async function voidReturn(user, orderId, returnId, reason, { shiftId = null } = 
     }
 
     const [items] = await conn.query(
-      `SELECT ri.*, i.unit_factor FROM sales_return_items ri JOIN sales_order_items i ON i.id = ri.order_item_id WHERE ri.return_id = :returnId FOR UPDATE`,
+      `SELECT ri.*, i.unit_factor, p.open_price FROM sales_return_items ri
+         JOIN sales_order_items i ON i.id = ri.order_item_id JOIN products p ON p.id = ri.product_id
+        WHERE ri.return_id = :returnId FOR UPDATE`,
       { returnId },
     );
     const warehouseId = r.restocked ? await warehouseForBranch(conn, user.orgId, o.branch_id) : null;
     for (const it of items) {
       await conn.query('UPDATE sales_order_items SET returned_qty = GREATEST(returned_qty - :qty, 0) WHERE id = :id', { qty: it.quantity, id: it.order_item_id });
-      if (!r.restocked) continue;
+      if (!r.restocked || it.open_price) continue;
       const base = r3(Number(it.quantity) * Number(it.unit_factor ?? 1));
       await takeLots(conn, { warehouseId, productId: it.product_id, allocations: parseAlloc(it.lot_allocations) });
       await applyMovement(conn, {

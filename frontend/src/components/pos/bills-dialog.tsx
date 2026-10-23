@@ -14,6 +14,7 @@ import { DialogContent } from "@/components/ui/overlays";
 import { METHOD_LABEL } from "./receipt";
 import { ReturnView } from "./return-view";
 import { SHIFT_KEY } from "./shift";
+import { ApprovalCancelled, withApproval } from "./manager-approval";
 
 function StatusBadge({ b }: { b: PosOrderRow }) {
   if (b.status === "cancelled") return <Badge tone="danger">ยกเลิก</Badge>;
@@ -29,7 +30,7 @@ export function BillsDialog({ onReprint }: { onReprint: (o: PosOrder) => void })
   const query = q.trim();
   const bills = useQuery({
     queryKey: ["pos", "orders", query],
-    queryFn: () => api.get<PosOrderRow[]>("/pos/orders", { scope: "shift", q: query.length >= 3 ? query : undefined, limit: 50 }),
+    queryFn: () => api.get<PosOrderRow[]>("/pos/orders", { scope: "shift", q: query.length >= 2 ? query : undefined, limit: 50 }),
   });
   const [voiding, setVoiding] = useState<number | null>(null);
   const [reason, setReason] = useState("");
@@ -55,13 +56,13 @@ export function BillsDialog({ onReprint }: { onReprint: (o: PosOrder) => void })
   const doVoid = async (id: number) => {
     setBusy(true);
     try {
-      await api.post(`/pos/orders/${id}/void`, { reason });
+      await withApproval("void", (h) => api.post(`/pos/orders/${id}/void`, { reason }, h));
       toast.success("ยกเลิกบิลและคืนสต๊อกแล้ว");
       setVoiding(null);
       setReason("");
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "ยกเลิกไม่สำเร็จ");
+      if (!(err instanceof ApprovalCancelled)) toast.error(err instanceof Error ? err.message : "ยกเลิกไม่สำเร็จ");
     } finally {
       setBusy(false);
     }
@@ -88,15 +89,15 @@ export function BillsDialog({ onReprint }: { onReprint: (o: PosOrder) => void })
   }
 
   return (
-    <DialogContent title={query.length >= 3 ? "ค้นหาบิล" : "บิลในกะนี้"} className="max-w-2xl">
+    <DialogContent title={query.length >= 2 ? "ค้นหาบิล" : "บิลในกะนี้"} className="max-w-2xl">
       <div className="relative mb-3">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาเลขที่บิล (บิลวันก่อนๆ ก็ได้) เช่น POS2610" className="pl-9" />
+        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาบิล: ยอดเงิน, ชื่อสินค้า, เบอร์สมาชิก หรือเลขบิล" className="pl-9" />
       </div>
       {bills.isPending ? (
         <Loader2 className="mx-auto size-6 animate-spin text-muted-foreground" />
       ) : bills.data?.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">{query.length >= 3 ? "ไม่พบบิลที่ค้นหา" : "ยังไม่มีบิลในกะนี้"}</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">{query.length >= 2 ? "ไม่พบบิลที่ค้นหา" : "ยังไม่มีบิลในกะนี้"}</p>
       ) : (
         <ul className="divide-y divide-border">
           {bills.data?.map((b) => (
@@ -107,18 +108,19 @@ export function BillsDialog({ onReprint }: { onReprint: (o: PosOrder) => void })
                 <span className="text-muted-foreground">
                   {formatDateTime(b.orderedAt)} · {b.items} ชิ้น · {METHOD_LABEL[b.method ?? ""] ?? b.method}
                 </span>
+                {b.customerName && <span className="text-muted-foreground">· {b.customerName}</span>}
                 <span className="ml-auto font-semibold tabular-nums">{formatMoney(b.total)}</span>
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" onClick={() => void reprint(b.id)}>
                   <Printer /> พิมพ์ซ้ำ
                 </Button>
-                {can("pos:manage") && (b.status === "completed" || b.refundedAmount > 0) && (
+                {(b.status === "completed" || b.refundedAmount > 0) && (
                   <Button variant="outline" size="sm" onClick={() => void startReturn(b.id)}>
                     <Undo2 /> {b.status === "completed" ? "คืนสินค้า" : "ประวัติการคืน"}
                   </Button>
                 )}
-                {can("pos:manage") && b.status === "completed" && b.refundedAmount === 0 && (
+                {b.status === "completed" && b.refundedAmount === 0 && (
                   <Button variant="ghost" size="sm" className="text-danger" onClick={() => setVoiding(voiding === b.id ? null : b.id)}>
                     <Ban /> ยกเลิกบิล
                   </Button>
@@ -136,7 +138,7 @@ export function BillsDialog({ onReprint }: { onReprint: (o: PosOrder) => void })
           ))}
         </ul>
       )}
-      {!can("pos:manage") && <p className="mt-3 text-xs text-muted-foreground">การยกเลิกบิลและคืนสินค้าต้องให้ผู้จัดการทำ (สิทธิ์ pos:manage)</p>}
+      {!can("pos:manage") && <p className="mt-3 text-xs text-muted-foreground">คืนสินค้าและยกเลิกบิลได้ โดยให้ผู้จัดการกรอก PIN ยืนยันบนเครื่องนี้</p>}
     </DialogContent>
   );
 }

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { Loader2, Store, Trash2 } from "lucide-react";
+import { GraduationCap, Loader2, Store, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Branch, CashMovement, CashMoveType, Shift, ShiftReport } from "@/lib/types";
@@ -17,7 +17,7 @@ import { POS_SETTINGS_KEY } from "./settings-dialog";
 
 export const SHIFT_KEY = ["pos", "shift"] as const;
 
-export function OpenShiftCard() {
+export function OpenShiftCard({ onTraining }: { onTraining?: () => void }) {
   const { user, can } = useAuth();
   const qc = useQueryClient();
   const branches = useQuery({ queryKey: ["org", "branches"], queryFn: () => api.get<Branch[]>("/org/branches"), staleTime: 10 * 60_000 });
@@ -91,6 +91,11 @@ export function OpenShiftCard() {
           {busy && <Loader2 className="animate-spin" />}
           เปิดกะ
         </Button>
+        {onTraining && (
+          <Button variant="outline" onClick={onTraining}>
+            <GraduationCap /> ลองฝึกขายก่อน (ไม่บันทึกจริง)
+          </Button>
+        )}
       </div>
     </Card>
   );

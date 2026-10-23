@@ -8,6 +8,8 @@ export interface User {
   fullName: string;
   avatarUrl: string | null;
   mustChangePassword: boolean;
+  /** a manager has set the PIN used to approve refunds/voids on a cashier's till */
+  hasPosPin?: boolean;
   roles: string[];
   permissions: Permission[];
 }
@@ -214,6 +216,8 @@ export interface Product {
   supplierName: string | null;
   packSize: number;
   trackExpiry: boolean;
+  /** price typed at the sale, no stock kept */
+  openPrice: boolean;
   shelfLifeDays: number | null;
   imageUrl: string | null;
   status: ProductStatus;
@@ -526,6 +530,8 @@ export interface CatalogItem {
   /** Set by /pos/lookup when a pack/carton barcode was scanned. */
   matchedUnitId?: number | null;
   trackExpiry: boolean;
+  /** price typed at the sale, no stock kept (photocopies, fees, items without a barcode) */
+  openPrice?: boolean;
   /** Next lot to sell is marked down (near expiry): pct off for its qty base units */
   markdown: { pct: number; qty: number; expiry: string | null } | null;
   /** promotions running now at this branch that include the item */
@@ -547,7 +553,7 @@ export interface PromotionSlot {
   qty: number;
   productIds: number[];
   categoryIds: number[];
-  products: { id: number; name: string; price: number }[];
+  products: { id: number; name: string; price: number; cost?: number }[];
   categories: { id: number; name: string }[];
 }
 
@@ -655,6 +661,9 @@ export interface HeldCartItem {
   unitId?: number | null;
   quantity: number;
   discount?: number;
+  /** an open-price line keeps what the cashier typed */
+  unitPrice?: number;
+  name?: string;
 }
 
 export interface HeldBill {
@@ -767,6 +776,7 @@ export interface PosOrderRow {
   refundedAmount: number;
   orderedAt: string;
   cashierName: string | null;
+  customerName?: string | null;
   method: string | null;
   items: number;
 }

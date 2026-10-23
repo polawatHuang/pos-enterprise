@@ -12,6 +12,7 @@ const ai = require('../../integrations/ai');
 const service = require('./pos.service');
 const discounts = require('./discounts');
 const returns = require('./returns');
+const approvals = require('./approvals');
 const promotions = require('./promotions');
 const { paymentFor, promptpayIdSchema, bankAccountSchema } = require('./payment-target');
 const { SLIP_SCHEMA, SLIP_SYSTEM } = require('./slip');
@@ -28,7 +29,7 @@ const money = z.coerce.number().min(0).max(99_999_999);
 
 const CATALOG_SELECT = `
   SELECT p.id, p.sku, p.barcode, p.name, p.price, p.unit, p.image_url, p.category_id, p.vat_type,
-         COALESCE(sl.quantity, 0) AS stock, c.age_restricted, c.sale_block, p.track_expiry,
+         COALESCE(sl.quantity, 0) AS stock, c.age_restricted, c.sale_block, p.track_expiry, p.open_price,
          (SELECT CONCAT(l.markdown_pct, '|', l.quantity, '|', COALESCE(DATE_FORMAT(l.expiry_date, '%Y-%m-%d'), ''))
             FROM stock_lots l
            WHERE l.warehouse_id = :warehouseId AND l.product_id = p.id AND l.quantity > 0
@@ -59,6 +60,7 @@ const mapCatalog = (r) => ({
   vatType: r.vat_type,
   stock: Number(r.stock),
   ageRestricted: Boolean(r.age_restricted),
+  openPrice: Boolean(r.open_price),
   saleBlock: parseJson(r.sale_block),
   units: [],
   trackExpiry: Boolean(r.track_expiry),
@@ -125,6 +127,8 @@ router.get(
         .regex(/^\d+(,\d+){0,199}$/)
         .optional(),
       limit: z.coerce.number().int().min(1).max(200).default(60),
+      /** only items whose price is typed at the sale */
+      openPrice: z.enum(['1']).optional(),
     }),
   }),
   async (req, res) => {
@@ -136,6 +140,7 @@ router.get(
           AND (:q IS NULL OR p.name LIKE :q OR p.sku LIKE :q OR p.barcode = :exact)
           AND (:categoryId IS NULL OR p.category_id = :categoryId)
           ${ids ? 'AND p.id IN (:ids)' : ''}
+          ${f.openPrice ? 'AND p.open_price = 1' : ''}
         ORDER BY p.name LIMIT :limit`,
       {
         ids,
@@ -205,7 +210,7 @@ router.post(
       if (!p) return { productId: i.productId, categoryId: null, price: 0, quantity: i.quantity, markdown: 0, eligible: false };
       // estimate of the near-expiry markdown (checkout takes it from the actual lots)
       const md = !i.unitId && p.markdown ? (Math.min(i.quantity, p.markdown.qty) * p.price * p.markdown.pct) / 100 : 0;
-      return { productId: p.id, categoryId: p.categoryId, price: p.price, quantity: i.quantity, markdown: Math.round(md * 100) / 100, eligible: !i.unitId };
+      return { productId: p.id, categoryId: p.categoryId, price: p.price, quantity: i.quantity, markdown: Math.round(md * 100) / 100, eligible: !i.unitId && !p.openPrice };
     });
     const priced = promotions.priceCart(lines, promos);
     const candidates = async (slot) => {
@@ -383,6 +388,9 @@ const cartItem = z.object({
   unitId: z.number().int().positive().nullable().optional(),
   quantity: positiveQty,
   discount: money.optional(),
+  // an open-price line keeps the price and description the cashier typed
+  unitPrice: money.optional(),
+  name: z.string().trim().min(1).max(120).optional(),
 });
 
 async function shiftBranch(req) {
@@ -553,6 +561,19 @@ router.post(
   },
 );
 
+/* ------------------------------------------------------- manager approval */
+
+/** A manager types their PIN on this till; the cashier gets a 5-minute ticket for one kind of action. */
+router.post(
+  '/approvals',
+  validate({ body: z.object({ pin: z.string().regex(/^\d{4,6}$/, 'PIN เป็นตัวเลข 4-6 หลัก'), action: z.enum(approvals.ACTIONS) }) }),
+  async (req, res) => {
+    const r = await approvals.approve(req.user, req.valid.body.pin, req.valid.body.action);
+    audit(req, 'pos.approval', 'user', r.managerId, { action: req.valid.body.action });
+    res.json({ data: r });
+  },
+);
+
 /* ------------------------------------------------------------------ sales */
 
 router.post(
@@ -567,6 +588,8 @@ router.post(
             quantity: positiveQty,
             unitPrice: money.optional(),
             discount: money.optional(),
+            // what an open-price item was (e.g. "ถ่ายเอกสาร 10 แผ่น"); ignored for other items
+            name: z.string().trim().min(1).max(120).optional(),
           }),
         )
         .min(1, 'ตะกร้าว่าง')
@@ -597,9 +620,12 @@ router.post(
     }),
   }),
   async (req, res) => {
-    const result = await service.checkout(req.user, req.valid.body);
+    // a manager's PIN lets this one sale go past the cashier's price/discount limits
+    const ticket = req.user.permissions.includes('pos:manage') ? null : approvals.ticketFor(req, 'override');
+    const seller = ticket ? { ...req.user, permissions: [...req.user.permissions, 'pos:manage'] } : req.user;
+    const result = await service.checkout(seller, req.valid.body);
     const methods = req.valid.body.payments?.map((p) => p.method) ?? [req.valid.body.payment?.method];
-    audit(req, 'pos.checkout', 'sales_order', result.orderId, { total: result.total, methods });
+    audit(req, 'pos.checkout', 'sales_order', result.orderId, { total: result.total, methods, approvedBy: ticket?.managerId });
     res.status(201).json({ data: { ...(await service.getOrder(req.user.orgId, result.orderId)), change: result.change } });
   },
 );
@@ -610,17 +636,23 @@ router.get(
   async (req, res) => {
     const { scope, q, limit } = req.valid.query;
     const shift = await service.currentShift(req.user.id);
-    // A bill number search spans every date (returns are usually for an older bill)
+    // A bill number search spans every date (returns are usually for an older bill). Customers rarely
+    // keep the receipt, so the same box also finds the last 60 days by amount paid, member phone or
+    // name, or a product on the bill.
     if (!q && scope === 'shift' && !shift) return res.json({ data: [] });
+    const amount = q && /^\d+(\.\d{1,2})?$/.test(q.replace(/,/g, '')) ? Number(q.replace(/,/g, '')) : null;
+    const search = `(so.order_no LIKE :q OR (so.ordered_at >= UTC_TIMESTAMP() - INTERVAL 60 DAY AND (
+        ${amount !== null ? 'so.total = :amount OR ' : ''}c.phone LIKE :q OR c.name LIKE :q
+        OR EXISTS (SELECT 1 FROM sales_order_items si WHERE si.order_id = so.id AND si.name LIKE :q))))`;
     const rows = await db.query(
-      `SELECT so.id, so.order_no, so.status, so.total, so.refunded_amount, so.ordered_at, u.full_name AS cashier_name,
+      `SELECT so.id, so.order_no, so.status, so.total, so.refunded_amount, so.ordered_at, u.full_name AS cashier_name, c.name AS customer_name,
               (SELECT CASE WHEN COUNT(DISTINCT p.method) > 1 THEN 'split' ELSE MIN(p.method) END FROM payments p WHERE p.order_id = so.id AND p.amount > 0) AS method,
               (SELECT COALESCE(SUM(i.quantity), 0) FROM sales_order_items i WHERE i.order_id = so.id) AS items
-         FROM sales_orders so LEFT JOIN users u ON u.id = so.created_by
+         FROM sales_orders so LEFT JOIN users u ON u.id = so.created_by LEFT JOIN customers c ON c.id = so.customer_id
         WHERE so.org_id = :orgId AND so.channel = 'pos'
-          AND (${q ? 'so.order_no LIKE :q' : scope === 'shift' ? 'so.shift_id = :shiftId' : 'so.ordered_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY'})
+          AND (${q ? search : scope === 'shift' ? 'so.shift_id = :shiftId' : 'so.ordered_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY'})
         ORDER BY so.id DESC LIMIT :limit`,
-      { orgId: req.user.orgId, shiftId: shift?.id ?? 0, q: q ? `%${q.replace(/[%_\\]/g, '\\$&')}%` : null, limit },
+      { orgId: req.user.orgId, shiftId: shift?.id ?? 0, q: q ? `%${q.replace(/[%_\\]/g, '\\$&')}%` : null, amount, limit },
     );
     return res.json({
       data: rows.map((r) => ({
@@ -631,6 +663,7 @@ router.get(
         refundedAmount: Number(r.refunded_amount ?? 0),
         orderedAt: r.ordered_at,
         cashierName: r.cashier_name,
+        customerName: r.customer_name ?? null,
         method: r.method,
         items: Number(r.items),
       })),
@@ -644,11 +677,11 @@ router.get('/orders/:id', validate({ params: z.object({ id: z.coerce.number().in
 
 router.post(
   '/orders/:id/void',
-  requirePermission('pos:manage'),
+  approvals.managerOr('void'),
   validate({ params: z.object({ id: z.coerce.number().int().positive() }), body: z.object({ reason: z.string().trim().min(1, 'กรุณาระบุเหตุผล').max(200) }) }),
   async (req, res) => {
     const order = await service.voidOrder(req.user, req.valid.params.id, req.valid.body.reason);
-    audit(req, 'pos.void', 'sales_order', order.id, { reason: req.valid.body.reason, total: order.total });
+    audit(req, 'pos.void', 'sales_order', order.id, { reason: req.valid.body.reason, total: order.total, approvedBy: req.approval?.managerId });
     res.json({ data: order });
   },
 );
@@ -659,7 +692,7 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
 
 router.post(
   '/orders/:id/returns',
-  requirePermission('pos:manage'),
+  approvals.managerOr('refund'),
   validate({
     params: idParam,
     body: z.object({
@@ -677,7 +710,13 @@ router.post(
     const b = req.valid.body;
     const shift = await service.currentShift(req.user.id);
     const r = await returns.createReturn(req.user, req.valid.params.id, { ...b, shiftId: shift?.id ?? null });
-    audit(req, 'pos.return', 'sales_order', req.valid.params.id, { returnNo: r.returnNo, refund: r.refund, method: b.refundMethod, restock: b.restock });
+    audit(req, 'pos.return', 'sales_order', req.valid.params.id, {
+      returnNo: r.returnNo,
+      refund: r.refund,
+      method: b.refundMethod,
+      restock: b.restock,
+      approvedBy: req.approval?.managerId,
+    });
     res.status(201).json({ data: { ...r, order: await service.getOrder(req.user.orgId, req.valid.params.id) } });
   },
 );
@@ -685,7 +724,7 @@ router.post(
 /** Void a mistaken return: stock back out, refund mirrored, journal reversed; the return stays on record. */
 router.post(
   '/orders/:id/returns/:returnId/void',
-  requirePermission('pos:manage'),
+  approvals.managerOr('refund'),
   validate({
     params: z.object({ id: z.coerce.number().int().positive(), returnId: z.coerce.number().int().positive() }),
     body: z.object({ reason: z.string().trim().min(1, 'กรุณาระบุเหตุผล').max(200) }),
@@ -694,7 +733,13 @@ router.post(
     const { id, returnId } = req.valid.params;
     const shift = await service.currentShift(req.user.id);
     const r = await returns.voidReturn(req.user, id, returnId, req.valid.body.reason, { shiftId: shift?.id ?? null });
-    audit(req, 'pos.return.void', 'sales_order', id, { returnId, returnNo: r.returnNo, refund: r.refund, reason: req.valid.body.reason });
+    audit(req, 'pos.return.void', 'sales_order', id, {
+      returnId,
+      returnNo: r.returnNo,
+      refund: r.refund,
+      reason: req.valid.body.reason,
+      approvedBy: req.approval?.managerId,
+    });
     res.json({ data: { ...r, order: await service.getOrder(req.user.orgId, id) } });
   },
 );

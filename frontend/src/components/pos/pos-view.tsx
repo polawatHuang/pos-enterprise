@@ -7,11 +7,14 @@ import {
   Ban,
   Coins,
   FileBarChart,
+  GraduationCap,
+  HelpCircle,
   Keyboard,
   Loader2,
   Lock,
   Minus,
   MonitorSmartphone,
+  PackageOpen,
   PauseCircle,
   Plus,
   Printer,
@@ -43,6 +46,9 @@ import { type DisplayMessage, openDisplayChannel } from "./display-channel";
 import { toggleFavorite, useFavorites } from "./favorites";
 import { HELD_KEY, HeldDialog } from "./held-dialog";
 import { LineDialog } from "./line-dialog";
+import { ApprovalCancelled, ManagerPinHost, withApproval } from "./manager-approval";
+import { OpenPriceDialog } from "./open-price-dialog";
+import { PosGuide } from "./pos-guide";
 import { MemberDialog } from "./member-dialog";
 import { METHOD_NAME, PaymentDialog, type PaymentResult } from "./payment-dialog";
 import { Receipt } from "./receipt";
@@ -53,7 +59,39 @@ import { ShortcutsDialog } from "./shortcuts";
 import { beep } from "./sound";
 import { useTaxSettings } from "@/lib/tax";
 
-type Modal = "pay" | "codes" | "bills" | "close" | "settings" | "receipt" | "member" | "held" | "line" | "cash" | "report" | "keys" | null;
+type Modal =
+  | "pay"
+  | "codes"
+  | "bills"
+  | "close"
+  | "settings"
+  | "receipt"
+  | "member"
+  | "held"
+  | "line"
+  | "cash"
+  | "report"
+  | "keys"
+  | "openprice"
+  | "practice"
+  | null;
+
+const GUIDE_KEY = "pos.guide.done";
+
+/** Stand-in shift for training mode: the till works, nothing is saved. */
+const PRACTICE_SHIFT: Shift = {
+  id: 0,
+  branchId: 0,
+  branchName: "โหมดฝึกขาย",
+  openedAt: new Date(0).toISOString(),
+  closedAt: null,
+  openingCash: 0,
+  closingCash: null,
+  expectedCash: 0,
+  denominations: null,
+  note: null,
+  stats: { orders: 0, sales: 0, voided: 0, byMethod: {}, cash: { pay_in: 0, pay_out: 0, pickup: 0 } },
+};
 type Filter = number | "all" | "fav";
 
 export function PosView() {
@@ -79,6 +117,25 @@ export function PosView() {
   const [pointsUse, setPointsUse] = useState(0);
   const [pendingQty, setPendingQty] = useState<number | null>(null);
   const [scanMiss, setScanMiss] = useState<string | null>(null);
+  // Training mode: the whole till works but no sale, stock or money is recorded
+  const [training, setTraining] = useState(false);
+  const [practice, setPractice] = useState<{ total: number; change: number } | null>(null);
+  const [openItem, setOpenItem] = useState<CatalogItem | null>(null);
+  const [guide, setGuide] = useState(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem(GUIDE_KEY) !== "1";
+    } catch {
+      return false;
+    }
+  });
+  const closeGuide = () => {
+    setGuide(false);
+    try {
+      localStorage.setItem(GUIDE_KEY, "1");
+    } catch {
+      /* storage blocked: the card comes back next visit */
+    }
+  };
   useEffect(() => {
     if (!scanMiss) return;
     const t = setTimeout(() => setScanMiss(null), 4000);
@@ -183,6 +240,16 @@ export function PosView() {
       toast.error(`ขาย "${item.name}" ไม่ได้ช่วง ${item.saleBlock!.from}–${item.saleBlock!.to}${item.saleBlock!.label ? ` (${item.saleBlock!.label})` : ""}`);
       return;
     }
+    if (item.openPrice) {
+      // a priced open-price line is its own object in the cart: + adds to it; otherwise ask for the price
+      const line = cart.find((l) => l.item === item);
+      if (line) setQty(line.key, line.quantity + qty);
+      else {
+        setOpenItem(item);
+        setModal("openprice");
+      }
+      return;
+    }
     const key = lineKey(item.id, unitId);
     const factor = unitId ? (item.units.find((u) => u.id === unitId)?.factor ?? 1) : 1;
     const inCart = cart.filter((l) => l.item.id === item.id).reduce((s, l) => s + baseQty(l), 0);
@@ -205,6 +272,23 @@ export function PosView() {
     setFlash(key);
     setTimeout(() => setFlash((f) => (f === key ? null : f)), 450);
   };
+  /** An open-price line: the typed price and description ride on a copy of the item. */
+  const addOpen = (item: CatalogItem, price: number, name: string, qty: number) => {
+    const key = `${lineKey(item.id, null)}:open:${Date.now()}`;
+    beep("ok");
+    setCart((c) => [...c, { key, item: { ...item, price, name, promos: [], promoPrice: null, markdown: null }, unitId: null, quantity: qty, discount: 0 }]);
+    setSelected(key);
+    setOpenItem(null);
+    setModal(null);
+  };
+  const lineBody = (l: CartLine) => ({
+    productId: l.item.id,
+    unitId: l.unitId,
+    quantity: l.quantity,
+    discount: l.discount || undefined,
+    unitPrice: l.item.openPrice ? l.item.price : undefined,
+    name: l.item.openPrice ? l.item.name : undefined,
+  });
   const setQty = (key: string, q: number) => {
     setCart((c) => (q <= 0 ? c.filter((l) => l.key !== key) : c.map((l) => (l.key === key ? { ...l, quantity: q } : l))));
   };
@@ -264,10 +348,11 @@ export function PosView() {
   /* --------------------------------------------------------------- hold/recall */
   const hold = async () => {
     if (!cart.length) return;
+    if (training) return void toast.info("โหมดฝึกขายพักบิลไม่ได้");
     try {
       await api.post("/pos/held", {
         label: member?.name,
-        cart: { items: cart.map((l) => ({ productId: l.item.id, unitId: l.unitId, quantity: l.quantity, discount: l.discount || undefined })), discount: discountNum || undefined },
+        cart: { items: cart.map(lineBody), discount: discountNum || undefined },
         customerId: member?.id ?? null,
         total: totals.total,
       });
@@ -288,8 +373,12 @@ export function PosView() {
       await api.del(`/pos/held/${b.id}`);
       setCart(
         b.cart.items.flatMap((i) => {
-          const item = items.find((x) => x.id === i.productId);
-          return item ? [{ key: lineKey(item.id, i.unitId ?? null), item, unitId: i.unitId ?? null, quantity: i.quantity, discount: i.discount ?? 0 }] : [];
+          const found = items.find((x) => x.id === i.productId);
+          if (!found) return [];
+          const open = found.openPrice && i.unitPrice !== undefined;
+          const item = open ? { ...found, price: i.unitPrice!, name: i.name ?? found.name } : found;
+          const key = open ? `${lineKey(item.id, null)}:open:${Math.random().toString(36).slice(2)}` : lineKey(item.id, i.unitId ?? null);
+          return [{ key, item, unitId: open ? null : (i.unitId ?? null), quantity: i.quantity, discount: i.discount ?? 0 }];
         }),
       );
       setDiscount(b.cart.discount ? String(b.cart.discount) : "");
@@ -337,16 +426,34 @@ export function PosView() {
   };
 
   const pay = async (p: PaymentResult) => {
+    if (training) {
+      // practice sale: same screens, nothing sent to the server
+      const paid = r2(p.payments.reduce((sum, t) => sum + t.amount, 0));
+      beep("done");
+      setPractice({ total: totals.total, change: Math.max(0, r2(paid - totals.total)) });
+      clearBill();
+      setModal("practice");
+      return;
+    }
     setPaying(true);
     try {
-      const order = await api.post<PosOrder>("/pos/checkout", {
-        items: cart.map((l) => ({ productId: l.item.id, unitId: l.unitId, quantity: l.quantity, discount: l.discount || undefined })),
+      const body = {
+        items: cart.map(lineBody),
         discount: discountNum || undefined,
         discountCode: codeOff > 0 ? code?.code : undefined,
         customerId: member?.id ?? null,
         pointsUsed: points || undefined,
         ageConfirmed: needsAge ? p.ageConfirmed : undefined,
         payments: p.payments,
+      };
+      // past the cashier's discount limit -> a manager's PIN lets this one sale through
+      const order = await withApproval("override", async (h) => {
+        if (h) setPaying(true);
+        try {
+          return await api.post<PosOrder>("/pos/checkout", body, h);
+        } finally {
+          setPaying(false);
+        }
       });
       beep("done");
       post({ type: "done", total: order.total, change: order.change ?? 0, pointsEarned: order.pointsEarned });
@@ -363,6 +470,7 @@ export function PosView() {
         if (s && s.expectedCash > limit) toast.warning(`เงินสดในลิ้นชัก ${formatMoney(s.expectedCash)} เกินที่ตั้งไว้ — นำเข้าตู้เซฟ`, { duration: 8000 });
       }
     } catch (err) {
+      if (err instanceof ApprovalCancelled) return;
       beep("error");
       toast.error(err instanceof Error ? err.message : "ชำระเงินไม่สำเร็จ");
     } finally {
@@ -388,7 +496,7 @@ export function PosView() {
 
   /* ------------------------------------------------------------------ keyboard */
   const onKey = useEffectEvent((e: KeyboardEvent) => {
-    if (!shift.data) return;
+    if (!shift.data && !training) return;
     const fkey = /^F([1-9]|10)$/.test(e.key);
     if (modal !== null && !fkey) return;
     if (modal !== null && modal !== "pay") return;
@@ -404,6 +512,7 @@ export function PosView() {
       if (k === "F8" || k === "F9") e.preventDefault();
       return;
     }
+    if (training && (k === "F3" || k === "F5")) return act(() => toast.info("โหมดฝึกขายไม่มีสมาชิกและบิลพัก"));
     if (k === "F3") return act(() => setModal("member"));
     if (k === "F4") return act(() => void hold());
     if (k === "F5") return act(() => setModal("held"));
@@ -444,17 +553,17 @@ export function PosView() {
       </div>
     </DialogContent>
   );
-  if (!shift.data)
+  if (!shift.data && !training)
     return (
       <>
-        <OpenShiftCard />
+        <OpenShiftCard onTraining={() => setTraining(true)} />
         {/* the shift that just closed is gone from the query, so its summary is shown here */}
         <Dialog open={!!reportDialog} onOpenChange={(o) => !o && closeModal()}>
           {reportDialog}
         </Dialog>
       </>
     );
-  const s = shift.data;
+  const s = shift.data ?? PRACTICE_SHIFT;
   const heldCount = held.data?.length ?? 0;
 
   return (
@@ -464,21 +573,38 @@ export function PosView() {
         <div className="mr-auto min-w-0">
           <h1 className="text-xl font-semibold tracking-tight">ขายหน้าร้าน</h1>
           <p className="truncate text-xs text-muted-foreground">
-            {s.branchName} · เปิดกะ {formatDateTime(s.openedAt)} · {formatNumber(s.stats.orders)} บิล · {formatMoney(s.stats.sales)}
+            {training
+              ? "ลองขายได้ทุกขั้นตอน ไม่ตัดสต๊อก ไม่บันทึกยอด"
+              : `${s.branchName} · เปิดกะ ${formatDateTime(s.openedAt)} · ${formatNumber(s.stats.orders)} บิล · ${formatMoney(s.stats.sales)}`}
           </p>
         </div>
-        <ToolButton icon={PauseCircle} label="บิลพัก" k="F5" onClick={() => setModal("held")} badge={heldCount} />
-        <ToolButton icon={ReceiptText} label="บิล / คืนของ" onClick={() => setModal("bills")} />
-        <ToolButton icon={TicketPercent} label="โค้ดลด" onClick={() => setModal("codes")} />
-        <ToolButton icon={ArrowLeftRight} label="เงินเข้า/ออก" onClick={() => setModal("cash")} />
-        <ToolButton icon={FileBarChart} label="สรุปกะ" onClick={() => void showReport()} />
+        {!training && <ToolButton icon={PauseCircle} label="บิลพัก" k="F5" onClick={() => setModal("held")} badge={heldCount} />}
+        {!training && <ToolButton icon={ReceiptText} label="บิล / คืนของ" onClick={() => setModal("bills")} />}
+        <ToolButton icon={PackageOpen} label="ระบุราคา" onClick={() => (setOpenItem(null), setModal("openprice"))} />
+        {!training && can("pos:manage") && <ToolButton icon={TicketPercent} label="โค้ดลด" onClick={() => setModal("codes")} />}
+        {!training && <ToolButton icon={ArrowLeftRight} label="เงินเข้า/ออก" onClick={() => setModal("cash")} />}
+        {!training && <ToolButton icon={FileBarChart} label="สรุปกะ" onClick={() => void showReport()} />}
         <ToolButton icon={MonitorSmartphone} label="จอลูกค้า" onClick={() => window.open("/customer-display", "pos-customer-display", "popup,width=1024,height=700")} />
+        <ToolButton icon={HelpCircle} label="วิธีใช้" onClick={() => setGuide(true)} />
         <ToolButton icon={Keyboard} label="คีย์ลัด" k="F1" onClick={() => setModal("keys")} className="hidden lg:inline-flex" />
-        {can("pos:manage") && settings.data && <ToolButton icon={Settings2} label="ตั้งค่า" onClick={() => setModal("settings")} />}
-        <Button variant="secondary" size="sm" className="h-11 sm:h-8" onClick={() => setModal("close")}>
-          ปิดกะ
-        </Button>
+        {!training && can("pos:manage") && settings.data && <ToolButton icon={Settings2} label="ตั้งค่า" onClick={() => setModal("settings")} />}
+        {training ? (
+          <Button size="sm" className="h-11 sm:h-8" onClick={() => (clearBill(), setTraining(false))}>
+            <GraduationCap /> จบการฝึก
+          </Button>
+        ) : (
+          <Button variant="secondary" size="sm" className="h-11 sm:h-8" onClick={() => setModal("close")}>
+            ปิดกะ
+          </Button>
+        )}
       </div>
+      {training && (
+        <div role="status" className="mb-3 flex items-center gap-2 rounded-xl border-2 border-warning bg-warning/10 px-4 py-2.5 text-sm font-medium">
+          <GraduationCap className="size-5 shrink-0 text-warning" />
+          โหมดฝึกขาย — ทุกอย่างที่ทำตอนนี้ไม่ถูกบันทึก ลองสแกน ใส่ส่วนลด และรับเงินได้เต็มที่
+        </div>
+      )}
+      {guide && <PosGuide onClose={closeGuide} onTraining={training ? undefined : () => (closeGuide(), setTraining(true))} />}
 
       {/* Mobile tabs */}
       <div className="mb-3 grid grid-cols-2 rounded-xl bg-muted p-1 lg:hidden" role="tablist">
@@ -613,7 +739,7 @@ export function PosView() {
                   </button>
                 </div>
               ) : (
-                <button onClick={() => setModal("member")} className="flex w-full items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+                <button onClick={() => (training ? toast.info("โหมดฝึกขายไม่มีสมาชิก") : setModal("member"))} className="flex w-full items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
                   <UserRound className="size-4" /> เพิ่มสมาชิก / สะสมแต้ม <kbd className="ml-auto hidden rounded border border-border bg-muted px-1.5 text-xs lg:block">F3</kbd>
                 </button>
               )}
@@ -831,6 +957,19 @@ export function PosView() {
         )}
         {modal === "held" && <HeldDialog onRecall={(b) => void recall(b)} />}
         {modal === "keys" && <ShortcutsDialog />}
+        {modal === "openprice" && <OpenPriceDialog key={openItem?.id ?? 0} item={openItem} onAdd={addOpen} />}
+        {modal === "practice" && practice && (
+          <DialogContent title="ฝึกขายสำเร็จ" description="ของจริงจะขึ้นใบเสร็จตรงนี้ — บิลนี้ไม่ถูกบันทึก" className="max-w-sm">
+            <div className="rounded-2xl bg-success p-5 text-center text-white">
+              <p className="text-sm opacity-90">เงินทอน</p>
+              <p className="text-5xl font-bold tabular-nums">{formatMoney(practice.change)}</p>
+              <p className="mt-1 text-sm">ยอดบิล {formatMoney(practice.total)}</p>
+            </div>
+            <Button className="mt-4 w-full" onClick={closeModal} autoFocus>
+              ฝึกบิลถัดไป
+            </Button>
+          </DialogContent>
+        )}
         {modal === "cash" && <CashDialog onDone={closeModal} />}
         {modal === "line" && selectedLine && (
           <LineDialog
@@ -881,6 +1020,7 @@ export function PosView() {
           </DialogContent>
         )}
       </Dialog>
+      <ManagerPinHost />
       {paying && (
         <div className="fixed inset-0 z-[60] grid place-items-center bg-black/10">
           <Loader2 className="size-8 animate-spin text-primary" />
@@ -903,8 +1043,9 @@ function ProductTile({
   blocked: boolean;
   onAdd: (unitId: number | null) => void;
 }) {
-  const out = item.stock <= 0;
-  const low = !out && item.stock <= 5;
+  // an open-price item keeps no stock: never "out", and its price is asked when tapped
+  const out = !item.openPrice && item.stock <= 0;
+  const low = !out && !item.openPrice && item.stock <= 5;
   return (
     <div
       className={cn(
@@ -946,7 +1087,7 @@ function ProductTile({
           <span className="text-xs text-muted-foreground line-through tabular-nums">{formatMoney(item.price)}</span>
         </span>
       ) : (
-        <span className="pointer-events-none mt-auto pt-2 text-lg font-bold text-primary tabular-nums">{formatMoney(item.price)}</span>
+        <span className="pointer-events-none mt-auto pt-2 text-lg font-bold text-primary tabular-nums">{item.openPrice ? "ระบุราคา" : formatMoney(item.price)}</span>
       )}
       <span className={cn("pointer-events-none flex items-center gap-1 pr-5 text-[11px]", out || low ? "text-danger" : "text-muted-foreground")}>
         {blocked ? (
@@ -957,6 +1098,8 @@ function ProductTile({
           <>
             <Ban className="size-3" /> หมด
           </>
+        ) : item.openPrice ? (
+          "แตะเพื่อใส่ราคา"
         ) : (
           `เหลือ ${formatNumber(item.stock)} ${item.unit}`
         )}

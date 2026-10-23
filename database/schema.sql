@@ -76,6 +76,7 @@ CREATE TABLE users (
   branch_id             BIGINT UNSIGNED NULL,
   email                 VARCHAR(191) NOT NULL,
   password_hash         VARCHAR(255) NOT NULL,
+  pos_pin_hash          VARCHAR(100) NULL COMMENT 'manager PIN for till approvals (bcrypt)',
   full_name             VARCHAR(191) NOT NULL,
   phone                 VARCHAR(50)  NULL,
   welfare_monthly_limit DECIMAL(12,2) NULL COMMENT 'welfare withdrawal limit per month at cost; NULL = org default (settings welfare.monthly_limit)',
@@ -266,6 +267,7 @@ CREATE TABLE products (
   reorder_point   INT NOT NULL DEFAULT 0,
   pack_size       DECIMAL(12,3) NOT NULL DEFAULT 1 COMMENT 'order in multiples of this many base units',
   track_expiry    TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'receive with expiry dates, sell first-expiry-first-out',
+  open_price      TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'price typed at the sale, no stock kept',
   shelf_life_days INT NULL COMMENT 'default expiry = received date + this',
   image_url       VARCHAR(1000) NULL,
   shopee_item_id  VARCHAR(64) NULL,
@@ -1430,6 +1432,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist');
 
 SET FOREIGN_KEY_CHECKS = 1;

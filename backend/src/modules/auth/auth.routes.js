@@ -7,6 +7,7 @@ const env = require('../../config/env');
 const { validate } = require('../../core/http');
 const { authenticate, setAuthCookies, clearAuthCookies, REFRESH_COOKIE } = require('../../core/auth');
 const { audit } = require('../../core/audit');
+const { forbidden } = require('../../core/errors');
 const service = require('./auth.service');
 
 const router = express.Router();
@@ -80,6 +81,20 @@ router.post(
     setAuthCookies(res, result.accessToken, result.refreshToken);
     audit(req, 'auth.change_password', 'user', req.user.id);
     res.json({ data: { user: result.user } });
+  },
+);
+
+/** A manager's own 4-6 digit PIN for approving refunds, voids and overrides on a cashier's till. */
+router.put(
+  '/pin',
+  authenticate,
+  validate({ body: z.object({ currentPassword: z.string().min(1), pin: z.string().regex(/^\d{4,6}$/, 'PIN เป็นตัวเลข 4-6 หลัก') }) }),
+  async (req, res) => {
+    if (!req.user.permissions.includes('pos:manage')) throw forbidden('PIN ใช้สำหรับผู้จัดการที่อนุมัติงานหน้าร้าน');
+    await service.verifyPassword(req.user.id, req.valid.body.currentPassword);
+    await require('../pos/approvals').setPin(req.user.id, req.valid.body.pin);
+    audit(req, 'auth.set_pin', 'user', req.user.id);
+    res.json({ data: { ok: true } });
   },
 );
 
