@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Input, Label, NativeSelect } from "@/components/ui/primitives";
 import { r2 } from "./cart";
 import { METHOD_LABEL } from "./receipt";
+import { ApprovalCancelled, withApproval } from "./manager-approval";
 
 const REFUND_METHODS = ["cash", "transfer", "promptpay", "card", "ewallet"] as const;
 type RefundMethod = (typeof REFUND_METHODS)[number];
@@ -57,16 +58,12 @@ export function ReturnView({
   const submit = async () => {
     setBusy(true);
     try {
-      const r = await api.post<ReturnResult>(`/pos/orders/${order.id}/returns`, {
-        items: picked.map((l) => ({ orderItemId: l.id, quantity: qty[l.id] })),
-        reason: reason.trim(),
-        refundMethod: method,
-        restock,
-      });
+      const body = { items: picked.map((l) => ({ orderItemId: l.id, quantity: qty[l.id] })), reason: reason.trim(), refundMethod: method, restock };
+      const r = await withApproval("refund", (h) => api.post<ReturnResult>(`/pos/orders/${order.id}/returns`, body, h));
       toast.success(`คืนสินค้าแล้ว ${r.returnNo} · คืนเงิน ${formatMoney(r.refund)}`);
       onDone(r);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "คืนสินค้าไม่สำเร็จ");
+      if (!(err instanceof ApprovalCancelled)) toast.error(err instanceof Error ? err.message : "คืนสินค้าไม่สำเร็จ");
     } finally {
       setBusy(false);
     }
@@ -203,13 +200,15 @@ function ReturnHistory({ order, onChanged }: { order: PosOrder; onChanged?: (o: 
   const doVoid = async (r: SalesReturn) => {
     setBusy(true);
     try {
-      const out = await api.post<{ order: PosOrder }>(`/pos/orders/${order.id}/returns/${r.id}/void`, { reason: reason.trim() });
+      const out = await withApproval("refund", (h) =>
+        api.post<{ order: PosOrder }>(`/pos/orders/${order.id}/returns/${r.id}/void`, { reason: reason.trim() }, h),
+      );
       toast.success(`ยกเลิกการคืน ${r.returnNo} แล้ว`);
       setVoiding(null);
       setReason("");
       onChanged?.(out.order);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "ยกเลิกการคืนไม่สำเร็จ");
+      if (!(err instanceof ApprovalCancelled)) toast.error(err instanceof Error ? err.message : "ยกเลิกการคืนไม่สำเร็จ");
     } finally {
       setBusy(false);
     }

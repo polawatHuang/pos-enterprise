@@ -33,6 +33,8 @@ const productBody = z.object({
   supplierId: z.number().int().positive().nullable().optional(),
   packSize: z.coerce.number().positive().max(100_000).default(1),
   trackExpiry: z.boolean().default(false),
+  // price typed at the till and no stock kept (photocopies, fees, items without a barcode)
+  openPrice: z.boolean().default(false),
   shelfLifeDays: z.coerce.number().int().min(0).max(3650).nullable().optional(),
   imageUrl: z.url().max(1000).nullable().optional(),
   status: z.enum(['active', 'draft', 'archived']).default('active'),
@@ -40,7 +42,7 @@ const productBody = z.object({
 
 const SELECT_PRODUCT = `
   SELECT p.id, p.sku, p.barcode, p.name, p.category_id, c.name AS category_name, p.description, p.selling_points,
-         p.unit, p.price, p.cost, p.vat_type, p.reorder_point, p.supplier_id, p.pack_size, p.track_expiry, p.shelf_life_days, s.name AS supplier_name,
+         p.unit, p.price, p.cost, p.vat_type, p.reorder_point, p.supplier_id, p.pack_size, p.track_expiry, p.open_price, p.shelf_life_days, s.name AS supplier_name,
          p.image_url, p.status, p.created_at, p.updated_at,
          COALESCE((SELECT SUM(sl.quantity) FROM stock_levels sl WHERE sl.product_id = p.id), 0) AS on_hand
     FROM products p
@@ -66,6 +68,7 @@ function mapProduct(r) {
     supplierName: r.supplier_name ?? null,
     packSize: Number(r.pack_size ?? 1),
     trackExpiry: Boolean(r.track_expiry),
+    openPrice: Boolean(r.open_price),
     shelfLifeDays: r.shelf_life_days == null ? null : Number(r.shelf_life_days),
     imageUrl: r.image_url,
     status: r.status,
@@ -86,7 +89,7 @@ async function assertUnique(orgId, { sku, barcode }, exceptId = 0) {
       WHERE org_id = :orgId AND id <> :exceptId AND (sku = :sku OR (:barcode IS NOT NULL AND barcode = :barcode)) LIMIT 1`,
     { orgId, exceptId, sku, barcode: barcode || null },
   );
-  if (dup) throw conflict(dup.sku === sku ? `SKU "${sku}" ถูกใช้แล้ว` : `บาร์โค้ด "${barcode}" ถูกใช้แล้ว`);
+  if (dup) throw conflict(dup.sku === sku ? `รหัสสินค้า "${sku}" ถูกใช้แล้ว` : `บาร์โค้ด "${barcode}" ถูกใช้แล้ว`);
   if (barcode) {
     const unit = await db.one('SELECT id FROM product_units WHERE org_id = :orgId AND barcode = :barcode', { orgId, barcode });
     if (unit) throw conflict(`บาร์โค้ด "${barcode}" ถูกใช้เป็นบาร์โค้ดแพ็ก/ลังแล้ว`);
@@ -241,7 +244,19 @@ router.get('/:id', requirePermission('products:read'), validate({ params: idPara
   res.json({ data: { ...product, stock: stock.map((s) => ({ ...s, quantity: Number(s.quantity) })) } });
 });
 
+/** A code nobody has to invent: P + date + 4 random characters, retried until it is free. */
+async function autoSku(orgId) {
+  const day = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+  for (let i = 0; i < 20; i++) {
+    const sku = `P${day}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    if (!(await db.one('SELECT id FROM products WHERE org_id = :orgId AND sku = :sku', { orgId, sku }))) return sku;
+  }
+  throw conflict('สร้างรหัสสินค้าอัตโนมัติไม่สำเร็จ กรุณากรอกรหัสเอง');
+}
+
 const createBody = productBody.extend({
+  // left empty -> a code is made up (a new cashier only needs barcode, name and price)
+  sku: z.string().trim().max(64).optional().default(''),
   // Stock on hand when the product is added (recorded as an "opening" movement)
   openingStock: z
     .object({ warehouseId: z.number().int().positive(), quantity: z.coerce.number().positive().max(10_000_000) })
@@ -253,14 +268,16 @@ router.post('/', requirePermission('products:write'), validate({ body: createBod
   const b = req.valid.body;
   const { orgId, id: userId } = req.user;
   if (b.openingStock && !req.user.permissions.includes('inventory:write')) throw forbidden('ต้องมีสิทธิ์ inventory:write เพื่อใส่จำนวนสต๊อกเริ่มต้น');
+  if (b.openingStock && b.openPrice) throw badRequest('สินค้าระบุราคาตอนขายไม่นับสต๊อก จึงใส่สต๊อกเริ่มต้นไม่ได้');
+  b.sku = b.sku || (await autoSku(orgId));
   await assertUnique(orgId, b);
   const vatType = b.vatType ?? (await getTaxSettings(orgId)).defaultVatType;
   const id = await db.tx(async (conn) => {
     const [r] = await conn.query(
       `INSERT INTO products (org_id, category_id, supplier_id, sku, barcode, name, description, selling_points, unit, price, cost, vat_type, reorder_point,
-                             pack_size, track_expiry, shelf_life_days, image_url, status)
+                             pack_size, track_expiry, open_price, shelf_life_days, image_url, status)
        VALUES (:orgId, :categoryId, :supplierId, :sku, :barcode, :name, :description, :sellingPoints, :unit, :price, :cost, :vatType, :reorderPoint,
-               :packSize, :trackExpiry, :shelfLifeDays, :imageUrl, :status)`,
+               :packSize, :trackExpiry, :openPrice, :shelfLifeDays, :imageUrl, :status)`,
       {
         orgId,
         categoryId: b.categoryId ?? null,
@@ -277,6 +294,7 @@ router.post('/', requirePermission('products:write'), validate({ body: createBod
         supplierId: b.supplierId ?? null,
         packSize: b.packSize,
         trackExpiry: b.trackExpiry ? 1 : 0,
+        openPrice: b.openPrice ? 1 : 0,
         shelfLifeDays: b.shelfLifeDays ?? null,
         imageUrl: b.imageUrl ?? null,
         status: b.status,
@@ -343,12 +361,15 @@ router.patch(
     // .partial() still fills schema defaults (unit, cost, status...): only apply fields the client sent
     const sent = Object.fromEntries(Object.entries(req.valid.body).filter(([k]) => Object.hasOwn(req.body ?? {}, k)));
     const merged = { ...existing, ...sent };
+    if (merged.openPrice && !existing.openPrice && existing.onHand !== 0) {
+      throw conflict(`"${existing.name}" ยังมีสต๊อก ${existing.onHand} — ปรับสต๊อกเป็น 0 ก่อนเปลี่ยนเป็นสินค้าระบุราคาตอนขาย`);
+    }
     await assertUnique(req.user.orgId, merged, id);
     await db.query(
       `UPDATE products SET category_id = :categoryId, sku = :sku, barcode = :barcode, name = :name, description = :description,
               selling_points = :sellingPoints, unit = :unit, price = :price, cost = :cost, vat_type = :vatType,
               reorder_point = :reorderPoint, supplier_id = :supplierId, pack_size = :packSize,
-              track_expiry = :trackExpiry, shelf_life_days = :shelfLifeDays, image_url = :imageUrl, status = :status
+              track_expiry = :trackExpiry, open_price = :openPrice, shelf_life_days = :shelfLifeDays, image_url = :imageUrl, status = :status
         WHERE id = :id AND org_id = :orgId`,
       {
         id,
@@ -367,6 +388,7 @@ router.patch(
         supplierId: merged.supplierId ?? null,
         packSize: merged.packSize ?? 1,
         trackExpiry: merged.trackExpiry ? 1 : 0,
+        openPrice: merged.openPrice ? 1 : 0,
         shelfLifeDays: merged.shelfLifeDays ?? null,
         imageUrl: merged.imageUrl ?? null,
         status: merged.status,

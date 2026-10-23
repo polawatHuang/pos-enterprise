@@ -127,7 +127,7 @@ router.get('/', validate({ query: z.object({ branchId: z.coerce.number().int().p
   const pids = [...new Set(shown.flatMap((p) => p.slots.flatMap((s) => s.productIds)))];
   const cids = [...new Set(shown.flatMap((p) => p.slots.flatMap((s) => s.categoryIds)))];
   const [prods, cats] = await Promise.all([
-    pids.length ? db.query('SELECT id, name, price FROM products WHERE id IN (:pids)', { pids }) : [],
+    pids.length ? db.query('SELECT id, name, price, cost FROM products WHERE id IN (:pids)', { pids }) : [],
     cids.length ? db.query('SELECT id, name FROM product_categories WHERE id IN (:cids)', { cids }) : [],
   ]);
   const clock = promotions.localClock();
@@ -143,7 +143,7 @@ router.get('/', validate({ query: z.object({ branchId: z.coerce.number().int().p
         discountTotal: Number(st?.discount ?? 0),
         slots: p.slots.map((s) => ({
           ...s,
-          products: s.productIds.map((id) => prods.find((x) => x.id === id)).filter(Boolean).map((x) => ({ id: x.id, name: x.name, price: Number(x.price) })),
+          products: s.productIds.map((id) => prods.find((x) => x.id === id)).filter(Boolean).map((x) => ({ id: x.id, name: x.name, price: Number(x.price), cost: Number(x.cost) })),
           categories: s.categoryIds.map((id) => cats.find((x) => x.id === id)).filter(Boolean).map((x) => ({ id: x.id, name: x.name })),
         })),
       };

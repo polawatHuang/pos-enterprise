@@ -1,7 +1,7 @@
 'use strict';
 
 const db = require('../../db/pool');
-const { badRequest, conflict, forbidden, notFound } = require('../../core/errors');
+const { AppError, badRequest, conflict, notFound } = require('../../core/errors');
 const { applyMovement } = require('../inventory/inventory.service');
 const { consumeFefo, restoreLots, parseAlloc } = require('../inventory/lots');
 const { postJournal, reverseJournalsFor, saleLines } = require('../accounting/ledger.service');
@@ -315,7 +315,7 @@ async function checkout(user, input) {
     let needsAge = false;
     for (const item of input.items) {
       const [[p]] = await conn.query(
-        `SELECT p.id, p.name, p.price, p.cost, p.vat_type, p.status, p.category_id, c.sale_block, c.age_restricted
+        `SELECT p.id, p.name, p.price, p.cost, p.vat_type, p.status, p.category_id, p.open_price, c.sale_block, c.age_restricted
            FROM products p LEFT JOIN product_categories c ON c.id = p.category_id
           WHERE p.id = :id AND p.org_id = :orgId`,
         { id: item.productId, orgId: user.orgId },
@@ -326,8 +326,12 @@ async function checkout(user, input) {
         throw conflict(`ขาย "${p.name}" ไม่ได้ในช่วง ${block.from}–${block.to}${block.label ? ` (${block.label})` : ''}`);
       }
       if (p.age_restricted) needsAge = true;
+      // An open-price item (photocopies, a fee, a thing without a barcode): the cashier types the
+      // price and a short description, and no stock moves
+      const openPrice = Boolean(p.open_price);
+      if (openPrice && item.unitPrice === undefined) throw badRequest(`กรุณาระบุราคาของ "${p.name}"`);
       let unit = null;
-      if (item.unitId) {
+      if (item.unitId && !openPrice) {
         const [[u]] = await conn.query('SELECT id, name, factor, price FROM product_units WHERE id = :unitId AND product_id = :productId', {
           unitId: item.unitId,
           productId: p.id,
@@ -337,13 +341,13 @@ async function checkout(user, input) {
       }
       const factor = unit?.factor ?? 1;
       const listPrice = unit ? (unit.price ?? r2(Number(p.price) * factor)) : Number(p.price);
-      if (item.unitPrice !== undefined && Number(item.unitPrice) !== listPrice && !canOverride) {
-        throw forbidden('ต้องมีสิทธิ์ pos:manage เพื่อแก้ราคาขาย');
+      if (item.unitPrice !== undefined && Number(item.unitPrice) !== listPrice && !canOverride && !openPrice) {
+        throw new AppError(403, 'MANAGER_APPROVAL', 'การแก้ราคาขายต้องให้ผู้จัดการอนุมัติ');
       }
       const unitPrice = item.unitPrice ?? listPrice;
       const gross = unitPrice * item.quantity;
       // Expiry-tracked items leave first-expiry-first-out; near-expiry lots carry their markdown
-      const lotAllocations = await consumeFefo(conn, { warehouseId, productId: p.id, qty: r2(item.quantity * factor), forSale: true });
+      const lotAllocations = openPrice ? [] : await consumeFefo(conn, { warehouseId, productId: p.id, qty: r2(item.quantity * factor), forSale: true });
       const markdown = r2(lotAllocations.reduce((s, a) => s + (a.qty * (unitPrice / factor) * a.markdownPct) / 100, 0));
       lines.push({
         productId: p.id,
@@ -351,14 +355,15 @@ async function checkout(user, input) {
         manualDiscount: r2(item.discount ?? 0),
         gross,
         // promotions are priced per piece: packs/cartons and manager price overrides stay out of them
-        promoEligible: !unit && unitPrice === listPrice,
-        name: p.name,
+        promoEligible: !unit && unitPrice === listPrice && !openPrice,
+        name: openPrice && item.name ? item.name : p.name,
+        openPrice,
         unitName: unit?.name ?? null,
         unitFactor: factor,
         quantity: item.quantity,
         listPrice,
         unitPrice,
-        unitCost: r2(Number(p.cost) * factor),
+        unitCost: openPrice ? 0 : r2(Number(p.cost) * factor),
         vatType: p.vat_type,
         markdown,
         lotAllocations,
@@ -388,7 +393,7 @@ async function checkout(user, input) {
     const markdownTotal = lines.reduce((s, l) => s + l.markdown + l.promoDiscount, 0);
     const discountPct = listGross ? ((listGross - beforePoints.total - markdownTotal) / listGross) * 100 : 0;
     if (discountPct > settings.maxDiscountPct + 1e-9 && !canOverride) {
-      throw forbidden(`ส่วนลดรวมเกิน ${settings.maxDiscountPct}% ต้องให้ผู้จัดการอนุมัติ`);
+      throw new AppError(403, 'MANAGER_APPROVAL', `ส่วนลดรวมเกิน ${settings.maxDiscountPct}% ต้องให้ผู้จัดการอนุมัติ`);
     }
 
     let customer = null;
@@ -453,6 +458,7 @@ async function checkout(user, input) {
                  :promoDiscount, :promotionId, :lineTotal, :alloc)`,
         { orderId, ...l, alloc: l.lotAllocations.length ? JSON.stringify(l.lotAllocations) : null },
       );
+      if (l.openPrice) continue;
       await applyMovement(conn, {
         orgId: user.orgId,
         warehouseId,
@@ -581,8 +587,13 @@ async function voidOrder(user, orderId, reason) {
     // Part of it already went back through a return: voiding would restock and refund those twice
     if (Number(o.refunded_amount ?? 0) > 0) throw conflict('บิลนี้มีการคืนสินค้าแล้ว — ใช้ "คืนสินค้า" กับรายการที่เหลือแทนการยกเลิกบิล');
     const warehouseId = await warehouseForBranch(conn, user.orgId, o.branch_id);
-    const [items] = await conn.query('SELECT product_id, quantity, unit_factor, lot_allocations FROM sales_order_items WHERE order_id = :orderId', { orderId });
+    const [items] = await conn.query(
+      `SELECT i.product_id, i.quantity, i.unit_factor, i.lot_allocations, p.open_price
+         FROM sales_order_items i JOIN products p ON p.id = i.product_id WHERE i.order_id = :orderId`,
+      { orderId },
+    );
     for (const i of items) {
+      if (i.open_price) continue; // kept no stock
       await restoreLots(conn, parseAlloc(i.lot_allocations));
       await applyMovement(conn, {
         orgId: user.orgId,

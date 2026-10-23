@@ -22,6 +22,7 @@ function toPublicUser(row, rp) {
     fullName: row.full_name,
     avatarUrl: row.avatar_url,
     mustChangePassword: Boolean(row.must_change_password),
+    hasPosPin: row.pos_pin_hash != null,
     roles: rp.roles,
     permissions: rp.permissions,
   };
@@ -97,6 +98,13 @@ async function me(userId) {
   return toPublicUser(row, await repo.loadRolesAndPermissions(row.id));
 }
 
+/** Throws unless `password` is the user's current one (a re-check before a sensitive change). */
+async function verifyPassword(userId, password) {
+  const row = await repo.findUserById(userId);
+  if (!row) throw unauthorized();
+  if (!(await bcrypt.compare(password, row.password_hash))) throw badRequest('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+}
+
 /** Changes the password, signs out every session, and starts a fresh one for the caller. */
 async function changePassword(userId, currentPassword, newPassword, meta) {
   const row = await repo.findUserById(userId);
@@ -110,4 +118,4 @@ async function changePassword(userId, currentPassword, newPassword, meta) {
   return { user, ...tokens };
 }
 
-module.exports = { login, refresh, logout, me, changePassword, toPublicUser };
+module.exports = { login, refresh, logout, me, changePassword, verifyPassword, toPublicUser };

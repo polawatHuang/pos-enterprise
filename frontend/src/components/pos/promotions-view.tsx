@@ -187,9 +187,34 @@ export function PromotionsView() {
   );
 }
 
+/**
+ * Products this promotion would sell below cost. Picked products only (a whole category has no
+ * single cost). A set is checked against the dearest-to-buy product of each slot.
+ */
+export function belowCost(kind: PromotionKind, type: PromotionDiscountType, value: number, slots: SlotState[]) {
+  if (!(value > 0)) return [];
+  const known = (s: SlotState) => s.products.filter((p) => (p.cost ?? 0) > 0);
+  const out: { name: string; cost: number; net: number; perPiece: boolean }[] = [];
+  if (kind === "bundle") {
+    const worst = slots.map((s) => known(s).sort((a, b) => b.cost! - a.cost!)[0]);
+    if (worst.some((p) => !p)) return [];
+    const cost = worst.reduce((sum, p, i) => sum + p!.cost! * slots[i].qty, 0);
+    const list = worst.reduce((sum, p, i) => sum + p!.price * slots[i].qty, 0);
+    const net = type === "set_price" ? value : type === "percent" ? list * (1 - value / 100) : list - value;
+    if (net < cost - 1e-9) out.push({ name: worst.map((p) => p!.name).join(" + "), cost, net, perPiece: false });
+    return out;
+  }
+  const n = kind === "multi_buy" ? Math.max(1, slots[0]?.qty ?? 1) : 1;
+  for (const p of known(slots[0] ?? { qty: 1, products: [], categoryIds: [] })) {
+    const net = type === "set_price" ? value / n : type === "percent" ? p.price * (1 - value / 100) : p.price - value / n;
+    if (net < p.cost! - 1e-9) out.push({ name: p.name, cost: p.cost!, net: Math.round(net * 100) / 100, perPiece: true });
+  }
+  return out;
+}
+
 interface SlotState {
   qty: number;
-  products: { id: number; name: string; price: number }[];
+  products: { id: number; name: string; price: number; cost?: number }[];
   categoryIds: number[];
 }
 const emptySlot = (qty = 1): SlotState => ({ qty, products: [], categoryIds: [] });
@@ -212,8 +237,10 @@ function PromotionDialog({ promo, onDone }: { promo: Promotion | null; onDone: (
   const [allDay, setAllDay] = useState(!promo?.timeFrom);
   const [timeFrom, setTimeFrom] = useState(promo?.timeFrom ?? "17:00");
   const [timeTo, setTimeTo] = useState(promo?.timeTo ?? "20:00");
-  const [branchIds, setBranchIds] = useState<number[]>(promo?.branches ?? (allBranches ? [] : [user?.branchId ?? 0]));
+  // a new promotion starts on the user's own branch; reaching every branch is a deliberate choice
+  const [branchIds, setBranchIds] = useState<number[]>(promo?.branches ?? (user?.branchId ? [user.branchId] : []));
   const [busy, setBusy] = useState(false);
+  const [belowCostOk, setBelowCostOk] = useState(false);
 
   const changeKind = (k: PromotionKind) => {
     setKind(k);
@@ -242,6 +269,7 @@ function PromotionDialog({ promo, onDone }: { promo: Promotion | null; onDone: (
                   ? "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม"
                   : null;
 
+  const losses = belowCost(kind, discountType, Number(value), slots);
   const save = async () => {
     setBusy(true);
     const body = {
@@ -422,12 +450,28 @@ function PromotionDialog({ promo, onDone }: { promo: Promotion | null; onDone: (
           )}
         </fieldset>
 
+        {!problem && losses.length > 0 && (
+          <div role="alert" className="space-y-2 rounded-xl border-2 border-danger bg-danger/5 p-3 text-sm">
+            <p className="font-medium text-danger">โปรนี้ขายต่ำกว่าทุน</p>
+            <ul className="list-disc pl-5">
+              {losses.map((l) => (
+                <li key={l.name}>
+                  {l.name}: ทุน {formatMoney(l.cost)} แต่ขายได้ {formatMoney(l.net)}{l.perPiece ? " ต่อชิ้น" : " ต่อชุด"} (ขาดทุน {formatMoney(l.cost - l.net)})
+                </li>
+              ))}
+            </ul>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" className="size-5" checked={belowCostOk} onChange={(e) => setBelowCostOk(e.target.checked)} />
+              ตั้งใจขายต่ำกว่าทุน (เช่น ล้างสต๊อก)
+            </label>
+          </div>
+        )}
         {problem && <p className="text-sm text-muted-foreground">{problem}</p>}
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" onClick={onDone} disabled={busy}>
             ยกเลิก
           </Button>
-          <Button onClick={() => void save()} disabled={!!problem || busy}>
+          <Button onClick={() => void save()} disabled={!!problem || busy || (losses.length > 0 && !belowCostOk)}>
             {busy && <Loader2 className="animate-spin" />} {promo ? "บันทึก" : "สร้างโปรโมชั่น"}
           </Button>
         </div>
@@ -506,7 +550,7 @@ function SlotEditor({
             ))}
           </ul>
         )}
-        <ProductPicker exclude={slot.products.map((p) => p.id)} onPick={(p) => onChange({ ...slot, products: [...slot.products, { id: p.id, name: p.name, price: p.price }] })} />
+        <ProductPicker exclude={slot.products.map((p) => p.id)} onPick={(p) => onChange({ ...slot, products: [...slot.products, { id: p.id, name: p.name, price: p.price, cost: p.cost }] })} />
       </div>
     </fieldset>
   );

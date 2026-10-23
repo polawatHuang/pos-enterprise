@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { Product, Warehouse } from "@/lib/types";
-import { formatNumber } from "@/lib/utils";
+import type { Product, ProductDetail, Warehouse } from "@/lib/types";
+import { formatMoney, formatNumber } from "@/lib/utils";
+import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Input, Label, NativeSelect } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
@@ -177,16 +178,37 @@ export function MultiLineStockDialog({ action, warehouses, onDone }: { action: "
   );
 }
 
+/** A change this big (or worth this much) asks once more before it is saved. */
+const BIG_CHANGE_PCT = 30;
+const BIG_CHANGE_BAHT = 1000;
+
 export function AdjustDialog({ warehouses, onDone }: { warehouses: Warehouse[]; onDone: () => void }) {
   const invalidate = useInvalidate();
-  const [warehouseId, setWarehouseId] = useState(String(warehouses[0]?.id ?? ""));
+  const { user } = useAuth();
+  // the user's own branch store first: the main warehouse was the default and took counts by mistake
+  const own = warehouses.find((w) => w.branchId === user?.branchId) ?? warehouses[0];
+  const [warehouseId, setWarehouseId] = useState(String(own?.id ?? ""));
   const [product, setProduct] = useState<Product | null>(null);
   const [counted, setCounted] = useState("");
   const [reason, setReason] = useState("ตรวจนับสต๊อก");
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const detail = useQuery({
+    queryKey: ["products", product?.id, "detail"],
+    queryFn: () => api.get<ProductDetail>(`/products/${product!.id}`),
+    enabled: !!product,
+  });
+  const current = detail.data?.stock.find((st) => st.warehouseId === Number(warehouseId))?.quantity ?? (detail.data ? 0 : null);
+  const diff = current === null || counted === "" ? null : Number(counted) - current;
+  const value = diff === null || !product ? 0 : Math.abs(diff) * product.cost;
+  const big = diff !== null && diff !== 0 && (Math.abs(diff) > (Math.max(current ?? 0, 1) * BIG_CHANGE_PCT) / 100 || value >= BIG_CHANGE_BAHT);
 
   const submit = async () => {
     if (!product) return;
+    if (big && !confirming) {
+      setConfirming(true);
+      return;
+    }
     setBusy(true);
     try {
       const r = await api.post<{ before?: number; after?: number; unchanged?: boolean }>("/inventory/adjust", {
@@ -208,7 +230,7 @@ export function AdjustDialog({ warehouses, onDone }: { warehouses: Warehouse[]; 
   return (
     <DialogContent title="ปรับยอดสต๊อก" description="ใส่จำนวนที่นับได้จริง ระบบจะบันทึกส่วนต่างเป็นรายการปรับยอด">
       <div className="grid gap-4">
-        <WarehouseSelect id="wh" label="คลัง" value={warehouseId} onChange={setWarehouseId} warehouses={warehouses} />
+        <WarehouseSelect id="wh" label="คลัง" value={warehouseId} onChange={(v) => (setWarehouseId(v), setConfirming(false))} warehouses={warehouses} />
         <div className="space-y-2">
           <Label>สินค้า</Label>
           {product ? (
@@ -227,17 +249,24 @@ export function AdjustDialog({ warehouses, onDone }: { warehouses: Warehouse[]; 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="counted">จำนวนที่นับได้</Label>
-            <Input id="counted" inputMode="decimal" value={counted} onChange={(e) => setCounted(e.target.value)} />
+            <Input id="counted" inputMode="decimal" value={counted} onChange={(e) => (setCounted(e.target.value), setConfirming(false))} />
+            {current !== null && <p className="text-xs text-muted-foreground">ในระบบมี {formatNumber(current)} {product?.unit}</p>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="reason">เหตุผล</Label>
             <Input id="reason" value={reason} onChange={(e) => setReason(e.target.value)} />
           </div>
         </div>
+        {confirming && diff !== null && (
+          <p role="alert" className="rounded-xl border-2 border-warning bg-warning/10 p-3 text-sm">
+            ยอดเปลี่ยนเยอะ: จาก {formatNumber(current ?? 0)} เป็น {formatNumber(Number(counted))} ({diff > 0 ? "+" : ""}
+            {formatNumber(diff)} {product?.unit}, มูลค่าประมาณ {formatMoney(value)}) — ตรวจคลังและจำนวนอีกครั้ง แล้วกดยืนยัน
+          </p>
+        )}
         <div className="flex justify-end">
-          <Button onClick={submit} disabled={!product || counted === "" || Number(counted) < 0 || !reason.trim() || busy}>
+          <Button onClick={submit} variant={confirming ? "danger" : "default"} disabled={!product || counted === "" || Number(counted) < 0 || !reason.trim() || busy}>
             {busy && <Loader2 className="animate-spin" />}
-            บันทึกการปรับยอด
+            {confirming ? "ยืนยันปรับยอด" : "บันทึกการปรับยอด"}
           </Button>
         </div>
       </div>
