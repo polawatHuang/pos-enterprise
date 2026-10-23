@@ -117,6 +117,25 @@ router.patch('/suppliers/:id', requirePermission('purchasing:write'), validate({
   res.json({ data: mapSupplier(await db.one('SELECT * FROM suppliers WHERE id = :id', { id: s.id })) });
 });
 
+/** Delete a supplier added by mistake; one with purchase orders or documents is switched off instead. */
+router.delete('/suppliers/:id', requirePermission('purchasing:write'), validate({ params: idParam }), async (req, res) => {
+  const s = await db.one('SELECT * FROM suppliers WHERE id = :id AND org_id = :orgId', { id: req.valid.params.id, orgId: req.user.orgId });
+  if (!s) throw notFound('ไม่พบผู้ขาย');
+  const used = await db.one(
+    `SELECT (SELECT COUNT(*) FROM purchase_orders WHERE supplier_id = :id) AS pos, (SELECT COUNT(*) FROM documents WHERE supplier_id = :id) AS docs`,
+    { id: s.id },
+  );
+  if (Number(used.pos) || Number(used.docs)) {
+    throw conflict(`ลบไม่ได้: ผู้ขายนี้มีใบสั่งซื้อ ${used.pos} ใบ / เอกสาร ${used.docs} ฉบับ — ปิด "ใช้งานอยู่" แทน เพื่อเก็บประวัติไว้`);
+  }
+  await db.tx(async (conn) => {
+    await conn.query('UPDATE products SET supplier_id = NULL WHERE supplier_id = :id AND org_id = :orgId', { id: s.id, orgId: req.user.orgId });
+    await conn.query('DELETE FROM suppliers WHERE id = :id', { id: s.id });
+  });
+  audit(req, 'supplier.delete', 'supplier', s.id, { name: s.name });
+  res.json({ data: { id: s.id } });
+});
+
 /* ------------------------------------------------------------ suggestions */
 
 router.get(

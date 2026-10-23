@@ -29,6 +29,7 @@ const as = (c) => ({
   get: (url) => request(app).get(url).set('Cookie', c),
   post: (url, body) => request(app).post(url).set('Cookie', c).send(body),
   patch: (url, body) => request(app).patch(url).set('Cookie', c).send(body),
+  del: (url) => request(app).delete(url).set('Cookie', c),
 });
 const stock = async (warehouseId) => {
   const row = await db.one('SELECT quantity FROM stock_levels WHERE warehouse_id = :w AND product_id = :p AND variant_id = 0', {
@@ -194,5 +195,16 @@ describe('transfers', () => {
     assert.equal(await stock(2), 20);
     const list = await manager.get('/api/purchasing/transfers');
     assert.equal(list.body.data.find((t) => t.id === ship.body.data.id).shortage, 1);
+  });
+});
+
+describe('delete a supplier', () => {
+  test('an unused supplier is deleted; one with purchase orders must be switched off', async () => {
+    const s = await manager.post('/api/purchasing/suppliers', { name: `ผู้ขายลบได้ ${RUN}` });
+    assert.equal(s.status, 201, JSON.stringify(s.body));
+    assert.equal((await cashier.del(`/api/purchasing/suppliers/${s.body.data.id}`)).status, 403);
+    assert.equal((await manager.del(`/api/purchasing/suppliers/${s.body.data.id}`)).status, 200);
+    const used = await db.one('SELECT supplier_id AS id FROM purchase_orders WHERE org_id = 1 AND supplier_id IS NOT NULL LIMIT 1');
+    if (used) assert.equal((await manager.del(`/api/purchasing/suppliers/${used.id}`)).status, 409);
   });
 });

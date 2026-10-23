@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { Check, HeartHandshake, Loader2, Plus, Settings2, Trash2, X } from "lucide-react";
+import { Check, HeartHandshake, Loader2, Plus, Settings2, Trash2, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type {
@@ -30,6 +30,7 @@ const STATUS: Record<WelfareStatus, { label: string; tone: "warning" | "success"
   approved: { label: "อนุมัติแล้ว", tone: "success" },
   rejected: { label: "ปฏิเสธ", tone: "danger" },
   cancelled: { label: "ยกเลิก", tone: "neutral" },
+  reversed: { label: "กลับรายการแล้ว", tone: "neutral" },
 };
 
 const thisMonth = () => todayStr().slice(0, 7);
@@ -247,14 +248,70 @@ function RejectDialog({ request, onDone }: { request: WelfareRequest; onDone: ()
 
 /* ------------------------------------------------------------- history */
 
+function ReverseDialog({ request, onDone }: { request: WelfareRequest; onDone: () => void }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/inventory/welfare/${request.id}/reverse`, { reason: reason.trim() });
+      toast.success(`กลับรายการ ${request.requestNo} แล้ว สินค้ากลับเข้าสต๊อก`);
+      onDone();
+    } catch (err) {
+      toast.error(errText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <DialogContent title={`กลับรายการ ${request.requestNo}`} description={`${request.employeeName} · ${formatMoney(request.totalCost)}`} className="max-w-sm">
+      <div className="grid gap-3">
+        <p className="rounded-lg bg-muted px-3 py-2 text-sm">
+          สินค้าทุกรายการในคำขอนี้จะกลับเข้าสต๊อก {request.warehouseName} (ล็อตเดิม) และบันทึกบัญชีกลับรายการค่าสวัสดิการ {formatMoney(request.totalCost)} ·
+          ยอดนี้จะไม่นับในวงเงินของพนักงานอีก คำขอยังเก็บไว้ในประวัติเป็น &quot;กลับรายการแล้ว&quot;
+        </p>
+        <Label htmlFor="welfare-reverse-reason">เหตุผล</Label>
+        <Textarea id="welfare-reverse-reason" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={255} placeholder="เช่น บันทึกผิดคน / ผิดจำนวน" />
+        <Button variant="danger" className="h-11" onClick={save} disabled={busy || !reason.trim()}>
+          {busy && <Loader2 className="animate-spin" />}
+          ยืนยันกลับรายการ
+        </Button>
+      </div>
+    </DialogContent>
+  );
+}
+
 function History() {
+  const { user, can } = useAuth();
+  const refresh = useRefresh();
   const [month, setMonth] = useState(thisMonth());
   const [status, setStatus] = useState<"" | WelfareStatus>("");
+  const [busy, setBusy] = useState<number | null>(null);
+  const [reversing, setReversing] = useState<WelfareRequest | null>(null);
   const list = useQuery({
     queryKey: ["inventory", "welfare", "list", month, status],
     queryFn: () => api.get<WelfareRequest[]>("/inventory/welfare", { month: month || undefined, status: status || undefined }),
   });
   const total = (list.data ?? []).filter((r) => r.status === "approved").reduce((s, r) => s + r.totalCost, 0);
+  // Requests that never moved stock can go; approved ones are reversed instead (history is kept)
+  const canDelete = (r: WelfareRequest) => {
+    const own = r.employeeId === user?.id || r.requestedBy === user?.id;
+    return (own && r.status === "pending") || (can("inventory:approve") && ["pending", "rejected", "cancelled"].includes(r.status));
+  };
+  const canReverse = (r: WelfareRequest) => r.status === "approved" && can("inventory:approve");
+  const remove = async (r: WelfareRequest) => {
+    if (!window.confirm(`ลบคำขอ ${r.requestNo} ของ ${r.employeeName}? ลบแล้วกู้คืนไม่ได้ (สต๊อกไม่เปลี่ยน)`)) return;
+    setBusy(r.id);
+    try {
+      await api.del(`/inventory/welfare/${r.id}`);
+      toast.success(`ลบ ${r.requestNo} แล้ว`);
+      refresh();
+    } catch (err) {
+      toast.error(errText(err));
+    } finally {
+      setBusy(null);
+    }
+  };
   return (
     <div className="p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -289,7 +346,10 @@ function History() {
                 <th className="py-2 pr-3 text-right font-medium">มูลค่าทุน</th>
                 <th className="py-2 pr-3 font-medium">ขอเมื่อ</th>
                 <th className="py-2 pr-3 font-medium">อนุมัติ/ปิดเมื่อ</th>
-                <th className="py-2 font-medium">สถานะ</th>
+                <th className="py-2 pr-3 font-medium">สถานะ</th>
+                <th className="py-2 font-medium">
+                  <span className="sr-only">จัดการ</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -326,11 +386,34 @@ function History() {
                       "–"
                     )}
                   </td>
-                  <td data-label="สถานะ" className="py-2">
+                  <td data-label="สถานะ" className="py-2 pr-3">
                     <span className="flex flex-col items-end gap-1 sm:items-start">
                       <Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge>
                       {r.rejectReason && <span className="text-xs text-muted-foreground">{r.rejectReason}</span>}
+                      {r.status === "reversed" && (
+                        <span className="text-right text-xs text-muted-foreground sm:text-left">
+                          {r.reverseReason}
+                          {r.reversedAt && ` · ${formatDateTime(r.reversedAt)}`}
+                          {r.reversedByName && ` · ${r.reversedByName}`}
+                        </span>
+                      )}
                     </span>
+                  </td>
+                  <td className="py-2">
+                    {(canDelete(r) || canReverse(r)) && (
+                      <span className="flex justify-end gap-2">
+                        {canReverse(r) && (
+                          <Button variant="outline" className="h-10" disabled={busy === r.id} onClick={() => setReversing(r)}>
+                            <Undo2 /> กลับรายการ
+                          </Button>
+                        )}
+                        {canDelete(r) && (
+                          <Button variant="outline" className="h-10 text-danger" disabled={busy === r.id} onClick={() => void remove(r)}>
+                            {busy === r.id ? <Loader2 className="animate-spin" /> : <Trash2 />} ลบ
+                          </Button>
+                        )}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -338,6 +421,17 @@ function History() {
           </table>
         </div>
       )}
+      <Dialog open={reversing !== null} onOpenChange={(o) => !o && setReversing(null)}>
+        {reversing && (
+          <ReverseDialog
+            request={reversing}
+            onDone={() => {
+              setReversing(null);
+              refresh();
+            }}
+          />
+        )}
+      </Dialog>
     </div>
   );
 }

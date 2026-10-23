@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Supplier } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge, Input, Label, Skeleton } from "@/components/ui/primitives";
@@ -83,6 +84,24 @@ function SupplierDialog({ supplier, onDone }: { supplier: Supplier | null; onDon
     isActive: supplier?.isActive ?? true,
   });
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const remove = async () => {
+    if (!supplier) return;
+    if (!confirmDelete) return setConfirmDelete(true);
+    setBusy(true);
+    try {
+      await api.del(`/purchasing/suppliers/${supplier.id}`);
+      toast.success(`ลบผู้ขาย ${supplier.name} แล้ว`);
+      void qc.invalidateQueries({ queryKey: ["purchasing"] });
+      onDone();
+    } catch (err) {
+      // e.g. it has purchase orders: the message says to switch it off instead
+      toast.error(err instanceof Error ? err.message : "ลบไม่สำเร็จ", { duration: 10_000 });
+      setConfirmDelete(false);
+    } finally {
+      setBusy(false);
+    }
+  };
   const save = async () => {
     setBusy(true);
     try {
@@ -121,6 +140,11 @@ function SupplierDialog({ supplier, onDone }: { supplier: Supplier | null; onDon
           {busy && <Loader2 className="animate-spin" />}
           บันทึก
         </Button>
+        {supplier && (
+          <Button variant={confirmDelete ? "danger" : "ghost"} className={cn("sm:col-span-2", !confirmDelete && "text-danger")} onClick={() => void remove()} disabled={busy}>
+            <Trash2 /> {confirmDelete ? "ยืนยันลบผู้ขายนี้" : "ลบผู้ขาย"}
+          </Button>
+        )}
       </div>
     </DialogContent>
   );

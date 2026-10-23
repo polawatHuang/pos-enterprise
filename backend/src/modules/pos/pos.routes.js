@@ -341,6 +341,27 @@ router.post(
   },
 );
 
+/**
+ * Remove a mistaken pay-in / pay-out / safe drop of an OPEN shift (the drawer's expected cash is
+ * computed from these rows, so it follows). Own shift only, unless pos:manage. Rows written by a
+ * return belong to that return: void the return instead.
+ */
+router.delete('/shift/cash/:id', validate({ params: z.object({ id: z.coerce.number().int().positive() }) }), async (req, res) => {
+  const m = await db.one(
+    `SELECT m.*, s.user_id AS shift_user, s.closed_at FROM cash_movements m JOIN pos_shifts s ON s.id = m.shift_id
+      WHERE m.id = :id AND s.org_id = :orgId`,
+    { id: req.valid.params.id, orgId: req.user.orgId },
+  );
+  if (!m) throw notFound('ไม่พบรายการเงินเข้า/ออก');
+  if (m.shift_user !== req.user.id && !req.user.permissions.includes('pos:manage')) throw notFound('ไม่พบรายการเงินเข้า/ออก');
+  if (m.closed_at) throw conflict('กะนี้ปิดแล้ว ลบรายการไม่ได้');
+  if (returns.isAutoCashMovement(m.reason)) throw conflict('รายการนี้มาจากการคืนสินค้า — ยกเลิกที่รายการคืนสินค้าของบิลแทน');
+  await db.query('DELETE FROM cash_movements WHERE id = :id', { id: m.id });
+  audit(req, 'pos.cash.delete', 'pos_shift', m.shift_id, { movementId: m.id, type: m.type, amount: Number(m.amount), reason: m.reason });
+  const s = await db.one('SELECT s.*, b.name AS branch_name FROM pos_shifts s JOIN branches b ON b.id = s.branch_id WHERE s.id = :id', { id: m.shift_id });
+  res.json({ data: service.mapShift(s, await service.shiftStats(s.id)) });
+});
+
 /** X report of the open shift (or Z report of a closed shift the user may see). */
 router.get('/shift/report', validate({ query: z.object({ shiftId: z.coerce.number().int().positive().optional() }) }), async (req, res) => {
   let shiftId = req.valid.query.shiftId;
@@ -661,6 +682,23 @@ router.post(
   },
 );
 
+/** Void a mistaken return: stock back out, refund mirrored, journal reversed; the return stays on record. */
+router.post(
+  '/orders/:id/returns/:returnId/void',
+  requirePermission('pos:manage'),
+  validate({
+    params: z.object({ id: z.coerce.number().int().positive(), returnId: z.coerce.number().int().positive() }),
+    body: z.object({ reason: z.string().trim().min(1, 'กรุณาระบุเหตุผล').max(200) }),
+  }),
+  async (req, res) => {
+    const { id, returnId } = req.valid.params;
+    const shift = await service.currentShift(req.user.id);
+    const r = await returns.voidReturn(req.user, id, returnId, req.valid.body.reason, { shiftId: shift?.id ?? null });
+    audit(req, 'pos.return.void', 'sales_order', id, { returnId, returnNo: r.returnNo, refund: r.refund, reason: req.valid.body.reason });
+    res.json({ data: { ...r, order: await service.getOrder(req.user.orgId, id) } });
+  },
+);
+
 /* ---------------------------------------------------------- discount codes */
 
 const codeBody = z.object({
@@ -756,5 +794,22 @@ router.patch(
     res.json({ data: discounts.mapCode(await db.one('SELECT * FROM discount_codes WHERE id = :id', { id: req.valid.params.id })) });
   },
 );
+
+/** Delete a code that was never used; anything with history is switched off instead. */
+router.delete('/discount-codes/:id', requirePermission('pos:manage'), validate({ params: idParam }), async (req, res) => {
+  const id = req.valid.params.id;
+  const c = await db.one('SELECT id, code, used_count FROM discount_codes WHERE id = :id AND org_id = :orgId', { id, orgId: req.user.orgId });
+  if (!c) throw notFound('ไม่พบโค้ด');
+  const refs = await db.one(
+    `SELECT (SELECT COUNT(*) FROM sales_orders WHERE discount_code_id = :id) AS orders, (SELECT COUNT(*) FROM ai_offers WHERE discount_code_id = :id) AS offers`,
+    { id },
+  );
+  if (Number(c.used_count) > 0 || Number(refs.orders) > 0 || Number(refs.offers) > 0) {
+    throw conflict('โค้ดนี้มีประวัติการใช้งานหรือผูกกับข้อเสนอแล้ว ลบไม่ได้ — ให้ปิดใช้งานแทน');
+  }
+  await db.query('DELETE FROM discount_codes WHERE id = :id', { id });
+  audit(req, 'pos.discount_code.delete', 'discount_code', id, { code: c.code });
+  res.json({ data: { ok: true } });
+});
 
 module.exports = { router };

@@ -497,6 +497,10 @@ export interface StockMovement {
   productName: string;
   warehouseName: string;
   userName: string | null;
+  /** A quick adjustment that has already been undone */
+  reversed: boolean;
+  /** A quick adjustment ("ปรับยอด") that can still be undone */
+  reversible: boolean;
 }
 
 export interface Paged<T> {
@@ -613,6 +617,17 @@ export interface Shift {
 
 export type CashMoveType = "pay_in" | "pay_out" | "pickup";
 
+/** A pay-in / pay-out / safe drop of a shift; `auto` rows were written by a return (void the return to undo them). */
+export interface CashMovement {
+  id: number;
+  type: CashMoveType;
+  amount: number;
+  reason: string;
+  createdAt: string;
+  userName: string | null;
+  auto: boolean;
+}
+
 /** X report (open shift) / Z report (closed shift). */
 export interface ShiftReport extends Shift {
   kind: "X" | "Z";
@@ -621,7 +636,7 @@ export interface ShiftReport extends Shift {
   promoDiscount: number;
   vat: number;
   pointsUsed: number;
-  cashMovements: { type: CashMoveType; amount: number; reason: string; createdAt: string }[];
+  cashMovements: CashMovement[];
   topItems: { name: string; quantity: number; amount: number }[];
 }
 
@@ -713,6 +728,9 @@ export interface SalesReturn {
   restocked: boolean;
   userName: string | null;
   createdAt: string;
+  voided: boolean;
+  voidedAt: string | null;
+  voidReason: string | null;
   items: { name: string; unitName: string | null; quantity: number; amount: number }[];
 }
 
@@ -1770,7 +1788,7 @@ export interface CustomerInput {
 }
 
 /* ------------------------------------------------- employee welfare withdrawal */
-export type WelfareStatus = "pending" | "approved" | "rejected" | "cancelled";
+export type WelfareStatus = "pending" | "approved" | "rejected" | "cancelled" | "reversed";
 
 export interface WelfareEmployee {
   id: number;
@@ -1820,6 +1838,10 @@ export interface WelfareRequest {
   approvedByName: string | null;
   approvedAt: string | null;
   rejectReason: string | null;
+  reversedBy: number | null;
+  reversedByName: string | null;
+  reversedAt: string | null;
+  reverseReason: string | null;
   items: WelfareItem[];
 }
 

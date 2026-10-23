@@ -259,7 +259,7 @@ async function suggestions(lines, promos, candidates) {
   for (const p of promos.filter((x) => x.kind !== 'time_discount' && x.slots.length)) {
     const priced = priceCart(lines, [p]);
     const counts = p.slots.map((slot) =>
-      lines.reduce((s, l, i) => (l.eligible !== false && matches(slot, l) ? s + Math.floor(l.quantity + 1e-9) : s), 0),
+      lines.reduce((s, l) => (l.eligible !== false && matches(slot, l) ? s + Math.floor(l.quantity + 1e-9) : s), 0),
     );
     const sets = priced.applied.filter((a) => a.promotionId === p.id).length;
     // pieces needed for one more set, per slot

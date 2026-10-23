@@ -14,31 +14,21 @@ import { Dialog, DialogContent } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
 
 interface Summary {
-  products: number;
-  salesOrders: number;
-  customers: number;
-  documents: number;
-  transactions: number;
-  conversations: number;
-  trends: number;
-  videos: number;
-  otherUsers: number;
+  groups: { label: string; items: { key: string; label: string; count: number }[] }[];
   confirmPhrase: string;
 }
 
-const LABELS: [keyof Summary, string][] = [
-  ["products", "สินค้า"],
-  ["salesOrders", "บิลขาย/ออร์เดอร์"],
-  ["customers", "ลูกค้า/สมาชิก"],
-  ["documents", "เอกสารบัญชี"],
-  ["transactions", "รายรับ-รายจ่าย"],
-  ["conversations", "แชตลูกค้า"],
-  ["trends", "สินค้าเทรนด์"],
-  ["videos", "วิดีโอ AI"],
-  ["otherUsers", "ผู้ใช้อื่น"],
-];
+const countOf = (s: Summary, key: string) => s.groups.flatMap((g) => g.items).find((i) => i.key === key)?.count ?? 0;
 
-const KEPT = ["บัญชีของคุณ (admin)", "ข้อมูลบริษัท สาขา และคลัง", "ผังบัญชี", "ตั้งค่า PromptPay / บัญชีธนาคาร / LINE", "API key ที่บันทึกไว้", "ตั้งค่า AI แชต"];
+const KEPT = [
+  "บัญชีของคุณ (admin)",
+  "ข้อมูลบริษัท สาขา และคลัง (รวม PromptPay/บัญชีของแต่ละสาขา)",
+  "ผังบัญชี",
+  "ตั้งค่า POS: PromptPay / บัญชีธนาคาร / แต้ม / ส่วนลดสูงสุด",
+  "ตั้งค่าภาษี และวงเงินสวัสดิการเริ่มต้น",
+  "API key ที่บันทึกไว้ และตั้งค่า LINE",
+  "ตั้งค่า AI แชต",
+];
 
 /** Settings > จัดการข้อมูล: wipe the demo data before going live (owner/admin only). */
 export function DataResetView() {
@@ -66,15 +56,22 @@ export function DataResetView() {
               {summary.isPending ? (
                 <Skeleton className="h-40" />
               ) : (
-                <ul className="grid grid-cols-2 gap-2 text-sm">
-                  {LABELS.map(([k, label]) => (
-                    <li key={k} className="flex justify-between rounded-lg bg-danger-soft/40 px-3 py-2">
-                      <span>{label}</span>
-                      <span className="font-semibold tabular-nums">{formatNumber(Number(summary.data?.[k] ?? 0))}</span>
-                    </li>
+                <div className="space-y-3">
+                  {summary.data?.groups.map((g) => (
+                    <div key={g.label}>
+                      <p className="mb-1 text-xs font-medium text-muted-foreground">{g.label}</p>
+                      <ul className="grid gap-1.5 text-sm sm:grid-cols-2">
+                        {g.items.map((i) => (
+                          <li key={i.key} className="flex justify-between gap-2 rounded-lg bg-danger-soft/40 px-3 py-2">
+                            <span>{i.label}</span>
+                            <span className="font-semibold tabular-nums">{formatNumber(i.count)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ))}
-                  <li className="col-span-2 text-xs text-muted-foreground">รวมถึงสต๊อก ใบสั่งซื้อ ผู้ขาย บัญชีแยกประเภท โพสต์ ปกคลิป และแจ้งเตือนทั้งหมด</li>
-                </ul>
+                  <p className="text-xs text-muted-foreground">รวมถึงยอดคงเหลือ ล็อตสินค้า ใบเสร็จ/สลิป การแจ้งเตือน และไฟล์สื่อที่อัปโหลดทั้งหมด</p>
+                </div>
               )}
             </div>
             <div>
@@ -127,8 +124,10 @@ function ConfirmDialog({ summary, onClose }: { summary: Summary; onClose: () => 
         <div className="flex gap-3 rounded-xl bg-danger-soft p-3 text-sm text-danger">
           <AlertTriangle className="mt-0.5 size-5 shrink-0" />
           <p>
-            จะลบสินค้า {formatNumber(summary.products)} รายการ, บิล {formatNumber(summary.salesOrders)} ใบ, ลูกค้า {formatNumber(summary.customers)} ราย,
-            เอกสาร {formatNumber(summary.documents)} ฉบับ และผู้ใช้อื่น {formatNumber(summary.otherUsers)} คน พร้อมข้อมูลอื่นทั้งหมด
+            จะลบสินค้า {formatNumber(countOf(summary, "products"))} รายการ, บิล {formatNumber(countOf(summary, "salesOrders"))} ใบ, ลูกค้า{" "}
+            {formatNumber(countOf(summary, "customers"))} ราย, เอกสาร {formatNumber(countOf(summary, "documents"))} ฉบับ, โปรโมชั่น{" "}
+            {formatNumber(countOf(summary, "promotions"))} รายการ, เบิกสวัสดิการ {formatNumber(countOf(summary, "welfareRequests"))} รายการ และผู้ใช้อื่น{" "}
+            {formatNumber(countOf(summary, "otherUsers"))} คน พร้อมข้อมูลอื่นทั้งหมด
           </p>
         </div>
         <label className="grid gap-1.5 text-sm">

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, TicketPercent } from "lucide-react";
+import { Loader2, Plus, TicketPercent, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { DiscountCode } from "@/lib/types";
@@ -48,6 +48,18 @@ export function DiscountCodesDialog({ canManage }: { canManage: boolean }) {
       void qc.invalidateQueries({ queryKey: CODES_KEY });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
+    }
+  };
+
+  // Only a code that was never used goes away; one with history is switched off instead (the server checks)
+  const remove = async (c: DiscountCode) => {
+    if (!window.confirm(`ลบโค้ด ${c.code}?`)) return;
+    try {
+      await api.del(`/pos/discount-codes/${c.id}`);
+      toast.success(`ลบโค้ด ${c.code} แล้ว`);
+      void qc.invalidateQueries({ queryKey: CODES_KEY });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "ลบไม่สำเร็จ");
     }
   };
 
@@ -99,7 +111,7 @@ export function DiscountCodesDialog({ canManage }: { canManage: boolean }) {
                     <span className="rounded-md border border-dashed border-primary/50 bg-primary/5 px-2 py-0.5 font-mono font-semibold tracking-wide">{c.code}</span>
                     <span className="font-medium">{codeLabel(c)}</span>
                     <Badge tone={st.tone}>{st.label}</Badge>
-                    {c.issuedBy === "ai" && <Badge tone="primary">AI แชต</Badge>}
+                    {c.issuedBy === "ai_agent" && <Badge tone="primary">AI แชต</Badge>}
                     <span className="basis-full text-xs text-muted-foreground sm:basis-auto">
                       {[
                         c.description,
@@ -112,9 +124,16 @@ export function DiscountCodesDialog({ canManage }: { canManage: boolean }) {
                         .join(" · ")}
                     </span>
                     {canManage && (
-                      <Button variant="ghost" size="sm" className={cn("ml-auto", c.isActive && "text-danger")} onClick={() => void toggle(c)}>
-                        {c.isActive ? "ปิดใช้งาน" : "เปิดใช้งาน"}
-                      </Button>
+                      <span className="ml-auto flex gap-1">
+                        <Button variant="ghost" size="sm" className={cn("h-10", c.isActive && "text-danger")} onClick={() => void toggle(c)}>
+                          {c.isActive ? "ปิดใช้งาน" : "เปิดใช้งาน"}
+                        </Button>
+                        {c.usedCount === 0 && (
+                          <Button variant="ghost" size="sm" className="h-10 text-danger" onClick={() => void remove(c)}>
+                            <Trash2 /> ลบ
+                          </Button>
+                        )}
+                      </span>
                     )}
                   </li>
                 );

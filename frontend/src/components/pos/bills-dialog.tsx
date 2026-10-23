@@ -78,6 +78,10 @@ export function BillsDialog({ onReprint }: { onReprint: (o: PosOrder) => void })
             setReturning(null);
             onReprint(r.order);
           }}
+          onChanged={(o) => {
+            refresh();
+            setReturning(o);
+          }}
         />
       </DialogContent>
     );
@@ -109,9 +113,9 @@ export function BillsDialog({ onReprint }: { onReprint: (o: PosOrder) => void })
                 <Button variant="outline" size="sm" onClick={() => void reprint(b.id)}>
                   <Printer /> พิมพ์ซ้ำ
                 </Button>
-                {can("pos:manage") && b.status === "completed" && (
+                {can("pos:manage") && (b.status === "completed" || b.refundedAmount > 0) && (
                   <Button variant="outline" size="sm" onClick={() => void startReturn(b.id)}>
-                    <Undo2 /> คืนสินค้า
+                    <Undo2 /> {b.status === "completed" ? "คืนสินค้า" : "ประวัติการคืน"}
                   </Button>
                 )}
                 {can("pos:manage") && b.status === "completed" && b.refundedAmount === 0 && (

@@ -13,7 +13,7 @@ const { lotsFor } = require('../src/modules/pos/returns');
 const app = createApp();
 const RUN = Date.now().toString(36);
 const CODE = `T${RUN}`.toUpperCase().slice(0, 12);
-const state = { productId: 0, orderIds: [], codeIds: [], customerIds: [] };
+const state = { productId: 0, orderIds: [], codeIds: [], customerIds: [], shiftIds: [] };
 let manager;
 let cashier;
 
@@ -26,6 +26,7 @@ const as = (c) => ({
   get: (url) => request(app).get(url).set('Cookie', c),
   post: (url, body) => request(app).post(url).set('Cookie', c).send(body),
   patch: (url, body) => request(app).patch(url).set('Cookie', c).send(body),
+  del: (url) => request(app).delete(url).set('Cookie', c),
 });
 const stock = async () =>
   Number((await db.one('SELECT quantity FROM stock_levels WHERE warehouse_id = 2 AND product_id = :p AND variant_id = 0', { p: state.productId }))?.quantity ?? 0);
@@ -57,8 +58,10 @@ before(async () => {
 after(async () => {
   if (state.orderIds.length) await db.query('DELETE FROM sales_orders WHERE id IN (:ids)', { ids: state.orderIds });
   await db.query('DELETE FROM pos_shifts WHERE user_id = 4 AND opened_at > UTC_TIMESTAMP() - INTERVAL 1 HOUR');
+  if (state.shiftIds.length) await db.query('DELETE FROM pos_shifts WHERE id IN (:ids)', { ids: state.shiftIds });
   if (state.codeIds.length) await db.query('DELETE FROM discount_codes WHERE id IN (:ids)', { ids: state.codeIds });
   if (state.customerIds.length) await db.query('DELETE FROM customers WHERE id IN (:ids)', { ids: state.customerIds });
+  await db.query("DELETE FROM stock_lots WHERE product_id IN (SELECT id FROM products WHERE sku LIKE 'TR-%')");
   await db.query("DELETE FROM products WHERE sku LIKE 'TR-%'");
   await db.pool.end();
 });
@@ -187,5 +190,146 @@ describe('returns and refunds', () => {
     const pays = await db.query('SELECT SUM(amount) AS net FROM payments WHERE order_id = :id', { id });
     assert.equal(Number(pays[0].net), 0);
     assert.equal((await manager.post(`/api/pos/orders/${id}/returns`, { items: [{ orderItemId: itemId, quantity: 1 }], reason: 'x', refundMethod: 'transfer' })).status, 409);
+  });
+});
+
+describe('voiding a return', () => {
+  const journalNetsToZero = async (refId) => {
+    const lines = await journalFor('sales_return', refId);
+    const by = {};
+    for (const l of lines) by[l.code] = Math.round(((by[l.code] ?? 0) + Number(l.debit) - Number(l.credit)) * 100) / 100;
+    return lines.length > 0 && Object.values(by).every((v) => v === 0);
+  };
+
+  test('void puts back stock, lots, refunded amount, status, customer and the books; double void 409; manager only', async () => {
+    const p = await manager.post('/api/products', { sku: `TR-L${RUN}`, barcode: `887${RUN}`, name: 'นมทดสอบล็อต', price: 50, cost: 20, trackExpiry: true });
+    assert.equal(p.status, 201, JSON.stringify(p.body));
+    const pid = p.body.data.id;
+    const rec = await manager.post('/api/inventory/receive', { warehouseId: 2, items: [{ productId: pid, quantity: 10, unitCost: 20, expiryDate: '2099-12-31' }] });
+    assert.equal(rec.status, 201, JSON.stringify(rec.body));
+    const lotId = rec.body.data[0].lotId;
+    const lotQty = async () => Number((await db.one('SELECT quantity FROM stock_lots WHERE id = :id', { id: lotId })).quantity);
+    const level = async () =>
+      Number((await db.one('SELECT quantity FROM stock_levels WHERE warehouse_id = 2 AND product_id = :p AND variant_id = 0', { p: pid })).quantity);
+    const cust = await db.query("INSERT INTO customers (org_id, name) VALUES (1, 'ลูกค้ายกเลิกคืน')");
+    state.customerIds.push(cust.insertId);
+    const customer = () => db.one('SELECT total_spent, order_count, points FROM customers WHERE id = :id', { id: cust.insertId });
+
+    const sale = await sell({ items: [{ productId: pid, quantity: 2 }], customerId: cust.insertId });
+    assert.equal(sale.status, 201, JSON.stringify(sale.body));
+    const id = sale.body.data.id;
+    const itemId = sale.body.data.items[0].id;
+    const afterSale = { lot: await lotQty(), level: await level(), customer: await customer() };
+    assert.equal(afterSale.lot, 8);
+
+    const r = await manager.post(`/api/pos/orders/${id}/returns`, { items: [{ orderItemId: itemId, quantity: 2 }], reason: 'ผิดรายการ', refundMethod: 'transfer' });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.data.order.status, 'refunded');
+    assert.equal(await lotQty(), 10);
+    const stored = await db.one('SELECT lot_allocations FROM sales_return_items WHERE return_id = :id', { id: r.body.data.id });
+    const alloc = typeof stored.lot_allocations === 'string' ? JSON.parse(stored.lot_allocations) : stored.lot_allocations;
+    assert.deepEqual(alloc, [{ lotId, qty: 2 }]);
+    assert.notDeepEqual(await customer(), afterSale.customer);
+
+    const url = `/api/pos/orders/${id}/returns/${r.body.data.id}/void`;
+    assert.equal((await cashier.post(url, { reason: 'x' })).status, 403);
+    assert.equal((await manager.post(url, {})).status, 400);
+    const v = await manager.post(url, { reason: 'คืนผิดบิล' });
+    assert.equal(v.status, 200, JSON.stringify(v.body));
+    const o = v.body.data.order;
+    assert.deepEqual([o.status, o.refundedAmount, o.items[0].returnedQty], ['completed', 0, 0]);
+    assert.deepEqual([o.returns[0].voided, o.returns[0].voidReason], [true, 'คืนผิดบิล']);
+    assert.equal(await lotQty(), afterSale.lot);
+    assert.equal(await level(), afterSale.level);
+    assert.deepEqual(await customer(), afterSale.customer);
+    const net = await db.one('SELECT SUM(amount) AS net FROM payments WHERE order_id = :id', { id });
+    assert.equal(Number(net.net), sale.body.data.total);
+    assert.ok(await db.one('SELECT id FROM payments WHERE order_id = :id AND reference = :ref AND amount > 0', { id, ref: `VOID-RETURN ${r.body.data.returnNo}` }));
+    assert.ok(await journalNetsToZero(r.body.data.id), 'journal mirrored');
+    const mv = await db.one("SELECT quantity, type FROM stock_movements WHERE ref_type = 'sales_return' AND ref_id = :id AND quantity < 0", { id: r.body.data.id });
+    assert.deepEqual([Number(mv.quantity), mv.type], [-2, 'sale']);
+
+    assert.equal((await manager.post(url, { reason: 'อีกครั้ง' })).status, 409);
+
+    // The bill can be returned again, then voided normally once nothing is refunded
+    const again = await manager.post(`/api/pos/orders/${id}/returns`, { items: [{ orderItemId: itemId, quantity: 1 }], reason: 'คืนจริง', refundMethod: 'transfer' });
+    assert.equal(again.status, 201, JSON.stringify(again.body));
+    assert.equal(again.body.data.refund, 50);
+    assert.equal((await manager.post(`/api/pos/orders/${id}/returns/${again.body.data.id}/void`, { reason: 'ผิด' })).status, 200);
+    assert.equal((await manager.post(`/api/pos/orders/${id}/void`, { reason: 'ยกเลิกบิล' })).status, 200);
+    assert.equal(await lotQty(), 10);
+    assert.equal(await level(), 10);
+  });
+
+  test('a cash refund paid from another shift: its pay-out is removed on void and cannot be deleted by hand', async () => {
+    const shift = await manager.post('/api/pos/shift/open', { branchId: 2, openingCash: 500 });
+    assert.equal(shift.status, 201, JSON.stringify(shift.body));
+    state.shiftIds.push(shift.body.data.id);
+    try {
+      const sale = await sell({ items: [{ productId: state.productId, quantity: 1 }] });
+      const id = sale.body.data.id;
+      const r = await manager.post(`/api/pos/orders/${id}/returns`, { items: [{ orderItemId: sale.body.data.items[0].id, quantity: 1 }], reason: 'x', refundMethod: 'cash' });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      const payout = await db.one("SELECT id FROM cash_movements WHERE shift_id = :s AND type = 'pay_out'", { s: shift.body.data.id });
+      assert.ok(payout);
+      const del = await manager.del(`/api/pos/shift/cash/${payout.id}`);
+      assert.equal(del.status, 409);
+      assert.match(del.body.error.message, /คืนสินค้า/);
+      const report = await manager.get('/api/pos/shift/report');
+      assert.equal(report.body.data.cashMovements.find((m) => m.id === payout.id).auto, true);
+      assert.equal(report.body.data.expectedCash, 400);
+
+      assert.equal((await manager.post(`/api/pos/orders/${id}/returns/${r.body.data.id}/void`, { reason: 'ผิด' })).status, 200);
+      assert.equal(await db.one('SELECT id FROM cash_movements WHERE id = :id', { id: payout.id }), null);
+      assert.equal((await manager.get('/api/pos/shift')).body.data.expectedCash, 500);
+    } finally {
+      await db.query('UPDATE pos_shifts SET closed_at = UTC_TIMESTAMP() WHERE id = :id', { id: shift.body.data.id });
+    }
+  });
+});
+
+describe('deleting mistaken entries', () => {
+  test('cash movements: own open shift (or pos:manage), never a closed shift; the drawer follows', async () => {
+    const before = (await cashier.get('/api/pos/shift')).body.data.expectedCash;
+    const add = await cashier.post('/api/pos/shift/cash', { type: 'pay_in', amount: 123, reason: 'ทอนผิด' });
+    assert.equal(add.status, 201, JSON.stringify(add.body));
+    assert.equal(add.body.data.expectedCash, before + 123);
+    const row = (await cashier.get('/api/pos/shift/report')).body.data.cashMovements.find((m) => m.reason === 'ทอนผิด');
+    assert.equal(row.auto, false);
+    const del = await cashier.del(`/api/pos/shift/cash/${row.id}`);
+    assert.equal(del.status, 200, JSON.stringify(del.body));
+    assert.equal(del.body.data.expectedCash, before);
+    assert.equal((await cashier.del(`/api/pos/shift/cash/${row.id}`)).status, 404);
+
+    // A manager may remove a cashier's row; nobody may touch a closed shift's
+    await cashier.post('/api/pos/shift/cash', { type: 'pay_in', amount: 10, reason: 'ทดสอบ 2' });
+    const r2 = (await cashier.get('/api/pos/shift/report')).body.data.cashMovements.find((m) => m.reason === 'ทดสอบ 2');
+    assert.equal((await manager.del(`/api/pos/shift/cash/${r2.id}`)).status, 200);
+    const old = await db.query('INSERT INTO pos_shifts (org_id, branch_id, user_id, opening_cash, opened_at, closed_at) VALUES (1, 2, 4, 0, UTC_TIMESTAMP(), UTC_TIMESTAMP())');
+    state.shiftIds.push(old.insertId);
+    const m = await db.query("INSERT INTO cash_movements (shift_id, type, amount, reason, created_by) VALUES (:s, 'pay_in', 5, 'เก่า', 4)", { s: old.insertId });
+    assert.equal((await cashier.del(`/api/pos/shift/cash/${m.insertId}`)).status, 409);
+  });
+
+  test('discount codes: an unused code can be deleted (manager only); one with history must be switched off', async () => {
+    const mk = async (code) => {
+      const c = await manager.post('/api/pos/discount-codes', { code, type: 'fixed', value: 5 });
+      assert.equal(c.status, 201, JSON.stringify(c.body));
+      state.codeIds.push(c.body.data.id);
+      return c.body.data.id;
+    };
+    const fresh = await mk(`D${RUN}`.toUpperCase().slice(0, 12));
+    assert.equal((await cashier.del(`/api/pos/discount-codes/${fresh}`)).status, 403);
+    assert.equal((await manager.del(`/api/pos/discount-codes/${fresh}`)).status, 200);
+    assert.equal(await db.one('SELECT id FROM discount_codes WHERE id = :id', { id: fresh }), null);
+    assert.equal((await manager.del(`/api/pos/discount-codes/${fresh}`)).status, 404);
+
+    // The first test's code was used on a bill (then voided: used_count is back to 0, the bill still points at it)
+    const used = await manager.del(`/api/pos/discount-codes/${state.codeIds[0]}`);
+    assert.equal(used.status, 409);
+    assert.match(used.body.error.message, /ปิดใช้งาน/);
+    const counted = await mk(`U${RUN}`.toUpperCase().slice(0, 12));
+    await db.query('UPDATE discount_codes SET used_count = 1 WHERE id = :id', { id: counted });
+    assert.equal((await manager.del(`/api/pos/discount-codes/${counted}`)).status, 409);
   });
 });
