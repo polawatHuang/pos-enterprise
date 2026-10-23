@@ -59,10 +59,15 @@ handlers['social.status'] = (p) => require('../../modules/social/publish').check
 /** Low / out-of-stock alerts (in-app + LINE OA) for every org. */
 handlers['inventory.alerts'] = () => require('../../modules/inventory/alerts').runAlerts();
 
+/** Daily sales summary to LINE OA at each org's set time (default 18:00), once a day. */
+handlers['reports.daily_sales'] = () => require('../../modules/reports/daily-sales').runDue();
+
 /** Recurring jobs scheduled by the cron tick (idempotent: one queued instance at a time). */
 const recurring = [
   { type: 'system.cleanup', everyMinutes: 60 * 24 },
   { type: 'inventory.alerts', everyMinutes: 60 },
+  // every 5 minutes so the report arrives within minutes of its set time
+  { type: 'reports.daily_sales', everyMinutes: 5 },
 ];
 
 async function scheduleRecurring() {

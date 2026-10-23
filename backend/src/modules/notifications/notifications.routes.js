@@ -7,7 +7,9 @@ const { validate } = require('../../core/http');
 const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
 const { badRequest } = require('../../core/errors');
+const { localDate, localTime } = require('../../utils/dates');
 const alerts = require('../inventory/alerts');
+const dailySales = require('../reports/daily-sales');
 
 const router = express.Router();
 router.use(authenticate);
@@ -109,6 +111,81 @@ router.post('/test-line', requirePermission('inventory:write'), async (req, res)
   if (!s.to.length) throw badRequest('ยังไม่ได้เลือกผู้รับแจ้งเตือน');
   try {
     const sent = await alerts.pushLine(req.user.orgId, '✅ ทดสอบแจ้งเตือนสต๊อกจาก POS Enterprise', { ...s, enabled: true });
+    res.json({ data: { sent } });
+  } catch (err) {
+    throw badRequest(`ส่ง LINE ไม่สำเร็จ: ${err.message}`);
+  }
+});
+
+/* ------------------------------------------- daily sales summary (LINE OA, e.g. 18:00) */
+
+const lineTargets = async (orgId) =>
+  (
+    await db.query(
+      `SELECT c.external_thread_id AS id, COALESCE(c.customer_name, 'ผู้ใช้ LINE') AS name, c.last_message_at
+         FROM conversations c JOIN channels ch ON ch.id = c.channel_id
+        WHERE c.org_id = :orgId AND ch.platform = 'line' ORDER BY c.last_message_at DESC LIMIT 30`,
+      { orgId },
+    )
+  ).map((t) => ({ id: t.id, name: t.name, lastMessageAt: t.last_message_at }));
+
+router.get('/sales-report', requirePermission('settings:manage'), async (req, res) => {
+  const orgId = req.user.orgId;
+  const [settings, lastSentOn, targets] = await Promise.all([dailySales.getSettings(orgId), dailySales.lastSentOn(orgId), lineTargets(orgId)]);
+  res.json({ data: { settings, lastSentOn, lineTargets: targets, lineConnected: Boolean(await alerts.lineToken(orgId)) } });
+});
+
+const salesReportBody = z.object({
+  enabled: z.boolean(),
+  time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'เวลาต้องเป็น HH:MM'),
+  to: z
+    .array(
+      z
+        .string()
+        .trim()
+        .regex(/^[UCR][0-9a-f]{32}$/, 'LINE ID ต้องขึ้นต้นด้วย U (ผู้ใช้) หรือ C (กลุ่ม) ตามด้วย 32 ตัวอักษร'),
+    )
+    .max(10),
+  branchId: z.number().int().positive().nullable().default(null),
+});
+
+router.put('/sales-report', requirePermission('settings:manage'), validate({ body: salesReportBody }), async (req, res) => {
+  const b = req.valid.body;
+  if (b.enabled && !b.to.length) throw badRequest('เลือกผู้รับอย่างน้อย 1 คนก่อนเปิดใช้');
+  if (b.branchId) {
+    const br = await db.one('SELECT id FROM branches WHERE id = :id AND org_id = :orgId', { id: b.branchId, orgId: req.user.orgId });
+    if (!br) throw badRequest('ไม่พบสาขา');
+  }
+  await dailySales.saveSetting(req.user.orgId, dailySales.SETTINGS_KEY, b);
+  audit(req, 'notify.sales_report', 'settings', dailySales.SETTINGS_KEY, { enabled: b.enabled, time: b.time, targets: b.to.length, branchId: b.branchId });
+  res.json({ data: { settings: await dailySales.getSettings(req.user.orgId) } });
+});
+
+/** The report as data, for the preview on the settings page (today up to now, or a past day). */
+router.get(
+  '/sales-report/preview',
+  requirePermission('settings:manage'),
+  validate({ query: z.object({ date: z.iso.date().optional(), branchId: z.coerce.number().int().positive().optional() }) }),
+  async (req, res) => {
+    const today = localDate();
+    const date = req.valid.query.date ?? today;
+    const report = await dailySales.buildDailyReport(req.user.orgId, {
+      date,
+      until: date === today ? localTime() : null,
+      branchId: req.valid.query.branchId ?? null,
+    });
+    res.json({ data: report });
+  },
+);
+
+/** Send today's report now to the chosen recipients (whether or not the daily send is on). */
+router.post('/sales-report/test', requirePermission('settings:manage'), validate({ body: salesReportBody.partial() }), async (req, res) => {
+  const saved = await dailySales.getSettings(req.user.orgId);
+  const s = { ...saved, ...req.valid.body };
+  if (!s.to?.length) throw badRequest('ยังไม่ได้เลือกผู้รับ');
+  try {
+    const { sent } = await dailySales.sendReport(req.user.orgId, s);
+    audit(req, 'notify.sales_report.test', 'settings', dailySales.SETTINGS_KEY, { sent });
     res.json({ data: { sent } });
   } catch (err) {
     throw badRequest(`ส่ง LINE ไม่สำเร็จ: ${err.message}`);

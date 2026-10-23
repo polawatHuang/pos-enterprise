@@ -45,10 +45,12 @@ export function DataResetView() {
       ) : (
         <Card className="border-danger/40">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-danger">
-              <AlertTriangle className="size-5" /> ลบข้อมูลตัวอย่างทั้งหมด
-            </CardTitle>
-            <CardDescription>ลบข้อมูลทุกอย่างในระบบ เหลือไว้เฉพาะบัญชี admin ของคุณและการตั้งค่าพื้นฐาน กู้คืนไม่ได้</CardDescription>
+            <div className="min-w-0">
+              <CardTitle className="flex items-center gap-2 text-danger">
+                <AlertTriangle className="size-5" /> ลบข้อมูลตัวอย่างทั้งหมด
+              </CardTitle>
+              <CardDescription>ลบข้อมูลทุกอย่างในระบบ เหลือไว้เฉพาะบัญชี admin ของคุณและการตั้งค่าพื้นฐาน กู้คืนไม่ได้</CardDescription>
+            </div>
           </CardHeader>
           <CardContent className="grid gap-5 md:grid-cols-2">
             <div>
@@ -92,7 +94,9 @@ export function DataResetView() {
           </CardContent>
         </Card>
       )}
-      <Dialog open={open} onOpenChange={setOpen}>{open && summary.data && <ConfirmDialog summary={summary.data} onClose={() => setOpen(false)} />}</Dialog>
+      <Dialog open={open} onOpenChange={setOpen}>
+        {open && summary.data && <ConfirmDialog summary={summary.data} onClose={() => setOpen(false)} />}
+      </Dialog>
     </>
   );
 }

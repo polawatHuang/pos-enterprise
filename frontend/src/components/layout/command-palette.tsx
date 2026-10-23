@@ -7,6 +7,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   ArrowRight,
   BadgePercent,
+  BellRing,
   Boxes,
   ClipboardList,
   Clock,
@@ -53,6 +54,7 @@ const ACTIONS: { label: string; href: string; icon: LucideIcon; permission: stri
   { label: "สั่งของ (ยอดแนะนำแบบ 7-Eleven)", href: "/purchasing", icon: Truck, permission: "inventory:read", keywords: "สั่งซื้อ po ใบสั่งซื้อ order" },
   { label: "รับสินค้าเข้า / ปรับสต๊อก", href: "/inventory", icon: PackagePlus, permission: "inventory:write", keywords: "รับของ สต๊อก stock" },
   { label: "เริ่มตรวจนับสต๊อก", href: "/inventory/counts", icon: ClipboardList, permission: "inventory:count", keywords: "นับ count stocktake" },
+  { label: "ตั้งค่าสรุปยอดขายทาง LINE", href: "/settings/notifications", icon: BellRing, permission: "settings:manage", keywords: "แจ้งเตือน line สรุปยอด รายงาน 18:00 noti" },
   { label: "สร้างโปรโมชั่น / ลดราคาตามเวลา", href: "/promotions", icon: BadgePercent, permission: "pos:manage", keywords: "โปร promotion ซื้อคู่ 2 ชิ้น ลดราคา bundle" },
   { label: "ดูสินค้าใกล้หมดอายุ", href: "/inventory/expiry", icon: Hourglass, permission: "inventory:read", keywords: "หมดอายุ expiry ของเสีย" },
   { label: "เบิกสินค้าสวัสดิการพนักงาน", href: "/inventory/welfare", icon: HeartHandshake, permission: "welfare:request", keywords: "สวัสดิการ เบิก พนักงาน welfare" },

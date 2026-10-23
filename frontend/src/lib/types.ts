@@ -1868,3 +1868,38 @@ export interface WelfareSettings {
   defaultLimit: number;
   users: { userId: number; name: string; email: string; branchName: string | null; limit: number | null }[];
 }
+
+/* ------------------------------------------------- daily sales summary (LINE OA) */
+
+export interface SalesReportSettings {
+  enabled: boolean;
+  /** HH:MM, local time */
+  time: string;
+  to: string[];
+  /** null = every branch */
+  branchId: number | null;
+}
+
+export interface SalesReport {
+  shopName: string;
+  branchName: string | null;
+  date: string;
+  /** "HH:MM" when the report covers today up to now */
+  until: string | null;
+  net: number;
+  bills: number;
+  avgBill: number;
+  profit: number;
+  promoDiscount: number;
+  vsYesterday: { net: number; pct: number | null };
+  vsLastWeek: { net: number; pct: number | null };
+  cancelled: { count: number; amount: number };
+  refunds: { count: number; amount: number };
+  methods: { method: string; label: string; color: string; amount: number; share: number }[];
+  hours: { hour: number; amount: number }[];
+  branches: { id: number; name: string; net: number; bills: number }[];
+  topProducts: { name: string; qty: number; amount: number }[];
+  income: number;
+  expense: number;
+  balance: number;
+}

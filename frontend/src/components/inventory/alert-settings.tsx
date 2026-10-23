@@ -9,6 +9,7 @@ import type { NotifySettings } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
+import { LineRecipients } from "@/components/common/line-recipients";
 
 /** LINE OA alerts: who receives them and when the morning digest goes out. */
 export function AlertSettingsDialog({ onDone }: { onDone: () => void }) {
@@ -21,10 +22,8 @@ function Form({ initial, onDone }: { initial: NotifySettings; onDone: () => void
   const qc = useQueryClient();
   const [enabled, setEnabled] = useState(initial.line.enabled);
   const [to, setTo] = useState<string[]>(initial.line.to);
-  const [manual, setManual] = useState("");
   const [time, setTime] = useState(initial.line.digestTime);
   const [busy, setBusy] = useState<"save" | "test" | "check" | null>(null);
-  const toggle = (id: string) => setTo((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
 
   const save = async () => {
     setBusy("save");
@@ -76,44 +75,7 @@ function Form({ initial, onDone }: { initial: NotifySettings; onDone: () => void
         </label>
         <div className="space-y-2">
           <Label>ผู้รับ</Label>
-          {initial.lineTargets.length ? (
-            <ul className="max-h-44 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
-              {initial.lineTargets.map((t) => (
-                <li key={t.id}>
-                  <label className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-accent">
-                    <input type="checkbox" checked={to.includes(t.id)} onChange={() => toggle(t.id)} />
-                    {t.name}
-                    <span className="ml-auto truncate font-mono text-[10px] text-muted-foreground">{t.id.slice(0, 9)}…</span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">ให้ผู้จัดการทักแชต LINE OA ของร้าน 1 ครั้ง แล้วชื่อจะขึ้นที่นี่ให้เลือก</p>
-          )}
-          <div className="flex gap-2">
-            <Input value={manual} onChange={(e) => setManual(e.target.value.trim())} placeholder="หรือใส่ LINE userId / groupId (U… / C…)" className="h-9 font-mono text-xs" />
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9"
-              disabled={!/^[UCR][0-9a-f]{32}$/.test(manual)}
-              onClick={() => {
-                setTo((t) => (t.includes(manual) ? t : [...t, manual]));
-                setManual("");
-              }}
-            >
-              เพิ่ม
-            </Button>
-          </div>
-          {to.filter((id) => !initial.lineTargets.some((t) => t.id === id)).map((id) => (
-            <p key={id} className="flex items-center justify-between rounded-lg bg-muted px-3 py-1.5 font-mono text-xs">
-              {id}
-              <button className="text-danger" onClick={() => toggle(id)}>
-                เอาออก
-              </button>
-            </p>
-          ))}
+          <LineRecipients targets={initial.lineTargets} value={to} onChange={setTo} />
         </div>
         <div className="flex items-center gap-3">
           <Label htmlFor="digest">ส่งสรุปสต๊อกทุกวันเวลา</Label>
