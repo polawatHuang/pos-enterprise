@@ -1043,8 +1043,9 @@ function ProductTile({
   blocked: boolean;
   onAdd: (unitId: number | null) => void;
 }) {
-  const out = item.stock <= 0;
-  const low = !out && item.stock <= 5;
+  // an open-price item keeps no stock: never "out", and its price is asked when tapped
+  const out = !item.openPrice && item.stock <= 0;
+  const low = !out && !item.openPrice && item.stock <= 5;
   return (
     <div
       className={cn(
@@ -1086,7 +1087,7 @@ function ProductTile({
           <span className="text-xs text-muted-foreground line-through tabular-nums">{formatMoney(item.price)}</span>
         </span>
       ) : (
-        <span className="pointer-events-none mt-auto pt-2 text-lg font-bold text-primary tabular-nums">{formatMoney(item.price)}</span>
+        <span className="pointer-events-none mt-auto pt-2 text-lg font-bold text-primary tabular-nums">{item.openPrice ? "ระบุราคา" : formatMoney(item.price)}</span>
       )}
       <span className={cn("pointer-events-none flex items-center gap-1 pr-5 text-[11px]", out || low ? "text-danger" : "text-muted-foreground")}>
         {blocked ? (
@@ -1097,6 +1098,8 @@ function ProductTile({
           <>
             <Ban className="size-3" /> หมด
           </>
+        ) : item.openPrice ? (
+          "แตะเพื่อใส่ราคา"
         ) : (
           `เหลือ ${formatNumber(item.stock)} ${item.unit}`
         )}

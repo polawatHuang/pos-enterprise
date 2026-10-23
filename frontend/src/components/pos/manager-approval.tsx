@@ -103,7 +103,7 @@ export function ManagerPinHost() {
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
               placeholder="PIN ผู้จัดการ"
               aria-label="PIN ผู้จัดการ"
-              className="h-14 text-center text-2xl tracking-[0.5em]"
+              className="h-14 text-center text-2xl tracking-[0.5em] placeholder:text-base placeholder:tracking-normal"
               autoFocus
             />
             {error && (
