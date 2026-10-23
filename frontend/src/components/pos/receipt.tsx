@@ -97,8 +97,8 @@ export function Receipt({ order, settings }: { order: PosOrder; settings?: PosSe
           <div className="my-2 border-t border-dashed border-black" />
           <p className="font-bold">รายการคืนสินค้า</p>
           {order.returns.map((r) => (
-            <div key={r.id}>
-              <Row label={`${r.returnNo} (${METHOD_LABEL[r.refundMethod] ?? r.refundMethod})`} value={-r.refundAmount} />
+            <div key={r.id} className={r.voided ? "line-through" : undefined}>
+              <Row label={`${r.returnNo} (${METHOD_LABEL[r.refundMethod] ?? r.refundMethod})${r.voided ? " ยกเลิก" : ""}`} value={-r.refundAmount} />
               {r.items.map((i, idx) => (
                 <p key={idx} className="pl-2 text-[11px]">
                   {i.name} x {i.quantity}

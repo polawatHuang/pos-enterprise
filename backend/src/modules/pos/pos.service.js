@@ -152,7 +152,10 @@ async function shiftReport(shiftId) {
   });
   if (!s) throw notFound('ไม่พบกะ');
   const stats = await shiftStats(shiftId);
-  const moves = await db.query('SELECT type, amount, reason, created_at FROM cash_movements WHERE shift_id = :shiftId ORDER BY id', { shiftId });
+  const moves = await db.query(
+    'SELECT m.id, m.type, m.amount, m.reason, m.created_at, m.created_by, u.full_name AS user_name FROM cash_movements m LEFT JOIN users u ON u.id = m.created_by WHERE m.shift_id = :shiftId ORDER BY m.id',
+    { shiftId },
+  );
   const top = await db.query(
     `SELECT i.name, SUM(i.quantity * i.unit_factor) AS qty, SUM(i.line_total) AS amount
        FROM sales_order_items i JOIN sales_orders so ON so.id = i.order_id
@@ -175,7 +178,16 @@ async function shiftReport(shiftId) {
     promoDiscount: Number(disc.promo),
     vat: Number(disc.vat),
     pointsUsed: Number(disc.points),
-    cashMovements: moves.map((m) => ({ type: m.type, amount: Number(m.amount), reason: m.reason, createdAt: m.created_at })),
+    cashMovements: moves.map((m) => ({
+      id: m.id,
+      type: m.type,
+      amount: Number(m.amount),
+      reason: m.reason,
+      createdAt: m.created_at,
+      userName: m.user_name ?? null,
+      // rows a return wrote itself go away only by voiding that return
+      auto: require('./returns').isAutoCashMovement(m.reason),
+    })),
     topItems: top.map((t) => ({ name: t.name, quantity: Number(t.qty), amount: Number(t.amount) })),
   };
 }
