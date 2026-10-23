@@ -111,7 +111,7 @@ export function DiscountCodesDialog({ canManage }: { canManage: boolean }) {
                     <span className="rounded-md border border-dashed border-primary/50 bg-primary/5 px-2 py-0.5 font-mono font-semibold tracking-wide">{c.code}</span>
                     <span className="font-medium">{codeLabel(c)}</span>
                     <Badge tone={st.tone}>{st.label}</Badge>
-                    {c.issuedBy === "ai" && <Badge tone="primary">AI แชต</Badge>}
+                    {c.issuedBy === "ai_agent" && <Badge tone="primary">AI แชต</Badge>}
                     <span className="basis-full text-xs text-muted-foreground sm:basis-auto">
                       {[
                         c.description,
