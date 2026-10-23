@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "เข้าสู่ระบบ" }
 const highlights = [
   { icon: Store, text: "POS หน้าร้าน สต๊อกหลายสาขา สั่งซื้อและรับของ" },
   { icon: Bot, text: "AI ตอบแชต LINE / Facebook / Instagram ปิดการขายให้อัตโนมัติ" },
-  { icon: LineChart, text: "บัญชี ภาษี และ Smart Dashboard ในที่เดียว" },
+  { icon: LineChart, text: "บัญชี ภาษี และภาพรวมร้านในที่เดียว" },
   { icon: ShieldCheck, text: "สิทธิ์ผู้ใช้ระดับองค์กร พร้อม audit log" },
 ];
 

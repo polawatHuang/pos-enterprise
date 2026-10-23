@@ -321,7 +321,7 @@ describe('POS posts to the ledger', () => {
     await manager.post(`/api/pos/orders/${sale.body.data.id}/void`, { reason: 'ทดสอบ' });
     l = await ledgerFor('sales_order', sale.body.data.id);
     for (const code of ['1100', '4100', '2200', '5100', '1300']) assert.equal(l[code].dr, l[code].cr, code);
-    await cashier.post('/api/pos/shift/close', { closingCash: 0 });
+    await cashier.post('/api/pos/shift/close', { closingCash: 0, note: 'ทดสอบ' });
   });
 });
 

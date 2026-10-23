@@ -38,7 +38,7 @@ export function ExpiryView() {
     <>
       <PageHeader
         title="ใกล้หมดอายุ & ของเสีย"
-        description="สินค้าที่ติดตามวันหมดอายุ ขายล็อตที่หมดก่อนออกก่อน (FEFO) · ลดราคาให้หน้าร้านอัตโนมัติ · บันทึกของเสียลงบัญชี"
+        description="สินค้าที่ติดตามวันหมดอายุ ล็อตที่หมดอายุก่อนขายออกก่อน · ลดราคาให้หน้าร้านอัตโนมัติ · บันทึกของเสียลงบัญชี"
         actions={
           <NativeSelect aria-label="คลัง" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
             <option value="">ทุกคลัง</option>

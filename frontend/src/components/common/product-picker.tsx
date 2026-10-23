@@ -44,7 +44,7 @@ export function ProductPicker({ onPick, exclude = [] }: { onPick: (p: Product) =
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="พิมพ์ชื่อสินค้า / SKU / บาร์โค้ด"
+            placeholder="พิมพ์ชื่อสินค้า / รหัสสินค้า / บาร์โค้ด"
             className="h-11 pl-9"
             aria-label="ค้นหาสินค้า"
           />

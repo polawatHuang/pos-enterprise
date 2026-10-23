@@ -194,8 +194,12 @@ describe('POS', () => {
       payment: { method: 'cash', amountReceived: 107 },
     });
     state.orderIds.push(sale.body.data.id);
-    const close = await cashier.post('/api/pos/shift/close', { closingCash: 600 });
+    // a short drawer needs a reason before the shift can close
+    const noReason = await cashier.post('/api/pos/shift/close', { closingCash: 600 });
+    assert.equal(noReason.status, 400, JSON.stringify(noReason.body));
+    const close = await cashier.post('/api/pos/shift/close', { closingCash: 600, note: 'ทอนเงินผิด' });
     assert.equal(close.status, 200, JSON.stringify(close.body));
+    assert.equal(close.body.data.note, 'ทอนเงินผิด');
     // 500 opening + 214 sale - 214 void + 107 sale = 607
     assert.equal(close.body.data.expectedCash, 607);
     assert.equal(close.body.data.difference, -7);

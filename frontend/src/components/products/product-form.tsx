@@ -20,7 +20,7 @@ import { ScanButton } from "@/components/ui/barcode-scanner";
 const num = (msg: string) => z.string().trim().min(1, msg).refine((v) => !Number.isNaN(Number(v)) && Number(v) >= 0, "ต้องเป็นตัวเลขไม่ติดลบ");
 
 const schema = z.object({
-  sku: z.string().trim().min(1, "กรุณากรอก SKU").max(64),
+  sku: z.string().trim().min(1, "กรุณากรอกรหัสสินค้า").max(64),
   barcode: z.string().trim().max(64),
   name: z.string().trim().min(1, "กรุณากรอกชื่อสินค้า").max(255),
   categoryId: z.string(),
@@ -165,7 +165,7 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
           <Field label="ชื่อสินค้า" error={errors.name?.message} className="sm:col-span-2">
             <Input aria-invalid={!!errors.name} {...register("name")} />
           </Field>
-          <Field label="SKU" error={errors.sku?.message}>
+          <Field label="รหัสสินค้า" error={errors.sku?.message}>
             <Input aria-invalid={!!errors.sku} {...register("sku")} />
           </Field>
           <Field label="บาร์โค้ด" error={errors.barcode?.message}>

@@ -77,7 +77,7 @@ export function DashboardView() {
   return (
     <>
       <PageHeader
-        title="Smart Dashboard"
+        title="ภาพรวมร้าน"
         description="ภาพรวมยอดขาย บัญชี สต๊อก แชต และการตลาด จากทุกโมดูล"
         actions={
           <>
