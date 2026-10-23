@@ -606,6 +606,7 @@ export interface Shift {
   expectedCash: number;
   difference?: number | null;
   denominations: Record<string, number> | null;
+  note: string | null;
   stats: {
     orders: number;
     sales: number;

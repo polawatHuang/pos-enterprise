@@ -20,6 +20,16 @@ export interface LinePromo {
 }
 
 export const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Amounts a customer typically hands over for `total`: the next 20 / 50 / 100 / 500 / 1000 above it (exact is its own button). */
+export function suggestTenders(total: number): number[] {
+  const out = new Set<number>();
+  for (const step of [20, 50, 100, 500, 1000]) {
+    const v = Math.ceil(total / step) * step;
+    if (v > total + 1e-9) out.add(v);
+  }
+  return [...out].sort((a, b) => a - b).slice(0, 5);
+}
 export const lineKey = (productId: number, unitId: number | null) => `${productId}:${unitId ?? 0}`;
 
 export function unitOf(line: Pick<CartLine, "item" | "unitId">) {

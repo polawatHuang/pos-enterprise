@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { hasPermission, navGroups } from "@/config/nav";
+import { hasPermission, isFrontline, navGroups } from "@/config/nav";
 import { cn } from "@/lib/utils";
 
 export function Brand({ collapsed = false }: { collapsed?: boolean }) {
@@ -21,6 +22,8 @@ export function Brand({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
+const SHOW_ALL_KEY = "nav.showAll";
+
 export function SidebarNav({
   permissions,
   collapsed = false,
@@ -37,8 +40,27 @@ export function SidebarNav({
     .flatMap((g) => g.items.map((i) => i.href))
     .filter(matches)
     .sort((a, b) => b.length - a.length)[0];
+  // A cashier starts with the few pages they use; the rest is one tap away and the choice is remembered
+  const frontline = isFrontline(permissions);
+  const [showAll, setShowAll] = useState(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem(SHOW_ALL_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleAll = () => {
+    const next = !showAll;
+    setShowAll(next);
+    try {
+      localStorage.setItem(SHOW_ALL_KEY, next ? "1" : "0");
+    } catch {
+      /* storage blocked: the choice lasts this visit only */
+    }
+  };
+  const short = frontline && !showAll;
   const groups = navGroups
-    .map((g) => ({ ...g, items: g.items.filter((i) => hasPermission(permissions, i.permission)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => hasPermission(permissions, i.permission) && (!short || i.essential || i.href === best)) }))
     .filter((g) => g.items.length > 0);
 
   return (
@@ -85,6 +107,15 @@ export function SidebarNav({
           </ul>
         </div>
       ))}
+      {frontline && !collapsed && (
+        <button
+          type="button"
+          onClick={toggleAll}
+          className="mt-5 h-10 w-full rounded-lg px-3 text-left text-sm text-sidebar-muted hover:bg-white/5 hover:text-white"
+        >
+          {short ? "แสดงเมนูทั้งหมด" : "แสดงเฉพาะเมนูที่ใช้บ่อย"}
+        </button>
+      )}
     </nav>
   );
 }

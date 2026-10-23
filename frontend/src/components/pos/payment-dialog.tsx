@@ -12,7 +12,7 @@ import { cn, formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
-import { r2 } from "./cart";
+import { r2, suggestTenders } from "./cart";
 import { Upsell } from "./upsell";
 import { isUnreadable, readFileNow, UNREADABLE_HELP } from "@/lib/files";
 
@@ -24,7 +24,6 @@ const METHODS: { value: PaymentMethod; label: string; icon: typeof Banknote; key
   { value: "ewallet", label: "e-Wallet", icon: Wallet, key: "" },
 ];
 export const METHOD_NAME: Record<string, string> = Object.fromEntries(METHODS.map((m) => [m.value, m.label]));
-const NOTES = [1000, 500, 100, 50, 20];
 
 export interface Tender {
   method: PaymentMethod;
@@ -78,6 +77,8 @@ export function PaymentDialog({
   const [slip, setSlip] = useState<SlipCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [ageChecked, setAgeChecked] = useState(false);
+  // a QR or transfer ends the sale only once the cashier has seen the money arrive (or the AI passed the slip)
+  const [seenPaid, setSeenPaid] = useState(false);
   const receivedRef = useRef<HTMLInputElement>(null);
   /** Quick-tender taps keep focus in the amount box so Enter completes the sale. */
   const tap = (fn: () => void) => {
@@ -91,12 +92,14 @@ export function PaymentDialog({
   const change = r2(cashNum - remaining);
   const ageOk = !needsAge || ageChecked || ageConfirmedByCustomer;
   const amountNum = amount === "" ? remaining : Number(amount) || 0;
+  const needsSeen = (method === "promptpay" || method === "transfer") && !slip?.ok;
 
   const pick = (m: PaymentMethod) => {
     setMethod(m);
     setAmount("");
     setReference("");
     setSlip(null);
+    setSeenPaid(false);
     if (m !== "promptpay") onQr(null, m, remaining);
   };
 
@@ -112,7 +115,7 @@ export function PaymentDialog({
 
   /** Adds an electronic tender; when it settles the bill the sale completes right away. */
   const addTender = () => {
-    if (amountNum <= 0) return;
+    if (amountNum <= 0 || (needsSeen && !seenPaid)) return;
     if (amountNum > remaining + 0.001) {
       toast.error("ยอดเกินที่ต้องชำระ");
       return;
@@ -126,6 +129,7 @@ export function PaymentDialog({
     setAmount("");
     setReference("");
     setSlip(null);
+    setSeenPaid(false);
     setMethod("cash");
     onQr(null, "cash", r2(remaining - t.amount));
   };
@@ -199,7 +203,7 @@ export function PaymentDialog({
           >
             <Icon className="size-5" />
             {label}
-            {key && <kbd className="absolute right-1 top-1 hidden rounded bg-muted px-1 text-[9px] text-muted-foreground sm:block">{key}</kbd>}
+            {key && <kbd className="absolute right-1 top-1 hidden rounded bg-muted px-1 text-xs text-muted-foreground lg:block">{key}</kbd>}
           </button>
         ))}
       </div>
@@ -228,12 +232,13 @@ export function PaymentDialog({
               <Button type="button" variant="secondary" onClick={() => tap(() => setReceived(String(remaining)))}>
                 พอดี
               </Button>
-              {NOTES.map((v) => (
-                <Button key={v} type="button" variant="outline" onClick={() => tap(() => setReceived((r) => String(r2((Number(r) || 0) + v))))} className="tabular-nums">
-                  +{v.toLocaleString("th-TH")}
+              {suggestTenders(remaining).map((v) => (
+                <Button key={v} type="button" variant="outline" onClick={() => tap(() => setReceived(String(v)))} className="tabular-nums">
+                  {v.toLocaleString("th-TH")}
                 </Button>
               ))}
             </div>
+            {received === "" && <p className="text-xs text-muted-foreground">ไม่กรอก = รับเงินพอดี {formatMoney(remaining)}</p>}
             {received && (
               <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => tap(() => setReceived(""))}>
                 ล้างจำนวนเงิน
@@ -271,6 +276,7 @@ export function PaymentDialog({
                 onChange={(e) => {
                   setAmount(e.target.value);
                   setSlip(null);
+                  setSeenPaid(false);
                 }}
                 autoFocus
               />
@@ -278,7 +284,7 @@ export function PaymentDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="ref">เลขอ้างอิง (ไม่บังคับ)</Label>
-              <Input id="ref" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="approval / 4 หลักท้ายบัตร / เลขสลิป" />
+              <Input id="ref" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="เลขอนุมัติ / 4 หลักท้ายบัตร / เลขสลิป" />
             </div>
           </div>
           {method === "promptpay" && <PromptPayQr amount={amountNum} enabled={!!settings?.promptpayEnabled} onPayload={(p) => onQr(p, "promptpay", amountNum)} />}
@@ -293,7 +299,15 @@ export function PaymentDialog({
               {slip && <SlipResult slip={slip} />}
             </div>
           )}
-          <Button type="submit" size="lg" className="h-12 text-base" disabled={busy || amountNum <= 0 || !ageOk || (slip !== null && !slip.ok)}>
+          {needsSeen && amountNum > 0 && (
+            <label className={cn("flex cursor-pointer items-center gap-3 rounded-xl border-2 p-3 text-sm", seenPaid ? "border-success bg-success-soft" : "border-warning")}>
+              <input type="checkbox" className="size-6 shrink-0 accent-[var(--success)]" checked={seenPaid} onChange={(e) => setSeenPaid(e.target.checked)} />
+              <span>
+                เห็นเงินเข้า <b className="text-base tabular-nums">{formatMoney(amountNum)}</b> ในแอปธนาคารหรือในสลิปของลูกค้าแล้ว
+              </span>
+            </label>
+          )}
+          <Button type="submit" size="lg" className="h-12 text-base" disabled={busy || amountNum <= 0 || !ageOk || (slip !== null && !slip.ok) || (needsSeen && !seenPaid)}>
             {busy && <Loader2 className="animate-spin" />}
             {Math.abs(amountNum - remaining) < 0.001 ? `ได้รับ${METHOD_NAME[method]}แล้ว · จบการขาย` : `เพิ่ม${METHOD_NAME[method]} ${formatMoney(amountNum)}`}
           </Button>
@@ -393,7 +407,7 @@ function PromptPayQr({ amount, enabled, onPayload }: { amount: number; enabled: 
         {svg ? <div dangerouslySetInnerHTML={{ __html: svg }} /> : <Loader2 className="size-6 animate-spin text-muted-foreground" />}
       </div>
       <div className="text-center text-sm text-muted-foreground sm:text-left">
-        <p className="font-medium text-foreground">QR ใส่ยอด {formatMoney(amount)}</p>
+        <p className="text-lg font-semibold text-foreground">QR ใส่ยอด {formatMoney(amount)}</p>
         <p className="mt-1">ลูกค้าสแกนแล้วยอดขึ้นเอง ไม่ต้องพิมพ์</p>
         <p className="mt-1">QR แสดงบนจอลูกค้าด้วย (ถ้าเปิดไว้)</p>
         <p className="mt-2 text-xs">ตรวจสลิปด้วย AI หรือดูแจ้งเตือนเงินเข้าก่อนยืนยัน</p>

@@ -44,6 +44,8 @@ export interface NavItem {
   permission: string | string[];
   /** Delivery phase of a module not yet built; 1 = available now (no badge) */
   phase: number;
+  /** Part of the short menu a front-line cashier sees by default */
+  essential?: boolean;
 }
 
 export interface NavGroup {
@@ -59,6 +61,19 @@ export const CUSTOMERS_WRITE = ["pos:sell", "inbox:reply"];
 /** Welfare withdrawals: staff who request them, and managers who approve them. */
 export const WELFARE_ACCESS = ["welfare:request", "inventory:approve", "inventory:write"];
 
+/** Any of these makes someone a manager; without them the sidebar starts with the short cashier menu. */
+const MANAGE_PERMISSIONS = [
+  "pos:manage",
+  "products:write",
+  "inventory:write",
+  "inventory:approve",
+  "purchasing:write",
+  "dashboard:view",
+  "settings:manage",
+  "accounting:read",
+];
+export const isFrontline = (permissions: readonly string[]) => !hasPermission(permissions, MANAGE_PERMISSIONS);
+
 /** True when `permissions` satisfies a nav permission (a string, or any one of an array). */
 export function hasPermission(permissions: readonly string[], required: string | readonly string[]) {
   return typeof required === "string" ? permissions.includes(required) : required.some((p) => permissions.includes(p));
@@ -67,21 +82,21 @@ export function hasPermission(permissions: readonly string[], required: string |
 export const navGroups: NavGroup[] = [
   {
     label: "ภาพรวม",
-    items: [{ href: "/dashboard", label: "Smart Dashboard", icon: LayoutDashboard, permission: "dashboard:view", phase: 1 }],
+    items: [{ href: "/dashboard", label: "ภาพรวมร้าน", icon: LayoutDashboard, permission: "dashboard:view", phase: 1 }],
   },
   {
     label: "ขายและสต๊อก",
     items: [
-      { href: "/pos", label: "ขายหน้าร้าน (POS)", icon: ShoppingCart, permission: "pos:sell", phase: 1 },
+      { href: "/pos", label: "ขายหน้าร้าน", icon: ShoppingCart, permission: "pos:sell", phase: 1, essential: true },
       { href: "/promotions", label: "โปรโมชั่น", icon: BadgePercent, permission: "pos:sell", phase: 1 },
       { href: "/products", label: "สินค้า", icon: Package, permission: "products:read", phase: 1 },
       { href: "/products/categories", label: "หมวดหมู่สินค้า", icon: Tags, permission: "products:read", phase: 1 },
       { href: "/inventory", label: "สต๊อกสินค้า", icon: Boxes, permission: "inventory:read", phase: 1 },
-      { href: "/inventory/counts", label: "ตรวจนับสต๊อก", icon: ClipboardList, permission: "inventory:count", phase: 1 },
+      { href: "/inventory/counts", label: "ตรวจนับสต๊อก", icon: ClipboardList, permission: "inventory:count", phase: 1, essential: true },
       { href: "/purchasing", label: "สั่งซื้อ & รับของ", icon: Truck, permission: "inventory:read", phase: 1 },
       { href: "/purchasing/suppliers", label: "ผู้ขาย", icon: Factory, permission: "inventory:read", phase: 1 },
       { href: "/inventory/expiry", label: "ใกล้หมดอายุ", icon: Hourglass, permission: "inventory:read", phase: 1 },
-      { href: "/inventory/welfare", label: "เบิกสวัสดิการพนักงาน", icon: HeartHandshake, permission: WELFARE_ACCESS, phase: 1 },
+      { href: "/inventory/welfare", label: "เบิกสวัสดิการพนักงาน", icon: HeartHandshake, permission: WELFARE_ACCESS, phase: 1, essential: true },
     ],
   },
   {
@@ -97,7 +112,7 @@ export const navGroups: NavGroup[] = [
   {
     label: "ลูกค้าและการตลาด",
     items: [
-      { href: "/customers", label: "ลูกค้า", icon: Contact, permission: CUSTOMERS_READ, phase: 1 },
+      { href: "/customers", label: "ลูกค้า", icon: Contact, permission: CUSTOMERS_READ, phase: 1, essential: true },
       { href: "/inbox", label: "แชตลูกค้า + AI", icon: MessagesSquare, permission: "inbox:read", phase: 1 },
       { href: "/inbox/aftersales", label: "คืนสินค้า & ข้อเสนอ", icon: PackageX, permission: "inbox:read", phase: 1 },
       { href: "/inbox/settings", label: "ตั้งค่า AI แชต", icon: Bot, permission: "inbox:read", phase: 1 },

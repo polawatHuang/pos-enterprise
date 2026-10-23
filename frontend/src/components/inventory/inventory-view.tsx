@@ -184,7 +184,7 @@ function LevelsTable({
                 setQ(e.target.value);
                 setPage(1);
               }}
-              placeholder="ค้นหาสินค้า / SKU / บาร์โค้ด"
+              placeholder="ค้นหาสินค้า / รหัสสินค้า / บาร์โค้ด"
               className="h-11 pl-9 lg:h-9"
               aria-label="ค้นหาสินค้า"
             />

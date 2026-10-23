@@ -78,6 +78,12 @@ export function PosView() {
   const [member, setMember] = useState<PosMember | null>(null);
   const [pointsUse, setPointsUse] = useState(0);
   const [pendingQty, setPendingQty] = useState<number | null>(null);
+  const [scanMiss, setScanMiss] = useState<string | null>(null);
+  useEffect(() => {
+    if (!scanMiss) return;
+    const t = setTimeout(() => setScanMiss(null), 4000);
+    return () => clearTimeout(t);
+  }, [scanMiss]);
   const [modal, setModal] = useState<Modal>(null);
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
   const [receipt, setReceipt] = useState<PosOrder | null>(null);
@@ -221,24 +227,31 @@ export function PosView() {
   const onSearchEnter = async (scanned?: string) => {
     const code = (scanned ?? search).trim();
     if (!code) return;
+    setScanMiss(null);
     try {
       const item = await api.get<CatalogItem>("/pos/lookup", { code });
       add(item, item.matchedUnitId ?? null, pendingQty ?? 1);
       setSearch("");
       setPendingQty(null);
     } catch (err) {
-      if (!(err instanceof ApiError && err.status === 404)) toast.error(err instanceof Error ? err.message : "ค้นหาไม่สำเร็จ");
-      else if (scanned === undefined && catalog.data?.length === 1) {
+      if (!(err instanceof ApiError && err.status === 404)) {
+        beep("error");
+        toast.error(err instanceof Error ? err.message : "ค้นหาไม่สำเร็จ");
+      } else if (scanned === undefined && catalog.data?.length === 1) {
         add(catalog.data[0], null, pendingQty ?? 1);
         setSearch("");
         setPendingQty(null);
       } else {
+        // clear the box so the next scan starts clean; the message under it says what was missed
         beep("error");
-        toast.error(`ไม่พบสินค้ารหัส ${code}`);
+        setScanMiss(code);
+        setSearch("");
+        setPendingQty(null);
       }
     }
   };
   const onSearchChange = (v: string) => {
+    setScanMiss(null);
     const m = v.match(/^(\d{1,4})\*$/);
     if (m) {
       setPendingQty(Number(m[1]));
@@ -418,7 +431,29 @@ export function PosView() {
   }, []);
 
   if (shift.isPending) return <Skeleton className="h-[70vh] w-full rounded-xl" />;
-  if (!shift.data) return <OpenShiftCard />;
+  const reportDialog = modal === "report" && report && (
+    <DialogContent title={report.kind === "Z" ? "ปิดกะเรียบร้อย · สรุปปิดกะ" : "สรุประหว่างกะ"} className="max-w-md">
+      <div className="max-h-[60dvh] overflow-y-auto rounded-lg border border-border">
+        <ShiftReportView report={report} />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <Button variant="outline" onClick={() => window.print()}>
+          <Printer /> พิมพ์
+        </Button>
+        <Button onClick={closeModal}>ปิด</Button>
+      </div>
+    </DialogContent>
+  );
+  if (!shift.data)
+    return (
+      <>
+        <OpenShiftCard />
+        {/* the shift that just closed is gone from the query, so its summary is shown here */}
+        <Dialog open={!!reportDialog} onOpenChange={(o) => !o && closeModal()}>
+          {reportDialog}
+        </Dialog>
+      </>
+    );
   const s = shift.data;
   const heldCount = held.data?.length ?? 0;
 
@@ -433,14 +468,14 @@ export function PosView() {
           </p>
         </div>
         <ToolButton icon={PauseCircle} label="บิลพัก" k="F5" onClick={() => setModal("held")} badge={heldCount} />
-        <ToolButton icon={ReceiptText} label="บิล / คืนสินค้า" onClick={() => setModal("bills")} />
-        <ToolButton icon={TicketPercent} label="โค้ดส่วนลด" onClick={() => setModal("codes")} />
+        <ToolButton icon={ReceiptText} label="บิล / คืนของ" onClick={() => setModal("bills")} />
+        <ToolButton icon={TicketPercent} label="โค้ดลด" onClick={() => setModal("codes")} />
         <ToolButton icon={ArrowLeftRight} label="เงินเข้า/ออก" onClick={() => setModal("cash")} />
-        <ToolButton icon={FileBarChart} label="รายงาน X" onClick={() => void showReport()} />
+        <ToolButton icon={FileBarChart} label="สรุปกะ" onClick={() => void showReport()} />
         <ToolButton icon={MonitorSmartphone} label="จอลูกค้า" onClick={() => window.open("/customer-display", "pos-customer-display", "popup,width=1024,height=700")} />
         <ToolButton icon={Keyboard} label="คีย์ลัด" k="F1" onClick={() => setModal("keys")} className="hidden lg:inline-flex" />
         {can("pos:manage") && settings.data && <ToolButton icon={Settings2} label="ตั้งค่า" onClick={() => setModal("settings")} />}
-        <Button variant="secondary" size="sm" onClick={() => setModal("close")}>
+        <Button variant="secondary" size="sm" className="h-11 sm:h-8" onClick={() => setModal("close")}>
           ปิดกะ
         </Button>
       </div>
@@ -475,7 +510,7 @@ export function PosView() {
                   void onSearchEnter();
                 }
               }}
-              placeholder="สแกนบาร์โค้ด หรือพิมพ์ชื่อ/SKU · พิมพ์ 6* ก่อนสแกน = 6 ชิ้น"
+              placeholder="สแกนบาร์โค้ด หรือพิมพ์ชื่อ/รหัสสินค้า · พิมพ์ 6* ก่อนสแกน = 6 ชิ้น"
               className="h-14 rounded-2xl pl-12 pr-32 text-lg shadow-sm"
               aria-label="สแกนหรือค้นหาสินค้า"
               autoFocus
@@ -491,7 +526,7 @@ export function PosView() {
                   <X className="size-4" />
                 </button>
               )}
-              <kbd className="hidden rounded border border-border bg-muted px-1.5 text-[10px] text-muted-foreground sm:block">F2</kbd>
+              <kbd className="hidden rounded border border-border bg-muted px-1.5 text-xs text-muted-foreground lg:block">F2</kbd>
               <ScanButton
                 mode="continuous"
                 beep={false}
@@ -502,6 +537,11 @@ export function PosView() {
               />
             </div>
           </div>
+          {scanMiss && (
+            <p role="alert" className="mt-2 rounded-lg bg-danger/10 px-3 py-2 text-sm font-medium text-danger">
+              ไม่พบสินค้ารหัส {scanMiss} — ลองสแกนใหม่ หรือพิมพ์ชื่อสินค้า
+            </p>
+          )}
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
             <Chip active={filter === "fav"} onClick={() => setFilter("fav")}>
               <Star className={cn("size-3.5", filter === "fav" ? "fill-current" : "fill-warning text-warning")} /> โปรด
@@ -540,11 +580,12 @@ export function PosView() {
               <h2 className="flex items-center gap-2 font-semibold">
                 <ShoppingCart className="size-4" /> ตะกร้า
                 <span className="text-sm font-normal text-muted-foreground">({formatNumber(totals.units)})</span>
+                {cart.length > 0 && <span className="hidden text-xs font-normal text-muted-foreground lg:inline">· F7 แก้รายการที่เลือก</span>}
               </h2>
               <div className="flex items-center gap-3">
                 {cart.length > 0 && (
                   <button onClick={() => void hold()} className="text-xs font-medium text-warning hover:underline">
-                    พักบิล F4
+                    พักบิล<span className="hidden lg:inline"> F4</span>
                   </button>
                 )}
                 {cart.length > 0 && (
@@ -573,7 +614,7 @@ export function PosView() {
                 </div>
               ) : (
                 <button onClick={() => setModal("member")} className="flex w-full items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-                  <UserRound className="size-4" /> เพิ่มสมาชิก / สะสมแต้ม <kbd className="ml-auto rounded border border-border bg-muted px-1.5 text-[10px]">F3</kbd>
+                  <UserRound className="size-4" /> เพิ่มสมาชิก / สะสมแต้ม <kbd className="ml-auto hidden rounded border border-border bg-muted px-1.5 text-xs lg:block">F3</kbd>
                 </button>
               )}
             </div>
@@ -612,14 +653,14 @@ export function PosView() {
                     </p>
                   </div>
                   <div className="flex items-center rounded-lg border border-border bg-card" onClick={(e) => e.stopPropagation()}>
-                    <button className="grid size-8 place-items-center" onClick={() => setQty(l.key, l.quantity - 1)} aria-label="ลด">
-                      {l.quantity === 1 ? <Trash2 className="size-3.5 text-danger" /> : <Minus className="size-3.5" />}
+                    <button className="grid size-11 place-items-center sm:size-9" onClick={() => setQty(l.key, l.quantity - 1)} aria-label="ลด">
+                      {l.quantity === 1 ? <Trash2 className="size-4 text-danger" /> : <Minus className="size-4" />}
                     </button>
-                    <button className="w-8 text-center text-sm font-semibold tabular-nums" onClick={() => (setSelected(l.key), setModal("line"))} aria-label="แก้จำนวน">
+                    <button className="h-11 w-9 text-center text-sm font-semibold tabular-nums sm:h-9" onClick={() => (setSelected(l.key), setModal("line"))} aria-label="แก้จำนวน">
                       {formatNumber(l.quantity)}
                     </button>
-                    <button className="grid size-8 place-items-center" onClick={() => add(l.item, l.unitId)} aria-label="เพิ่ม">
-                      <Plus className="size-3.5" />
+                    <button className="grid size-11 place-items-center sm:size-9" onClick={() => add(l.item, l.unitId)} aria-label="เพิ่ม">
+                      <Plus className="size-4" />
                     </button>
                   </div>
                   <span className="w-20 text-right text-sm font-semibold tabular-nums">{formatMoney(lineTotal(l))}</span>
@@ -633,7 +674,7 @@ export function PosView() {
               {r2(totals.lineDiscounts - totals.promo) > 0 && <Row label="ส่วนลดรายการ" value={`−${formatMoney(r2(totals.lineDiscounts - totals.promo))}`} danger />}
               <div className="flex items-center justify-between gap-3">
                 <label htmlFor="discount" className="text-muted-foreground">
-                  ส่วนลดท้ายบิล <kbd className="rounded border border-border bg-muted px-1 text-[10px]">F6</kbd>
+                  ส่วนลดท้ายบิล <kbd className="hidden rounded border border-border bg-muted px-1 text-xs lg:inline">F6</kbd>
                 </label>
                 <Input
                   ref={discountRef}
@@ -717,7 +758,7 @@ export function PosView() {
                 <PayButton label="เงินสด" k="F8" onClick={() => openPay("cash")} disabled={!cart.length} />
                 <PayButton label="PromptPay" k="F9" onClick={() => openPay("promptpay")} disabled={!cart.length} />
                 <Button size="lg" className="h-14 text-base" disabled={!cart.length || discountNum > totals.subtotal} onClick={() => openPay("cash")}>
-                  ชำระเงิน <kbd className="rounded bg-primary-foreground/20 px-1 text-[10px]">F10</kbd>
+                  ชำระเงิน <kbd className="hidden rounded bg-primary-foreground/20 px-1 text-xs lg:inline">F10</kbd>
                 </Button>
               </div>
             </div>
@@ -800,29 +841,18 @@ export function PosView() {
             }}
             onSave={({ quantity, unitId, discount: d }) => {
               const key = lineKey(selectedLine.item.id, unitId);
+              // edit in place: the line keeps its spot; a unit change that lands on another line folds that line in
               setCart((c) => {
-                const others = c.filter((l) => l.key !== selectedLine.key && l.key !== key);
                 const merged = c.find((l) => l.key === key && l.key !== selectedLine.key);
-                return [...others, { ...selectedLine, key, unitId, quantity: quantity + (merged?.quantity ?? 0), discount: d }];
+                const edited = { ...selectedLine, key, unitId, quantity: quantity + (merged?.quantity ?? 0), discount: d };
+                return c.filter((l) => l !== merged).map((l) => (l.key === selectedLine.key ? edited : l));
               });
               setSelected(key);
               closeModal();
             }}
           />
         )}
-        {modal === "report" && report && (
-          <DialogContent title={report.kind === "Z" ? "ปิดกะเรียบร้อย · รายงาน Z" : "รายงาน X (ระหว่างกะ)"} className="max-w-md">
-            <div className="max-h-[60dvh] overflow-y-auto rounded-lg border border-border">
-              <ShiftReportView report={report} />
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={() => window.print()}>
-                <Printer /> พิมพ์
-              </Button>
-              <Button onClick={closeModal}>ปิด</Button>
-            </div>
-          </DialogContent>
-        )}
+        {reportDialog}
         {modal === "receipt" && receipt && (
           <DialogContent
             title={receipt.status === "cancelled" ? "ใบเสร็จ (ยกเลิกแล้ว)" : receipt.change === undefined ? `ใบเสร็จ ${receipt.orderNo}` : "ขายสำเร็จ"}
@@ -966,9 +996,16 @@ function ToolButton({
   className?: string;
 }) {
   return (
-    <Button variant="outline" size="sm" onClick={onClick} className={cn("relative", className)} title={k ? `${label} (${k})` : label}>
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      className={cn("relative h-12 min-w-14 flex-col gap-0.5 px-2 text-[11px] sm:h-8 sm:min-w-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:text-xs", className)}
+      title={k ? `${label} (${k})` : label}
+    >
       <Icon />
-      <span className="hidden sm:inline">{label}</span>
+      <span className="leading-none sm:leading-normal">{label}</span>
+      {k && <span className="hidden text-muted-foreground lg:inline">{k}</span>}
       {!!badge && <span className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-warning text-[10px] font-bold text-white">{badge}</span>}
     </Button>
   );
@@ -978,7 +1015,7 @@ function PayButton({ label, k, onClick, disabled }: { label: string; k: string; 
   return (
     <Button variant="outline" className="h-14 flex-col gap-0 text-sm" onClick={onClick} disabled={disabled}>
       {label}
-      <span className="text-[10px] text-muted-foreground">{k}</span>
+      <span className="hidden text-xs text-muted-foreground lg:block">{k}</span>
     </Button>
   );
 }

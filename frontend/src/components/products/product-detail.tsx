@@ -69,7 +69,7 @@ export function ProductDetail({ id }: { id: number }) {
             <Badge tone={STATUS_LABEL[p.status].tone}>{STATUS_LABEL[p.status].label}</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            SKU {p.sku}
+            รหัส {p.sku}
             {p.barcode && ` · บาร์โค้ด ${p.barcode}`}
             {p.categoryName && ` · ${p.categoryName}`}
           </p>

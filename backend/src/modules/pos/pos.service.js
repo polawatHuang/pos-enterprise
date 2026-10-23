@@ -125,6 +125,7 @@ function mapShift(s, stats) {
     closingCash: s.closing_cash == null ? null : Number(s.closing_cash),
     expectedCash: s.expected_cash == null ? expectedCash : Number(s.expected_cash),
     denominations: parseJsonColumn(s.denominations) ?? null,
+    note: s.note ?? null,
     stats,
   };
 }
@@ -220,6 +221,8 @@ async function closeShift(user, { closingCash, denominations, note }) {
   if (counted === undefined) throw badRequest('กรุณานับเงินสดในลิ้นชัก');
   const stats = await shiftStats(s.id);
   const expected = expectedDrawer(s, stats);
+  // a drawer that is a baht or more off needs the cashier's explanation on record
+  if (Math.abs(r2(counted - expected)) >= 1 && !note) throw badRequest('กรุณาระบุสาเหตุที่เงินสดไม่ตรงยอด');
   await db.query(
     `UPDATE pos_shifts SET closed_at = UTC_TIMESTAMP(), closing_cash = :counted, expected_cash = :expected, denominations = :denominations, note = :note
       WHERE id = :id`,

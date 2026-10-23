@@ -50,7 +50,7 @@ interface Row extends Hit {
 
 /** Quick actions: the jobs people open the app for, gated by permission. */
 const ACTIONS: { label: string; href: string; icon: LucideIcon; permission: string; keywords: string }[] = [
-  { label: "เปิดหน้าขาย (POS)", href: "/pos", icon: ShoppingCart, permission: "pos:sell", keywords: "ขาย pos แคชเชียร์ คิดเงิน" },
+  { label: "เปิดหน้าขาย", href: "/pos", icon: ShoppingCart, permission: "pos:sell", keywords: "ขาย pos แคชเชียร์ คิดเงิน" },
   { label: "สั่งของ (ยอดแนะนำแบบ 7-Eleven)", href: "/purchasing", icon: Truck, permission: "inventory:read", keywords: "สั่งซื้อ po ใบสั่งซื้อ order" },
   { label: "รับสินค้าเข้า / ปรับสต๊อก", href: "/inventory", icon: PackagePlus, permission: "inventory:write", keywords: "รับของ สต๊อก stock" },
   { label: "เริ่มตรวจนับสต๊อก", href: "/inventory/counts", icon: ClipboardList, permission: "inventory:count", keywords: "นับ count stocktake" },
@@ -251,7 +251,7 @@ function Palette({ onClose }: { onClose: () => void }) {
           {term && !loading && debounced === q.trim() && rows.length === 0 && (
             <div className="grid place-items-center gap-2 py-10 text-center text-sm text-muted-foreground">
               <ScanBarcode className="size-8 opacity-40" />
-              ไม่พบ &quot;{q.trim()}&quot; — ลองพิมพ์บางส่วนของชื่อ, SKU หรือเบอร์โทร
+              ไม่พบ &quot;{q.trim()}&quot; — ลองพิมพ์บางส่วนของชื่อ, รหัสสินค้า หรือเบอร์โทร
             </div>
           )}
           {grouped.map((g) => {

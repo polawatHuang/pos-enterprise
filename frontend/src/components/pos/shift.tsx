@@ -96,8 +96,8 @@ export function OpenShiftCard() {
   );
 }
 
-const DENOMS = [1000, 500, 100, 50, 20, 10, 5, 2, 1];
-const DENOM_LABEL = (d: number) => (d >= 20 ? `แบงก์ ${d}` : `เหรียญ ${d}`);
+const DENOMS = [1000, 500, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.25];
+const DENOM_LABEL = (d: number) => (d >= 20 ? `แบงก์ ${d}` : d >= 1 ? `เหรียญ ${d}` : `เหรียญ ${d * 100} สต.`);
 const CASH_TYPES: { value: CashMoveType; label: string; hint: string }[] = [
   { value: "pickup", label: "นำเข้าตู้เซฟ", hint: "ลดเงินสดในลิ้นชักเมื่อมีมากเกินไป" },
   { value: "pay_out", label: "จ่ายเงินออก", hint: "เช่น ค่าน้ำแข็ง ค่าส่งของ" },
@@ -112,19 +112,24 @@ export function CloseShiftDialog({ shift, onClosed }: { shift: Shift; onClosed: 
   const [note, setNote] = useState("");
   const [reveal, setReveal] = useState(false);
   const [busy, setBusy] = useState(false);
-  const counted = DENOMS.reduce((sum, d) => sum + d * (Number(counts[d]) || 0), 0);
-  const diff = counted - shift.expectedCash;
+  const counted = Math.round(DENOMS.reduce((sum, d) => sum + d * (Number(counts[d]) || 0), 0) * 100) / 100;
+  const diff = Math.round((counted - shift.expectedCash) * 100) / 100;
+  // same rule as the server: a baht or more off needs a reason before the shift can close
+  const needsReason = Math.abs(diff) >= 1;
+  const diffWord = diff > 0 ? "เกิน" : "ขาด";
 
   const close = async () => {
     setBusy(true);
     try {
       const denominations = Object.fromEntries(DENOMS.filter((d) => Number(counts[d]) > 0).map((d) => [String(d), Number(counts[d])]));
-      const r = await api.post<ShiftReport>("/pos/shift/close", { denominations, note: note || undefined });
+      const r = await api.post<ShiftReport>("/pos/shift/close", { denominations, note: note.trim() || undefined });
       const d = r.difference ?? 0;
-      toast.success(d === 0 ? "ปิดกะแล้ว เงินสดตรงยอด" : `ปิดกะแล้ว เงินสด${d > 0 ? "เกิน" : "ขาด"} ${formatMoney(Math.abs(d))}`);
-      await qc.invalidateQueries({ queryKey: SHIFT_KEY });
-      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      if (d === 0) toast.success("ปิดกะแล้ว เงินสดตรงยอด");
+      else toast.warning(`ปิดกะแล้ว เงินสด${d > 0 ? "เกิน" : "ขาด"} ${formatMoney(Math.abs(d))}`);
+      // hand the report over first: once the shift query refetches, the POS swaps to the open-shift card
       onClosed(r);
+      void qc.invalidateQueries({ queryKey: SHIFT_KEY });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "ปิดกะไม่สำเร็จ");
     } finally {
@@ -158,7 +163,7 @@ export function CloseShiftDialog({ shift, onClosed }: { shift: Shift; onClosed: 
       {reveal ? (
         <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <Info label="เงินสดที่ควรมี" value={formatMoney(shift.expectedCash)} strong />
-          <Info label={diff === 0 ? "ตรงยอด" : diff > 0 ? "เกิน" : "ขาด"} value={formatMoney(Math.abs(diff))} strong />
+          <Info label={diff === 0 ? "ตรงยอด" : diffWord} value={formatMoney(Math.abs(diff))} strong />
         </dl>
       ) : (
         <Button variant="ghost" size="sm" className="mt-2" onClick={() => setReveal(true)}>
@@ -166,10 +171,22 @@ export function CloseShiftDialog({ shift, onClosed }: { shift: Shift; onClosed: 
         </Button>
       )}
       <div className="mt-4 grid gap-3">
-        <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="หมายเหตุ (ถ้ามีส่วนต่าง กรุณาระบุสาเหตุ)" aria-label="หมายเหตุ" />
-        <Button onClick={close} disabled={busy || !reveal}>
+        {reveal && needsReason && (
+          <p className="rounded-lg bg-danger/10 p-2.5 text-sm font-medium text-danger">
+            เงินสด{diffWord} {formatMoney(Math.abs(diff))} — นับใหม่อีกครั้ง หรือระบุสาเหตุก่อนปิดกะ
+          </p>
+        )}
+        <Input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder={reveal && needsReason ? "สาเหตุที่เงินไม่ตรง (ต้องระบุ) เช่น ทอนเงินผิด" : "หมายเหตุ (ถ้ามี)"}
+          aria-label="หมายเหตุ"
+          aria-invalid={reveal && needsReason && !note.trim()}
+          maxLength={255}
+        />
+        <Button onClick={close} disabled={busy || !reveal || (needsReason && !note.trim())} variant={reveal && needsReason ? "danger" : "default"}>
           {busy && <Loader2 className="animate-spin" />}
-          ยืนยันปิดกะ และพิมพ์รายงาน Z
+          {reveal && needsReason ? `ยืนยันปิดกะ (เงิน${diffWord} ${formatMoney(Math.abs(diff))})` : "ยืนยันปิดกะ และพิมพ์สรุปปิดกะ"}
         </Button>
       </div>
     </DialogContent>
@@ -178,7 +195,8 @@ export function CloseShiftDialog({ shift, onClosed }: { shift: Shift; onClosed: 
 
 export function CashDialog({ onDone }: { onDone: () => void }) {
   const qc = useQueryClient();
-  const [type, setType] = useState<CashMoveType>("pickup");
+  // no default: picking the wrong kind silently moved cash to the safe
+  const [type, setType] = useState<CashMoveType | null>(null);
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -201,6 +219,7 @@ export function CashDialog({ onDone }: { onDone: () => void }) {
   const save = async () => {
     setBusy(true);
     try {
+      if (!type) return;
       await api.post("/pos/shift/cash", { type, amount: Number(amount), reason: reason || CASH_LABEL[type] });
       toast.success(`บันทึก${CASH_LABEL[type]} ${formatMoney(Number(amount))} แล้ว`);
       await qc.invalidateQueries({ queryKey: SHIFT_KEY });
@@ -212,7 +231,7 @@ export function CashDialog({ onDone }: { onDone: () => void }) {
     }
   };
   return (
-    <DialogContent title="เงินเข้า / ออกลิ้นชัก">
+    <DialogContent title="เงินเข้า / ออกลิ้นชัก" description="เลือกก่อนว่าเป็นเงินแบบไหน">
       <div className="grid grid-cols-3 gap-2">
         {CASH_TYPES.map((t) => (
           <button
@@ -234,9 +253,9 @@ export function CashDialog({ onDone }: { onDone: () => void }) {
       >
         <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="จำนวนเงิน" className="h-12 text-lg" aria-label="จำนวนเงิน" autoFocus />
         <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="เหตุผล" aria-label="เหตุผล" />
-        <Button type="submit" disabled={busy || !(Number(amount) > 0)}>
+        <Button type="submit" disabled={busy || !type || !(Number(amount) > 0)}>
           {busy && <Loader2 className="animate-spin" />}
-          บันทึก
+          {type ? `บันทึก${CASH_LABEL[type]}` : "เลือกประเภทด้านบนก่อน"}
         </Button>
       </form>
       {!!moves.data?.length && (
@@ -284,7 +303,7 @@ export function ShiftReportView({ report }: { report: ShiftReport }) {
   const c = report.stats.cash;
   return (
     <div className="print-receipt mx-auto w-full max-w-[300px] bg-white p-4 font-mono text-[12px] leading-snug text-black">
-      <p className="text-center text-[14px] font-bold">รายงาน {report.kind} {report.kind === "Z" ? "(ปิดกะ)" : "(ระหว่างกะ)"}</p>
+      <p className="text-center text-[14px] font-bold">{report.kind === "Z" ? "สรุปปิดกะ" : "สรุประหว่างกะ"}</p>
       <p className="text-center">{report.branchName}</p>
       <p>พนักงาน {report.cashierName}</p>
       <p>เปิด {new Date(report.openedAt).toLocaleString("th-TH")}</p>
@@ -311,6 +330,7 @@ export function ShiftReportView({ report }: { report: ShiftReport }) {
         <>
           <R label="นับได้จริง" value={formatMoney(report.closingCash)} />
           <R label={(report.difference ?? 0) >= 0 ? "เกิน" : "ขาด"} value={formatMoney(Math.abs(report.difference ?? 0))} bold />
+          {report.note && <p>สาเหตุ: {report.note}</p>}
         </>
       )}
       {report.topItems.length > 0 && (
