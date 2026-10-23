@@ -772,6 +772,9 @@ CREATE TABLE sales_returns (
   aftersales_return_id BIGINT UNSIGNED NULL COMMENT 'returns row from the chat after-sales flow',
   created_by     BIGINT UNSIGNED NULL,
   created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  voided_by      BIGINT UNSIGNED NULL,
+  voided_at      DATETIME NULL,
+  void_reason    VARCHAR(255) NULL,
   UNIQUE KEY uq_sales_return_no (org_id, return_no),
   KEY idx_sret_order (order_id),
   CONSTRAINT fk_sret_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
@@ -785,6 +788,7 @@ CREATE TABLE sales_return_items (
   product_id     BIGINT UNSIGNED NOT NULL,
   quantity       DECIMAL(14,3) NOT NULL COMMENT 'in the units sold on the bill',
   amount         DECIMAL(14,2) NOT NULL COMMENT 'refunded for this line incl. VAT',
+  lot_allocations JSON NULL COMMENT '[{lotId, qty}] put back on restock, taken again on void',
   CONSTRAINT fk_sreti_return FOREIGN KEY (return_id) REFERENCES sales_returns(id) ON DELETE CASCADE,
   CONSTRAINT fk_sreti_item FOREIGN KEY (order_item_id) REFERENCES sales_order_items(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -796,7 +800,7 @@ CREATE TABLE welfare_requests (
   request_no     VARCHAR(40) NOT NULL,
   warehouse_id   BIGINT UNSIGNED NOT NULL,
   employee_id    BIGINT UNSIGNED NOT NULL COMMENT 'the staff member receiving the goods (users.id)',
-  status         ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
+  status         ENUM('pending','approved','rejected','cancelled','reversed') NOT NULL DEFAULT 'pending',
   note           VARCHAR(255) NULL,
   total_cost     DECIMAL(14,2) NOT NULL DEFAULT 0 COMMENT 'at products.cost; re-priced on approval',
   requested_by   BIGINT UNSIGNED NULL,
@@ -804,6 +808,9 @@ CREATE TABLE welfare_requests (
   approved_by    BIGINT UNSIGNED NULL COMMENT 'manager who approved or rejected',
   approved_at    DATETIME NULL,
   reject_reason  VARCHAR(255) NULL,
+  reversed_by    BIGINT UNSIGNED NULL,
+  reversed_at    DATETIME NULL,
+  reverse_reason VARCHAR(255) NULL,
   UNIQUE KEY uq_welfare_no (org_id, request_no),
   KEY idx_welfare_emp_time (employee_id, requested_at),
   KEY idx_welfare_org_status (org_id, status),
@@ -1423,6 +1430,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals');
 
 SET FOREIGN_KEY_CHECKS = 1;
