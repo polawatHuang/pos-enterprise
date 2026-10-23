@@ -100,6 +100,15 @@ function BranchDialog({ branch, onClose }: { branch: Branch | null; onClose: () 
   const qc = useQueryClient();
   const [code, setCode] = useState(branch?.code ?? "");
   const [name, setName] = useState(branch?.name ?? "");
+  // The branch's warehouse name follows the branch name while it is still the automatic one
+  const autoWh = (n: string) => `คลัง ${n.trim()}`;
+  const hasWarehouse = !branch || branch.warehouseName != null;
+  const [warehouseName, setWarehouseName] = useState(branch?.warehouseName ?? "");
+  const [whFollows, setWhFollows] = useState(!branch || branch.warehouseName === autoWh(branch.name) || branch.warehouseName === branch.name);
+  const changeName = (n: string) => {
+    setName(n);
+    if (whFollows) setWarehouseName(autoWh(n));
+  };
   const [branchNo, setBranchNo] = useState(branch?.branchNo ?? "");
   const [address, setAddress] = useState(branch?.address ?? "");
   const [isActive, setIsActive] = useState(branch?.isActive ?? true);
@@ -138,12 +147,16 @@ function BranchDialog({ branch, onClose }: { branch: Branch | null; onClose: () 
       // empty = this branch uses the shop-wide accounts from POS settings
       promptpayId: ownPay ? promptpayId.replace(/[\s-]/g, "") || null : null,
       bankAccount: ownPay && hasBank ? { bank: bank.bank.trim(), type: bank.type.trim() || "ออมทรัพย์", number: bank.number.replace(/[\s-]/g, ""), name: bank.name.trim() } : null,
+      ...(hasWarehouse && warehouseName.trim() ? { warehouseName: warehouseName.trim() } : {}),
     };
     try {
       if (branch) await api.patch(`/org/branches/${branch.id}`, { ...body, isActive });
       else await api.post("/org/branches", body);
       await qc.invalidateQueries({ queryKey: BRANCHES_KEY });
       void qc.invalidateQueries({ queryKey: ["pos", "settings"] }); // the till may charge into this branch
+      // warehouse names appear in stock, counts, expiry, welfare and purchasing
+      void qc.invalidateQueries({ queryKey: ["inventory"] });
+      void qc.invalidateQueries({ queryKey: ["purchasing"] });
       toast.success(branch ? "บันทึกสาขาแล้ว" : "เพิ่มสาขาและคลังสินค้าแล้ว");
       onClose();
     } catch (err) {
@@ -158,7 +171,7 @@ function BranchDialog({ branch, onClose }: { branch: Branch | null; onClose: () 
         <div className="grid grid-cols-[1fr_7rem] gap-3 sm:grid-cols-[1fr_8rem]">
           <div className="space-y-2">
             <Label htmlFor="br-name">ชื่อสาขา</Label>
-            <Input id="br-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น สาขาสยาม" required maxLength={191} />
+            <Input id="br-name" value={name} onChange={(e) => changeName(e.target.value)} placeholder="เช่น สาขาสยาม" required maxLength={191} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="br-code">รหัส</Label>
@@ -189,6 +202,23 @@ function BranchDialog({ branch, onClose }: { branch: Branch | null; onClose: () 
             className="font-mono"
           />
         </div>
+        {hasWarehouse && (
+          <div className="space-y-2">
+            <Label htmlFor="br-wh">ชื่อคลังสินค้าของสาขานี้</Label>
+            <Input
+              id="br-wh"
+              value={warehouseName}
+              onChange={(e) => {
+                setWarehouseName(e.target.value);
+                setWhFollows(false);
+              }}
+              placeholder={autoWh(name || "สาขา")}
+              required
+              maxLength={191}
+            />
+            <p className="text-xs text-muted-foreground">แสดงในหน้าสต๊อก โอนย้าย ตรวจนับ สั่งซื้อ และเบิกสวัสดิการ</p>
+          </div>
+        )}
         <div className="space-y-2">
           <Label htmlFor="br-address">ที่อยู่</Label>
           <Textarea id="br-address" value={address} onChange={(e) => setAddress(e.target.value)} rows={3} placeholder="ที่อยู่สำหรับใบเสร็จและใบกำกับภาษี" />

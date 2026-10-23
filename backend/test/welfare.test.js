@@ -59,6 +59,11 @@ before(async () => {
   await db.query("UPDATE welfare_requests SET status = 'cancelled' WHERE org_id = 1 AND employee_id IN (:ids) AND status = 'pending'", {
     ids: [MANAGER_ID, CASHIER_ID],
   });
+  // ...nor approved ones (e.g. a manual browser test): move them out of this month on the test database
+  await db.query(
+    "UPDATE welfare_requests SET requested_at = requested_at - INTERVAL 40 DAY WHERE org_id = 1 AND employee_id IN (:ids) AND status = 'approved' AND requested_at > UTC_TIMESTAMP() - INTERVAL 40 DAY",
+    { ids: [MANAGER_ID, CASHIER_ID] },
+  );
 
   const m = await manager.post('/api/products', { sku: `TWF-M-${RUN}`, name: 'นมสวัสดิการทดสอบ', price: 15, cost: 10, trackExpiry: true });
   assert.equal(m.status, 201, JSON.stringify(m.body));
