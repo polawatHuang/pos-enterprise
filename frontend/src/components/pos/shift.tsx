@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { Loader2, Store } from "lucide-react";
+import { Loader2, Store, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { Branch, CashMoveType, Shift, ShiftReport } from "@/lib/types";
+import type { Branch, CashMovement, CashMoveType, Shift, ShiftReport } from "@/lib/types";
 import { cn, formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -182,6 +182,22 @@ export function CashDialog({ onDone }: { onDone: () => void }) {
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState<number | null>(null);
+  // The open shift's movements, so a mistaken one can be removed (the drawer total follows)
+  const moves = useQuery({ queryKey: [...SHIFT_KEY, "cash"], queryFn: () => api.get<ShiftReport>("/pos/shift/report").then((r) => r.cashMovements) });
+  const remove = async (m: CashMovement) => {
+    if (!window.confirm(`ลบรายการ${CASH_LABEL[m.type]} ${formatMoney(m.amount)} (${m.reason})?`)) return;
+    setRemoving(m.id);
+    try {
+      await api.del(`/pos/shift/cash/${m.id}`);
+      toast.success("ลบรายการแล้ว");
+      await qc.invalidateQueries({ queryKey: SHIFT_KEY });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "ลบไม่สำเร็จ");
+    } finally {
+      setRemoving(null);
+    }
+  };
   const save = async () => {
     setBusy(true);
     try {
@@ -223,6 +239,42 @@ export function CashDialog({ onDone }: { onDone: () => void }) {
           บันทึก
         </Button>
       </form>
+      {!!moves.data?.length && (
+        <div className="mt-5">
+          <p className="mb-1.5 text-sm font-medium">รายการในกะนี้</p>
+          <ul className="divide-y divide-border rounded-xl border border-border">
+            {moves.data.map((m) => (
+              <li key={m.id} className="flex items-center gap-2 p-2 pl-3 text-sm">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">
+                    {CASH_LABEL[m.type]} · {m.reason}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {formatDateTime(m.createdAt)}
+                    {m.userName ? ` · ${m.userName}` : ""}
+                    {m.auto ? " · ยกเลิกได้ที่รายการคืนของบิล" : ""}
+                  </span>
+                </span>
+                <span className={cn("shrink-0 font-medium tabular-nums", m.type !== "pay_in" && "text-danger")}>
+                  {formatMoney(m.type === "pay_in" ? m.amount : -m.amount)}
+                </span>
+                {!m.auto && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-10 shrink-0 text-danger"
+                    aria-label="ลบรายการ"
+                    disabled={removing === m.id}
+                    onClick={() => void remove(m)}
+                  >
+                    {removing === m.id ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </DialogContent>
   );
 }
