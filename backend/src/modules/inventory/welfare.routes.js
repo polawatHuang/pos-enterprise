@@ -9,8 +9,8 @@ const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
 const { badRequest, conflict, forbidden, notFound } = require('../../core/errors');
 const { applyMovement, getWarehouse } = require('./inventory.service');
-const { consumeFefo, parseAlloc } = require('./lots');
-const { postJournal, ACC } = require('../accounting/ledger.service');
+const { consumeFefo, restoreLots, parseAlloc } = require('./lots');
+const { postJournal, reverseJournalsFor, ACC } = require('../accounting/ledger.service');
 const { localDate } = require('../../utils/dates');
 
 /**
@@ -18,7 +18,8 @@ const { localDate } = require('../../utils/dates');
  *   staff (welfare:request) asks for products from a warehouse -> a manager (inventory:approve, never
  *   for their own request unless settings:manage) approves -> stock leaves FEFO as a 'welfare'
  *   movement at cost and the journal books Dr 5250 ค่าสวัสดิการพนักงาน / Cr 1300 สินค้าคงเหลือ.
- * Reject / cancel never touch stock. Each employee has a monthly limit valued at cost
+ * Reject / cancel never touch stock; such requests (and pending ones) can be deleted outright. An approved
+ * request is never deleted: it is reversed (stock + lots back, mirror journal) and kept as 'reversed'. Each employee has a monthly limit valued at cost
  * (users.welfare_monthly_limit, else settings welfare.monthly_limit; 0 = unlimited). Usage counts
  * pending + approved requests of the Thai-local month and is checked at request time and on approval.
  */
@@ -26,7 +27,8 @@ const router = express.Router();
 router.use(authenticate);
 
 const LIMIT_KEY = 'welfare.monthly_limit';
-const COUNTED = ['pending', 'approved'];
+const COUNTED = ['pending', 'approved']; // a reversed request frees its amount again
+const STATUSES = ['pending', 'approved', 'rejected', 'cancelled', 'reversed'];
 const r2 = (n) => Math.round(Number(n) * 100) / 100;
 const r3 = (n) => Math.round(Number(n) * 1000) / 1000;
 const baht = (n) => `฿${Number(n).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -120,12 +122,14 @@ async function checkLimit(conn, { orgId, employeeId, month, amount, excludeId = 
 /* ------------------------------------------------------------------ reads */
 
 const SELECT_REQUEST = `
-  SELECT r.*, w.name AS warehouse_name, e.full_name AS employee_name, rb.full_name AS requested_by_name, ab.full_name AS approved_by_name
+  SELECT r.*, w.name AS warehouse_name, e.full_name AS employee_name, rb.full_name AS requested_by_name, ab.full_name AS approved_by_name,
+         vb.full_name AS reversed_by_name
     FROM welfare_requests r
     JOIN warehouses w ON w.id = r.warehouse_id
     JOIN users e ON e.id = r.employee_id
     LEFT JOIN users rb ON rb.id = r.requested_by
-    LEFT JOIN users ab ON ab.id = r.approved_by`;
+    LEFT JOIN users ab ON ab.id = r.approved_by
+    LEFT JOIN users vb ON vb.id = r.reversed_by`;
 
 async function withItems(rows) {
   if (!rows.length) return [];
@@ -168,6 +172,10 @@ async function withItems(rows) {
     approvedByName: r.approved_by_name ?? null,
     approvedAt: r.approved_at,
     rejectReason: r.reject_reason,
+    reversedBy: r.reversed_by ?? null,
+    reversedByName: r.reversed_by_name ?? null,
+    reversedAt: r.reversed_at ?? null,
+    reverseReason: r.reverse_reason ?? null,
     items: byReq.get(r.id) ?? [],
   }));
 }
@@ -223,7 +231,7 @@ router.get(
   requireWelfareAccess,
   validate({
     query: z.object({
-      status: z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
+      status: z.enum(STATUSES).optional(),
       month: monthSchema.optional(),
       employeeId: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().min(1).max(500).default(200),
@@ -457,7 +465,12 @@ async function lockRequest(conn, orgId, id) {
   return r;
 }
 
-const CLOSED = { approved: 'คำขอนี้อนุมัติแล้ว', rejected: 'คำขอนี้ถูกปฏิเสธแล้ว', cancelled: 'คำขอนี้ถูกยกเลิกแล้ว' };
+const CLOSED = {
+  approved: 'คำขอนี้อนุมัติแล้ว',
+  rejected: 'คำขอนี้ถูกปฏิเสธแล้ว',
+  cancelled: 'คำขอนี้ถูกยกเลิกแล้ว',
+  reversed: 'คำขอนี้ถูกกลับรายการแล้ว',
+};
 const assertPending = (r) => {
   if (r.status !== 'pending') throw conflict(CLOSED[r.status] ?? 'คำขอนี้ปิดแล้ว');
 };
@@ -556,6 +569,78 @@ router.post('/:id/cancel', requireWelfareAccess, validate({ params: idParam }), 
   });
   audit(req, 'welfare.cancel', 'welfare_request', r.id, { requestNo: r.request_no, employeeId: r.employee_id });
   res.json({ data: await loadOne(orgId, r.id) });
+});
+
+/**
+ * Reverse an approved withdrawal entered by mistake: the items go back to the same lots and stock
+ * (+qty 'welfare' movements), the 5250/1300 journal gets a mirror entry, and the request is kept as
+ * 'reversed' (no longer counted against the monthly limit).
+ */
+router.post(
+  '/:id/reverse',
+  requirePermission('inventory:approve'),
+  validate({ params: idParam, body: z.object({ reason: z.string().trim().min(1, 'กรุณาระบุเหตุผล').max(255) }) }),
+  async (req, res) => {
+    const orgId = req.user.orgId;
+    const reason = req.valid.body.reason;
+    const result = await db.tx(async (conn) => {
+      const r = await lockRequest(conn, orgId, req.valid.params.id);
+      if (r.status === 'reversed') throw conflict(CLOSED.reversed);
+      if (r.status !== 'approved') throw conflict('กลับรายการได้เฉพาะคำขอที่อนุมัติแล้ว — คำขอที่ยังไม่อนุมัติให้ยกเลิกหรือลบแทน');
+      const [items] = await conn.query(
+        'SELECT id, product_id, quantity, unit_cost, lot_allocations FROM welfare_request_items WHERE request_id = :id ORDER BY id',
+        { id: r.id },
+      );
+      for (const i of items) {
+        await restoreLots(conn, parseAlloc(i.lot_allocations));
+        await applyMovement(conn, {
+          orgId,
+          warehouseId: r.warehouse_id,
+          productId: i.product_id,
+          quantity: Number(i.quantity),
+          type: 'welfare',
+          unitCost: Number(i.unit_cost),
+          refType: 'welfare_request',
+          refId: r.id,
+          note: `กลับรายการเบิก ${r.request_no}`,
+          userId: req.user.id,
+        });
+      }
+      const journals = await reverseJournalsFor(conn, { orgId, refType: 'welfare_request', refId: r.id, reason, userId: req.user.id });
+      await conn.query(
+        "UPDATE welfare_requests SET status = 'reversed', reversed_by = :userId, reversed_at = UTC_TIMESTAMP(), reverse_reason = :reason WHERE id = :id",
+        { userId: req.user.id, reason, id: r.id },
+      );
+      return { id: r.id, requestNo: r.request_no, employeeId: r.employee_id, totalCost: Number(r.total_cost), journals };
+    });
+    audit(req, 'welfare.reverse', 'welfare_request', result.id, { ...result, reason });
+    res.json({ data: await loadOne(orgId, result.id) });
+  },
+);
+
+/**
+ * Delete a request that never touched stock: the requester (or its employee) while pending, an
+ * approver for any pending / rejected / cancelled one. Approved and reversed requests keep their history.
+ */
+router.delete('/:id', requireWelfareAccess, validate({ params: idParam }), async (req, res) => {
+  const orgId = req.user.orgId;
+  const r = await db.tx(async (conn) => {
+    const row = await lockRequest(conn, orgId, req.valid.params.id);
+    if (row.status === 'approved') throw conflict('คำขอนี้อนุมัติแล้ว ลบไม่ได้ — ใช้ "กลับรายการ" แทน');
+    if (row.status === 'reversed') throw conflict('คำขอนี้ถูกกลับรายการแล้ว ลบไม่ได้ (เก็บไว้เป็นประวัติ)');
+    const own = Number(row.requested_by) === req.user.id || Number(row.employee_id) === req.user.id;
+    const allowed = has(req, 'inventory:approve') || (own && row.status === 'pending');
+    if (!allowed) throw forbidden(own ? 'ลบได้เฉพาะคำขอที่ยังรออนุมัติ' : 'ลบได้เฉพาะคำขอของตัวเอง');
+    await conn.query('DELETE FROM welfare_requests WHERE id = :id', { id: row.id }); // items cascade
+    return row;
+  });
+  audit(req, 'welfare.delete', 'welfare_request', r.id, {
+    requestNo: r.request_no,
+    employeeId: r.employee_id,
+    status: r.status,
+    totalCost: Number(r.total_cost),
+  });
+  res.json({ data: { id: r.id } });
 });
 
 module.exports = { router, monthBounds, effectiveLimit };

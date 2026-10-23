@@ -6,7 +6,7 @@ const db = require('../../db/pool');
 const { validate } = require('../../core/http');
 const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
-const { badRequest } = require('../../core/errors');
+const { badRequest, conflict, notFound } = require('../../core/errors');
 const { applyMovement, getWarehouse, getProductForUpdate, updateAverageCost } = require('./inventory.service');
 const { salesStats, stockStatus, daysCover, EMPTY } = require('./analytics');
 const { receiveLot } = require('./lots');
@@ -172,6 +172,18 @@ router.get(
         LIMIT :limit`,
       { orgId: req.user.orgId, productId: f.productId ?? null, warehouseId: f.warehouseId ?? null, type: f.type ?? null, limit: f.limit },
     );
+    // quick adjustments on this page that were already undone
+    const adjIds = rows.filter((r) => r.type === 'adjustment' && r.ref_type == null).map((r) => r.id);
+    const reversedIds = new Set(
+      adjIds.length
+        ? (
+            await db.query(
+              "SELECT ref_id FROM stock_movements WHERE org_id = :orgId AND ref_type = 'movement_reversal' AND ref_id IN (:ids)",
+              { orgId: req.user.orgId, ids: adjIds },
+            )
+          ).map((r) => Number(r.ref_id))
+        : [],
+    );
     res.json({
       data: rows.map((r) => ({
         id: r.id,
@@ -187,6 +199,9 @@ router.get(
         productName: r.product_name,
         warehouseName: r.warehouse_name,
         userName: r.user_name,
+        reversed: reversedIds.has(Number(r.id)),
+        // only the quick "ปรับยอด" (no journal, no lots) can be undone here, once
+        reversible: r.type === 'adjustment' && r.ref_type == null && !reversedIds.has(Number(r.id)),
       })),
     });
   },
@@ -234,6 +249,52 @@ router.post(
       });
     });
     audit(req, 'inventory.adjust', 'product', b.productId, { warehouseId: b.warehouseId, ...result });
+    res.json({ data: result });
+  },
+);
+
+/**
+ * Undo a mistaken quick adjustment: the opposite quantity is booked as a new 'adjustment' movement
+ * (ref_type 'movement_reversal', ref_id = the original), so both stay in the history.
+ * Other movement types carry lots or journals and are reversed from their own document.
+ */
+router.post(
+  '/movements/:id/reverse',
+  requirePermission('inventory:write'),
+  validate({
+    params: z.object({ id: z.coerce.number().int().positive() }),
+    body: z.object({ reason: z.string().trim().min(1, 'กรุณาระบุเหตุผล').max(200) }),
+  }),
+  async (req, res) => {
+    const { orgId, id: userId } = req.user;
+    const { id } = req.valid.params;
+    const { reason } = req.valid.body;
+    const result = await db.tx(async (conn) => {
+      const [[m]] = await conn.query('SELECT * FROM stock_movements WHERE id = :id AND org_id = :orgId FOR UPDATE', { id, orgId });
+      if (!m) throw notFound('ไม่พบรายการเคลื่อนไหวสต๊อก');
+      if (m.type !== 'adjustment') throw badRequest('กลับรายการได้เฉพาะรายการปรับยอดสต๊อก — รายการประเภทอื่นให้กลับรายการจากเอกสารต้นทาง');
+      if (m.ref_type === 'movement_reversal') throw conflict('รายการนี้เป็นการกลับรายการอยู่แล้ว');
+      if (m.ref_type != null) throw badRequest('กลับรายการนี้ไม่ได้ — ให้กลับรายการจากเอกสารต้นทาง');
+      const [[done]] = await conn.query(
+        "SELECT id FROM stock_movements WHERE org_id = :orgId AND ref_type = 'movement_reversal' AND ref_id = :id LIMIT 1",
+        { orgId, id },
+      );
+      if (done) throw conflict('รายการนี้ถูกกลับรายการแล้ว');
+      await getProductForUpdate(conn, orgId, m.product_id);
+      const moved = await applyMovement(conn, {
+        orgId,
+        warehouseId: m.warehouse_id,
+        productId: m.product_id,
+        quantity: -Number(m.quantity),
+        type: 'adjustment',
+        refType: 'movement_reversal',
+        refId: m.id,
+        note: `กลับรายการ: ${reason}`.slice(0, 255),
+        userId,
+      });
+      return { movementId: m.id, warehouseId: m.warehouse_id, productId: m.product_id, quantity: -Number(m.quantity), ...moved };
+    });
+    audit(req, 'inventory.adjust.reverse', 'stock_movement', id, { ...result, reason });
     res.json({ data: result });
   },
 );

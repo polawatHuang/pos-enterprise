@@ -1,7 +1,8 @@
 'use strict';
 
 // Employee welfare withdrawal: request -> manager approval -> FEFO stock out at cost ('welfare' movement,
-// Dr 5250 / Cr 1300), monthly limit at request and approval, no self-approval, reject and cancel leave stock alone.
+// Dr 5250 / Cr 1300), monthly limit at request and approval, no self-approval, reject and cancel leave stock alone,
+// delete of requests that never moved stock, and reversal of an approved one (stock, lots, mirror journal, limit freed).
 process.env.NODE_ENV = 'test';
 
 const { test, before, after, describe } = require('node:test');
@@ -32,6 +33,7 @@ const as = (c) => ({
   get: (url) => request(app).get(url).set('Cookie', c),
   post: (url, body) => request(app).post(url).set('Cookie', c).send(body),
   put: (url, body) => request(app).put(url).set('Cookie', c).send(body),
+  del: (url) => request(app).delete(url).set('Cookie', c),
 });
 const stock = async (productId) => {
   const row = await db.one('SELECT quantity FROM stock_levels WHERE warehouse_id = :w AND product_id = :p AND variant_id = 0', { w: WH, p: productId });
@@ -142,6 +144,7 @@ describe('request and approval', () => {
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
     const r = res.body.data;
+    state.approved = r.id;
     assert.match(r.requestNo, /^WF\d{6}$/);
     assert.equal(r.status, 'pending');
     assert.equal(r.totalCost, 120, '7 x 10 + 2 x 25');
@@ -264,5 +267,95 @@ describe('request and approval', () => {
     assert.equal(Number(j.n), 0);
     const left = await cashier.get('/api/inventory/welfare/employees');
     assert.equal(left.body.data[0].usedThisMonth, 120, 'rejected and cancelled requests free the limit');
+  });
+});
+
+describe('delete and reverse', () => {
+  const exists = async (id) => Boolean(await db.one('SELECT id FROM welfare_requests WHERE id = :id', { id }));
+
+  test('requests that never moved stock can be deleted: the requester while pending, an approver when not approved', async () => {
+    const mine = await ask(cashier, { employeeId: CASHIER_ID, items: [{ productId: state.soap, quantity: 1 }] });
+    const id = mine.body.data.id;
+    assert.equal((await viewer.del(`/api/inventory/welfare/${id}`)).status, 403, 'viewer has no welfare access');
+    const del = await cashier.del(`/api/inventory/welfare/${id}`);
+    assert.equal(del.status, 200, JSON.stringify(del.body));
+    assert.equal(await exists(id), false);
+    const items = await db.one('SELECT COUNT(*) AS n FROM welfare_request_items WHERE request_id = :id', { id });
+    assert.equal(Number(items.n), 0, 'items cascade');
+    assert.equal((await cashier.del(`/api/inventory/welfare/${id}`)).status, 404);
+
+    const rej = await ask(cashier, { employeeId: CASHIER_ID, items: [{ productId: state.soap, quantity: 1 }] });
+    await manager.post(`/api/inventory/welfare/${rej.body.data.id}/reject`, { reason: 'ผิดรายการ' });
+    assert.equal((await cashier.del(`/api/inventory/welfare/${rej.body.data.id}`)).status, 403, 'the requester only deletes pending');
+    assert.equal((await manager.del(`/api/inventory/welfare/${rej.body.data.id}`)).status, 200, 'an approver deletes a rejected one');
+    assert.equal(await exists(rej.body.data.id), false);
+
+    const other = await ask(manager, { employeeId: MANAGER_ID, items: [{ productId: state.soap, quantity: 1 }] });
+    assert.equal((await cashier.del(`/api/inventory/welfare/${other.body.data.id}`)).status, 403, 'not your request');
+    await manager.post(`/api/inventory/welfare/${other.body.data.id}/cancel`);
+    assert.equal((await manager.del(`/api/inventory/welfare/${other.body.data.id}`)).status, 200, 'cancelled');
+
+    assert.equal((await manager.del(`/api/inventory/welfare/${state.approved}`)).status, 409, 'approved requests are reversed, not deleted');
+    assert.equal(await stock(state.soap), 7, 'nothing moved');
+    const logs = await db.query("SELECT action FROM audit_logs WHERE entity_type = 'welfare_request' AND entity_id = :id", { id: String(id) });
+    assert.ok(logs.some((l) => l.action === 'welfare.delete'));
+  });
+
+  test('reversing an approved request puts stock and lots back, mirrors the journal and frees the limit', async () => {
+    const id = state.approved;
+    const usedBefore = (await cashier.get('/api/inventory/welfare/employees')).body.data[0].usedThisMonth;
+    assert.equal(usedBefore, 120);
+    assert.equal((await cashier.post(`/api/inventory/welfare/${id}/reverse`, { reason: 'x' })).status, 403, 'needs inventory:approve');
+    assert.equal((await manager.post(`/api/inventory/welfare/${id}/reverse`, {})).status, 400, 'reason required');
+
+    const res = await manager.post(`/api/inventory/welfare/${id}/reverse`, { reason: 'บันทึกผิดคน' });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.data.status, 'reversed');
+    assert.equal(res.body.data.reverseReason, 'บันทึกผิดคน');
+    assert.equal(res.body.data.reversedByName, 'สมชาย ผู้จัดการ');
+    assert.ok(res.body.data.reversedAt);
+    assert.deepEqual([await stock(state.milk), await stock(state.soap)], [10, 9]);
+    assert.deepEqual(await lots(state.milk), [5, 5], 'back to the same lots');
+
+    const moves = await db.query(
+      "SELECT product_id, type, quantity, note FROM stock_movements WHERE ref_type = 'welfare_request' AND ref_id = :id AND quantity > 0 ORDER BY product_id",
+      { id },
+    );
+    assert.deepEqual(
+      moves.map((m) => [m.type, Number(m.quantity)]),
+      [
+        ['welfare', 7],
+        ['welfare', 2],
+      ],
+    );
+    assert.match(moves[0].note, /^กลับรายการเบิก WF\d{6}$/);
+
+    const j = await db.query(
+      `SELECT e.description, a.code, l.debit, l.credit FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id
+         JOIN chart_of_accounts a ON a.id = l.account_id WHERE e.ref_type = 'welfare_request' AND e.ref_id = :id`,
+      { id },
+    );
+    const net = (code) => j.filter((x) => x.code === code).reduce((s, x) => s + Number(x.debit) - Number(x.credit), 0);
+    assert.equal(net('5250'), 0, 'expense reversed');
+    assert.equal(net('1300'), 0, 'inventory back');
+    assert.ok(j.some((x) => x.description.startsWith('กลับรายการ') && x.code === '5250' && Number(x.credit) === 120));
+
+    const after = await cashier.get('/api/inventory/welfare/employees');
+    assert.equal(after.body.data[0].usedThisMonth, 0, 'a reversed request no longer counts');
+    const list = await manager.get('/api/inventory/welfare?status=reversed');
+    assert.equal(list.status, 200);
+    assert.ok(list.body.data.some((x) => x.id === id));
+
+    assert.equal((await manager.post(`/api/inventory/welfare/${id}/reverse`, { reason: 'อีกครั้ง' })).status, 409, 'reverse once');
+    assert.equal((await manager.del(`/api/inventory/welfare/${id}`)).status, 409, 'a reversed request stays as history');
+    assert.equal((await manager.post(`/api/inventory/welfare/${id}/approve`)).status, 409);
+    const journals = await db.one("SELECT COUNT(*) AS n FROM journal_entries WHERE ref_type = 'welfare_request' AND ref_id = :id", { id });
+    assert.equal(Number(journals.n), 2, 'one posting, one mirror');
+
+    const pending = await ask(cashier, { employeeId: CASHIER_ID, items: [{ productId: state.soap, quantity: 1 }] });
+    assert.equal((await manager.post(`/api/inventory/welfare/${pending.body.data.id}/reverse`, { reason: 'x' })).status, 409, 'only approved');
+    await cashier.post(`/api/inventory/welfare/${pending.body.data.id}/cancel`);
+    const logs = await db.query("SELECT action FROM audit_logs WHERE entity_type = 'welfare_request' AND entity_id = :id", { id: String(id) });
+    assert.ok(logs.some((l) => l.action === 'welfare.reverse'));
   });
 });
