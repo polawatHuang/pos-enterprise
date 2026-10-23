@@ -4,16 +4,16 @@ import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeftRight, BellRing, ClipboardCheck, ClipboardList, PackagePlus, Search, Warehouse as WarehouseIcon } from "lucide-react";
+import { ArrowLeftRight, BellRing, ClipboardCheck, ClipboardList, Loader2, PackagePlus, Search, Undo2, Warehouse as WarehouseIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiFetch } from "@/lib/api";
 import type { MovementType, Paged, StockLevel, StockMovement, StockStatus, Warehouse } from "@/lib/types";
 import { cn, formatCompact, formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
-import { Badge, Card, Input, NativeSelect, Pagination, Skeleton, TabBar } from "@/components/ui/primitives";
+import { Badge, Card, Input, Label, NativeSelect, Pagination, Skeleton, TabBar } from "@/components/ui/primitives";
 import { ScanButton } from "@/components/ui/barcode-scanner";
-import { Dialog } from "@/components/ui/overlays";
+import { Dialog, DialogContent } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
 import { ErrorNote } from "@/components/dashboard/widgets";
 import { Sparkline } from "@/components/common/sparkline";
@@ -114,7 +114,7 @@ export function InventoryView() {
             editable={can("inventory:write")}
           />
         ) : (
-          <MovementsTable warehouseId={warehouseId} />
+          <MovementsTable warehouseId={warehouseId} editable={can("inventory:write")} />
         )}
       </Card>
 
@@ -257,7 +257,7 @@ function LevelsTable({
             <tbody>
               {levels.data?.data.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-muted-foreground">
+                  <td colSpan={8} className="py-12 text-center text-muted-foreground">
                     ไม่พบรายการ
                   </td>
                 </tr>
@@ -322,8 +322,9 @@ function LevelsTable({
   );
 }
 
-function MovementsTable({ warehouseId }: { warehouseId: string }) {
+function MovementsTable({ warehouseId, editable }: { warehouseId: string; editable: boolean }) {
   const [type, setType] = useState<MovementType | "">("");
+  const [reversing, setReversing] = useState<StockMovement | null>(null);
   const movements = useQuery({
     queryKey: ["inventory", "movements", { warehouseId, type }],
     queryFn: () => api.get<StockMovement[]>("/inventory/movements", { warehouseId, type, limit: 100 }),
@@ -352,26 +353,29 @@ function MovementsTable({ warehouseId }: { warehouseId: string }) {
               <th className="px-4 py-3 text-right font-medium">จำนวน</th>
               <th className="px-4 py-3 font-medium">โดย</th>
               <th className="px-4 py-3 font-medium">หมายเหตุ</th>
+              <th className="px-4 py-3 font-medium">
+                <span className="sr-only">จัดการ</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {movements.isPending && (
               <tr>
-                <td colSpan={7} className="p-4">
+                <td colSpan={8} className="p-4">
                   <Skeleton className="h-40 w-full" />
                 </td>
               </tr>
             )}
             {movements.isError && !movements.data && (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={8}>
                   <ErrorNote onRetry={() => movements.refetch()} />
                 </td>
               </tr>
             )}
             {movements.data?.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-muted-foreground">
+                <td colSpan={8} className="py-12 text-center text-muted-foreground">
                   ยังไม่มีความเคลื่อนไหวของสต๊อก — การขาย รับของ โอนย้าย และปรับสต๊อกจะแสดงที่นี่
                 </td>
               </tr>
@@ -394,11 +398,72 @@ function MovementsTable({ warehouseId }: { warehouseId: string }) {
                 </td>
                 <td data-label="โดย" className="px-4 py-2.5 text-muted-foreground">{m.userName ?? "ระบบ"}</td>
                 <td data-label="หมายเหตุ" className="max-w-56 truncate px-4 py-2.5 text-muted-foreground">{m.note ?? "–"}</td>
+                <td className="px-4 py-2.5 text-right">
+                  {m.reversed ? (
+                    <Badge tone="neutral">กลับรายการแล้ว</Badge>
+                  ) : (
+                    editable &&
+                    m.reversible && (
+                      <Button variant="outline" className="h-10" onClick={() => setReversing(m)}>
+                        <Undo2 /> กลับรายการ
+                      </Button>
+                    )
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <Dialog open={reversing !== null} onOpenChange={(o) => !o && setReversing(null)}>
+        {reversing && <ReverseAdjustmentDialog movement={reversing} onDone={() => setReversing(null)} />}
+      </Dialog>
     </>
+  );
+}
+
+/** Undo a mistaken quick adjustment with the opposite quantity; both rows stay in the history. */
+function ReverseAdjustmentDialog({ movement, onDone }: { movement: StockMovement; onDone: () => void }) {
+  const qc = useQueryClient();
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const opposite = -movement.quantity;
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/inventory/movements/${movement.id}/reverse`, { reason: reason.trim() });
+      toast.success(`กลับรายการปรับยอด ${movement.productName} แล้ว`);
+      void qc.invalidateQueries({ queryKey: ["inventory"] });
+      void qc.invalidateQueries({ queryKey: ["products"] });
+      onDone();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "ไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <DialogContent title="กลับรายการปรับยอด" description={`${movement.productName} · ${movement.warehouseName}`} className="max-w-sm">
+      <div className="grid gap-3">
+        <p className="rounded-lg bg-muted px-3 py-2 text-sm">
+          ระบบจะบันทึกการปรับยอด {opposite > 0 ? "+" : ""}
+          {formatNumber(opposite)} เพื่อหักล้างรายการเดิม ({movement.quantity > 0 ? "+" : ""}
+          {formatNumber(movement.quantity)}) — ทั้งสองรายการยังอยู่ในประวัติ
+        </p>
+        <Label htmlFor="movement-reverse-reason">เหตุผล</Label>
+        <Input
+          id="movement-reverse-reason"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          maxLength={200}
+          placeholder="เช่น กรอกจำนวนผิด"
+          className="h-11"
+        />
+        <Button variant="danger" className="h-11" onClick={save} disabled={busy || !reason.trim()}>
+          {busy && <Loader2 className="animate-spin" />}
+          ยืนยันกลับรายการ
+        </Button>
+      </div>
+    </DialogContent>
   );
 }

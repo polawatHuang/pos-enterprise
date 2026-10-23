@@ -181,7 +181,8 @@ router.delete('/branches/:id', requirePermission('settings:manage'), validate({ 
             (SELECT COUNT(*) FROM stock_levels WHERE warehouse_id IN (${wh}) AND quantity <> 0) AS stocked,
             (SELECT COUNT(*) FROM purchase_orders WHERE warehouse_id IN (${wh})) AS purchases,
             (SELECT COUNT(*) FROM stock_transfers WHERE from_warehouse_id IN (${wh}) OR to_warehouse_id IN (${wh})) AS transfers,
-            (SELECT COUNT(*) FROM stock_counts WHERE warehouse_id IN (${wh})) AS counts`,
+            (SELECT COUNT(*) FROM stock_counts WHERE warehouse_id IN (${wh})) AS counts,
+            (SELECT COUNT(*) FROM welfare_requests WHERE warehouse_id IN (${wh})) AS welfare`,
     { id },
   );
   const LABEL = {
@@ -193,6 +194,7 @@ router.delete('/branches/:id', requirePermission('settings:manage'), validate({ 
     purchases: 'ใบสั่งซื้อ',
     transfers: 'ใบโอนสินค้า',
     counts: 'รอบตรวจนับ',
+    welfare: 'คำขอเบิกสวัสดิการ',
   };
   const used = Object.keys(LABEL).filter((k) => Number(usage[k]));
   if (used.length) {
