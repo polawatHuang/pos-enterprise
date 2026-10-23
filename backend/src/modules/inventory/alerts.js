@@ -196,4 +196,4 @@ async function runAlerts() {
   return out;
 }
 
-module.exports = { checkOrg, runAlerts, getLineSettings, saveSetting, pushLine, LINE_DEFAULTS, COVER_DAYS };
+module.exports = { checkOrg, runAlerts, getLineSettings, saveSetting, pushLine, lineToken, LINE_DEFAULTS, COVER_DAYS };

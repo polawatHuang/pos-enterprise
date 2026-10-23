@@ -56,6 +56,11 @@ const adapter = defineAdapter(
       return adapter.call('/message/push', token, { to, messages: [{ type: 'text', text: text.slice(0, 5000) }] });
     },
 
+    /** Push up to 5 prepared messages (e.g. a Flex report) in one request. */
+    pushMessages(token, to, messages) {
+      return adapter.call('/message/push', token, { to, messages: messages.slice(0, 5) });
+    },
+
     async getProfile(token, userId) {
       try {
         return await adapter.call(`/profile/${encodeURIComponent(userId)}`, token, null, 'GET');
