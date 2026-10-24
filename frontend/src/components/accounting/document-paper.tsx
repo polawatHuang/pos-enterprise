@@ -13,8 +13,9 @@ const branchLabel = (no?: string) => (!no || no === "00000" ? "สำนัก�
 export function DocumentPaper({ doc }: { doc: AccDocument }) {
   const { tax } = useTaxSettings();
   if (doc.docType === "wht_certificate") return <WhtCertificate doc={doc} />;
+  if (doc.docType === "billing_note") return <BillingNote doc={doc} />;
   const org = doc.org;
-  const isTax = doc.docType === "tax_invoice" || doc.docType === "tax_invoice_receipt" || doc.docType === "credit_note";
+  const isTax = ["tax_invoice", "tax_invoice_receipt", "credit_note", "debit_note"].includes(doc.docType);
   return (
     <article className="print-a4 relative mx-auto w-full max-w-[210mm] bg-white p-8 text-[13px] leading-relaxed text-neutral-900 shadow-sm ring-1 ring-black/5 max-sm:p-5 sm:p-12">
       {doc.status === "void" && <Stamp text="ยกเลิก" />}
@@ -216,6 +217,106 @@ function WhtCertificate({ doc }: { doc: AccDocument }) {
       <p className="mt-1 text-xs">ขอรับรองว่าข้อความและตัวเลขดังกล่าวข้างต้นถูกต้องตรงกับความจริงทุกประการ</p>
       <footer className="mt-16 flex justify-end text-center text-xs">
         <Signature label="ผู้มีหน้าที่หักภาษี ณ ที่จ่าย" />
+      </footer>
+    </article>
+  );
+}
+
+/** ใบวางบิล: the invoices (less credit notes) the customer is asked to pay, with a slip for whoever receives it. */
+function BillingNote({ doc }: { doc: AccDocument }) {
+  const org = doc.org;
+  const rows = doc.billedDocuments ?? [];
+  return (
+    <article className="print-a4 relative mx-auto w-full max-w-[210mm] bg-white p-8 text-[13px] leading-relaxed text-neutral-900 shadow-sm ring-1 ring-black/5 max-sm:p-5 sm:p-12">
+      {doc.status === "void" && <Stamp text="ยกเลิก" />}
+      {doc.status === "paid" && <Stamp text="ชำระแล้ว" muted />}
+      <header className="flex flex-col gap-6 sm:flex-row sm:justify-between">
+        <div className="max-w-sm">
+          <p className="text-lg font-bold">{org?.legalName || org?.name}</p>
+          {org?.address && <p>{org.address}</p>}
+          {org?.taxId && (
+            <p>
+              เลขประจำตัวผู้เสียภาษี {org.taxId} ({branchLabel(org.branchNo)})
+            </p>
+          )}
+          {(org?.phone || org?.email) && <p>{[org?.phone && `โทร ${org.phone}`, org?.email].filter(Boolean).join(" · ")}</p>}
+        </div>
+        <div className="sm:text-right">
+          <p className="text-xl font-bold">ใบวางบิล / ใบแจ้งยอด</p>
+          <dl className="mt-3 grid grid-cols-[auto_auto] justify-start gap-x-4 sm:justify-end">
+            <dt className="text-neutral-500">เลขที่</dt>
+            <dd className="font-semibold">{doc.docNo}</dd>
+            <dt className="text-neutral-500">วันที่</dt>
+            <dd>{formatThaiDate(doc.docDate)}</dd>
+            {doc.dueDate && (
+              <>
+                <dt className="text-neutral-500">นัดชำระ</dt>
+                <dd>{formatThaiDate(doc.dueDate)}</dd>
+              </>
+            )}
+          </dl>
+        </div>
+      </header>
+
+      <section className="mt-6 rounded-md border border-neutral-300 p-4">
+        <p className="text-xs text-neutral-500">ลูกค้า</p>
+        <p className="font-semibold">{doc.partyName || "—"}</p>
+        {doc.partyAddress && <p>{doc.partyAddress}</p>}
+        {doc.partyTaxId && <p>เลขประจำตัวผู้เสียภาษี {doc.partyTaxId}</p>}
+      </section>
+
+      <div className="-mx-5 mt-6 overflow-x-auto px-5 sm:mx-0 sm:px-0">
+        <table className="w-full min-w-[540px] border-collapse text-[12.5px] sm:min-w-0">
+          <thead>
+            <tr className="border-y border-neutral-400 bg-neutral-100 text-left">
+              <th className="w-10 px-2 py-2 font-semibold">#</th>
+              <th className="px-2 py-2 font-semibold">เอกสาร</th>
+              <th className="px-2 py-2 font-semibold">เลขที่</th>
+              <th className="px-2 py-2 font-semibold">ลงวันที่</th>
+              <th className="px-2 py-2 font-semibold">ครบกำหนด</th>
+              <th className="w-32 px-2 py-2 text-right font-semibold">จำนวนเงิน</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.id} className="border-b border-neutral-200">
+                <td className="px-2 py-2">{i + 1}</td>
+                <td className="px-2 py-2">{DOC_TYPE_LABEL[r.docType]}</td>
+                <td className="px-2 py-2">{r.docNo}</td>
+                <td className="px-2 py-2">{formatThaiDate(r.docDate)}</td>
+                <td className="px-2 py-2">{r.dueDate ? formatThaiDate(r.dueDate) : "-"}</td>
+                <td className="px-2 py-2 text-right">{n2(r.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <section className="mt-4 flex flex-col-reverse gap-6 sm:flex-row sm:justify-between">
+        <div className="max-w-sm">
+          <p className="rounded-md bg-neutral-100 px-3 py-2 font-semibold">({doc.amountText})</p>
+          {doc.note && <p className="mt-3 whitespace-pre-line text-xs text-neutral-600">หมายเหตุ: {doc.note}</p>}
+          {org?.bankAccount && (
+            <div className="mt-3 rounded-md border border-neutral-300 px-3 py-2 text-xs">
+              <p className="font-semibold">ชำระเงินโดยโอนเข้าบัญชี</p>
+              <p>
+                {org.bankAccount.bank} · {org.bankAccount.type} · เลขที่ {org.bankAccount.display ?? org.bankAccount.number}
+              </p>
+              <p>ชื่อบัญชี {org.bankAccount.name}</p>
+            </div>
+          )}
+        </div>
+        <dl className="grid min-w-64 grid-cols-[1fr_auto] gap-x-6 gap-y-1">
+          <dt>จำนวนเอกสาร</dt>
+          <dd className="text-right">{rows.length} ฉบับ</dd>
+          <dt className="border-t border-neutral-400 pt-1 font-bold">ยอดเรียกเก็บทั้งสิ้น</dt>
+          <dd className="border-t border-neutral-400 pt-1 text-right font-bold">{n2(doc.total)}</dd>
+        </dl>
+      </section>
+
+      <footer className="mt-16 grid grid-cols-2 gap-10 text-center text-xs">
+        <Signature label="ผู้รับวางบิล" />
+        <Signature label="ผู้วางบิล" />
       </footer>
     </article>
   );

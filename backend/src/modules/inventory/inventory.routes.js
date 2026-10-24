@@ -10,6 +10,7 @@ const { badRequest, conflict, notFound } = require('../../core/errors');
 const { applyMovement, getWarehouse, getProductForUpdate, updateAverageCost } = require('./inventory.service');
 const { salesStats, stockStatus, daysCover, EMPTY } = require('./analytics');
 const { receiveLot } = require('./lots');
+const { openStockDocument, closeStockDocument, getStockDocument } = require('./stock-documents');
 
 const router = express.Router();
 router.use(authenticate);
@@ -158,9 +159,10 @@ router.get(
   async (req, res) => {
     const f = req.valid.query;
     const rows = await db.query(
-      `SELECT m.id, m.type, m.quantity, m.unit_cost, m.ref_type, m.ref_id, m.note, m.created_at,
+      `SELECT m.id, m.type, m.quantity, m.unit_cost, m.ref_type, m.ref_id, m.note, m.created_at, m.stock_document_id, sd.doc_no,
               p.id AS product_id, p.sku, p.name AS product_name, w.name AS warehouse_name, u.full_name AS user_name
          FROM stock_movements m
+         LEFT JOIN stock_documents sd ON sd.id = m.stock_document_id
          JOIN products p ON p.id = m.product_id
          JOIN warehouses w ON w.id = m.warehouse_id
          LEFT JOIN users u ON u.id = m.created_by
@@ -192,6 +194,8 @@ router.get(
         unitCost: r.unit_cost == null ? null : Number(r.unit_cost),
         refType: r.ref_type,
         refId: r.ref_id,
+        documentId: r.stock_document_id ?? null,
+        documentNo: r.doc_no ?? null,
         note: r.note,
         createdAt: r.created_at,
         productId: r.product_id,
@@ -237,16 +241,20 @@ router.post(
         delta = b.countedQuantity - Number(row?.quantity ?? 0);
       }
       if (!delta) return { unchanged: true };
-      return applyMovement(conn, {
+      const doc = await openStockDocument(conn, { orgId, type: 'adjustment', warehouseId: b.warehouseId, reason: b.reason.slice(0, 100), userId });
+      const r = await applyMovement(conn, {
         orgId,
         warehouseId: b.warehouseId,
         productId: b.productId,
         quantity: delta,
         type: 'adjustment',
+        stockDocumentId: doc.id,
         note: b.reason,
         userId,
         // a correction may legitimately bring stock to zero but never below
       });
+      await closeStockDocument(conn, doc.id);
+      return { ...r, document: doc };
     });
     audit(req, 'inventory.adjust', 'product', b.productId, { warehouseId: b.warehouseId, ...result });
     res.json({ data: result });
@@ -299,6 +307,11 @@ router.post(
   },
 );
 
+/** A goods receipt / adjustment / write-off, for viewing and printing. */
+router.get('/documents/:id', requirePermission('inventory:read'), validate({ params: z.object({ id: z.coerce.number().int().positive() }) }), async (req, res) => {
+  res.json({ data: await getStockDocument(req.user.orgId, req.valid.params.id) });
+});
+
 /** Goods receipt (without a PO): increases stock and updates the moving-average cost. */
 router.post(
   '/receive',
@@ -327,6 +340,18 @@ router.post(
     const { orgId, id: userId } = req.user;
     const results = await db.tx(async (conn) => {
       await getWarehouse(conn, orgId, b.warehouseId);
+      if (b.supplierId) {
+        const [[s]] = await conn.query('SELECT id FROM suppliers WHERE id = :id AND org_id = :orgId', { id: b.supplierId, orgId });
+        if (!s) throw notFound('ไม่พบผู้ขาย');
+      }
+      const doc = await openStockDocument(conn, {
+        orgId,
+        type: 'goods_receipt',
+        warehouseId: b.warehouseId,
+        supplierId: b.supplierId ?? null,
+        reference: b.reference || null,
+        userId,
+      });
       const out = [];
       for (const item of b.items) {
         const product = await getProductForUpdate(conn, orgId, item.productId);
@@ -339,6 +364,7 @@ router.post(
           unitCost: item.unitCost ?? null,
           refType: b.supplierId ? 'supplier' : null,
           refId: b.supplierId ?? null,
+          stockDocumentId: doc.id,
           note: b.reference || 'รับสินค้าเข้า',
           userId,
         });
@@ -354,10 +380,12 @@ router.post(
         });
         out.push({ productId: item.productId, ...r, lotId });
       }
-      return out;
+      await closeStockDocument(conn, doc.id);
+      return { doc, out };
     });
-    audit(req, 'inventory.receive', 'warehouse', b.warehouseId, { items: b.items.length, reference: b.reference });
-    res.status(201).json({ data: results });
+    audit(req, 'inventory.receive', 'stock_document', results.doc.id, { items: b.items.length, reference: b.reference, docNo: results.doc.docNo });
+    // the array stays as before; the receipt's number rides on the response
+    res.status(201).json({ data: results.out, document: results.doc });
   },
 );
 

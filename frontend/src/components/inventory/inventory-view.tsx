@@ -27,7 +27,11 @@ export function InventoryView() {
   // Links from stock alerts open the right warehouse and filter (e.g. /inventory?warehouseId=2&status=low)
   const params = useSearchParams();
   const [warehouseId, setWarehouseId] = useState(params.get("warehouseId") ?? "");
-  const [action, setAction] = useState<StockAction | "alerts" | null>(null);
+  // the documents hub opens a dialog directly: /inventory?action=receive|adjust|transfer
+  const [action, setAction] = useState<StockAction | "alerts" | null>(() => {
+    const a = params.get("action");
+    return a === "receive" || a === "adjust" || a === "transfer" ? a : null;
+  });
   const warehouses = useQuery({ queryKey: ["inventory", "warehouses"], queryFn: () => api.get<Warehouse[]>("/inventory/warehouses") });
   const whs = warehouses.data ?? [];
   const totalValue = whs.reduce((s, w) => s + w.stockValue, 0);
@@ -397,7 +401,14 @@ function MovementsTable({ warehouseId, editable }: { warehouseId: string; editab
                   {formatNumber(m.quantity)}
                 </td>
                 <td data-label="โดย" className="px-4 py-2.5 text-muted-foreground">{m.userName ?? "ระบบ"}</td>
-                <td data-label="หมายเหตุ" className="max-w-56 truncate px-4 py-2.5 text-muted-foreground">{m.note ?? "–"}</td>
+                <td data-label="หมายเหตุ" className="max-w-56 truncate px-4 py-2.5 text-muted-foreground">
+                  {m.documentId && (
+                    <Link href={`/inventory/documents/${m.documentId}`} className="mr-1.5 font-medium text-primary hover:underline">
+                      {m.documentNo}
+                    </Link>
+                  )}
+                  {m.note ?? (m.documentId ? "" : "–")}
+                </td>
                 <td className="px-4 py-2.5 text-right">
                   {m.reversed ? (
                     <Badge tone="neutral">กลับรายการแล้ว</Badge>

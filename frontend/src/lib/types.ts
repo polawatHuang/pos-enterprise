@@ -424,6 +424,8 @@ export interface PurchaseOrder {
     trackExpiry: boolean;
     shelfLifeDays: number | null;
   }[];
+  /** goods receipts (GR) made against this PO */
+  receipts?: { id: number; docNo: string; docDate: string; totalCost: number }[];
 }
 
 export interface StockTransfer {
@@ -494,6 +496,9 @@ export interface StockMovement {
   unitCost: number | null;
   refType: string | null;
   refId: number | null;
+  /** the GR / AJ / WS this movement belongs to */
+  documentId: number | null;
+  documentNo: string | null;
   note: string | null;
   createdAt: string;
   productId: number;
@@ -865,6 +870,8 @@ export type DocType =
   | "receipt"
   | "tax_invoice_receipt"
   | "credit_note"
+  | "debit_note"
+  | "billing_note"
   | "wht_certificate";
 
 export interface DocItem {
@@ -917,6 +924,8 @@ export interface AccDocument {
     branchNo: string;
     bankAccount: BankAccount | null;
   };
+  /** a billing note: the documents it collects (credit notes are negative) */
+  billedDocuments?: { id: number; docType: DocType; docNo: string; status: AccDocument["status"]; docDate: string; dueDate: string | null; amount: number }[];
   whtSource?: {
     rate: number | null;
     incomeType: string | null;
@@ -1979,4 +1988,64 @@ export interface PaymentGatewayAdmin {
   /** saved on/off switches (e.g. sandbox) — not secret */
   flags: Record<string, boolean>;
   webhookKey: string | null;
+}
+
+/* ------------------------------------------------------------ ศูนย์รวมเอกสาร */
+
+export type DocCategory = "sales" | "purchase" | "stock" | "finance" | "hr";
+
+/** One row of the documents hub: any document, wherever it is kept. */
+export interface HubDocument {
+  source: "document" | "purchase_order" | "stock_document" | "stock_transfer" | "stock_count" | "welfare" | "transaction" | "pos_return" | "pos_sale";
+  id: number;
+  type: string;
+  category: DocCategory;
+  docNo: string;
+  docDate: string;
+  party: string | null;
+  amount: number | null;
+  status: string;
+}
+
+export interface HubPage {
+  data: HubDocument[];
+  meta: { page: number; pageSize: number; total: number; counts: Partial<Record<DocCategory, number>>; sources: string[] };
+}
+
+/** ใบรับสินค้า / ใบปรับสต๊อก / ใบตัดของเสีย */
+export interface StockDocument {
+  org: { name: string; legalName: string | null; taxId: string | null; address: string | null };
+  id: number;
+  docType: "goods_receipt" | "adjustment" | "waste";
+  docNo: string;
+  docDate: string;
+  warehouseName: string;
+  supplierName: string | null;
+  supplierTaxId: string | null;
+  purchaseOrderId: number | null;
+  poNo: string | null;
+  reference: string | null;
+  reason: string | null;
+  note: string | null;
+  totalCost: number;
+  createdBy: string | null;
+  createdAt: string;
+  lines: { productId: number; sku: string; name: string; unit: string; quantity: number; unitCost: number | null; value: number; note: string | null }[];
+}
+
+/** รายงานสินค้าและวัตถุดิบ (ม.87(3)) */
+export interface StockLedger {
+  month: string;
+  warehouse: { id: number; name: string; branchName: string | null; branchNo: string | null };
+  products: {
+    productId: number;
+    sku: string;
+    name: string;
+    unit: string;
+    opening: number;
+    totalIn: number;
+    totalOut: number;
+    closing: number;
+    lines: { date: string; docNo: string; type: string; description: string; qtyIn: number; qtyOut: number; unitCost: number | null; balance: number }[];
+  }[];
 }

@@ -3,12 +3,12 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
-import type { AccDocument, DocItem, DocType, VatType } from "@/lib/types";
-import { formatMoney, todayStr } from "@/lib/utils";
+import { api, apiFetch } from "@/lib/api";
+import type { AccDocument, DocItem, DocType, Paged, VatType } from "@/lib/types";
+import { formatMoney, formatThaiDate, todayStr } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, FieldError, Input, Label, NativeSelect, Textarea } from "@/components/ui/primitives";
 import { ProductPicker } from "@/components/common/product-picker";
@@ -64,13 +64,14 @@ export function DocumentEditor({ initial, defaultType }: { initial?: AccDocument
     setNote("");
   };
   const update = (i: number, patch: Partial<EditLine>) => setItems((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const needsBuyer = docType === "tax_invoice" || docType === "tax_invoice_receipt";
+  const adjusts = docType === "credit_note" || docType === "debit_note";
+  const needsBuyer = docType === "tax_invoice" || docType === "tax_invoice_receipt" || adjusts;
 
   const save = async () => {
     setError(null);
     if (needsBuyer && !partyName.trim()) return setError("ใบกำกับภาษีต้องระบุชื่อผู้ซื้อ");
     if (items.some((i) => !i.description.trim() || !(num(i.quantity) > 0))) return setError("กรอกรายการและจำนวนให้ครบทุกบรรทัด");
-    if (docType === "credit_note" && !refDocId) return setError("ใบลดหนี้ต้องระบุเลขที่ (ID) เอกสารเดิมที่อ้างอิง");
+    if (adjusts && !refDocId) return setError(`${DOC_TYPE_LABEL[docType]}ต้องเลือกใบกำกับภาษีเดิมที่อ้างอิง`);
     setBusy(true);
     const body = {
       docType,
@@ -108,8 +109,8 @@ export function DocumentEditor({ initial, defaultType }: { initial?: AccDocument
 
   return (
     <>
-      <Link href="/accounting/documents" className="mb-2 inline-flex min-h-10 items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> เอกสารทั้งหมด
+      <Link href="/documents" className="mb-2 inline-flex min-h-10 items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="size-4" /> ศูนย์เอกสาร
       </Link>
       <h1 className="mb-6 text-2xl font-semibold tracking-tight">{initial ? "แก้ไขฉบับร่าง" : `สร้าง${DOC_TYPE_LABEL[docType]}`}</h1>
 
@@ -122,7 +123,7 @@ export function DocumentEditor({ initial, defaultType }: { initial?: AccDocument
             <div className="space-y-2">
               <Label htmlFor="type">ประเภท</Label>
               <NativeSelect id="type" className="h-10 w-full" value={docType} onChange={(e) => setDocType(e.target.value as DocType)}>
-                {CREATABLE_DOC_TYPES.map((d) => (
+                {CREATABLE_DOC_TYPES.filter((d) => d !== "billing_note").map((d) => (
                   <option key={d} value={d}>
                     {DOC_TYPE_LABEL[d]}
                   </option>
@@ -151,10 +152,19 @@ export function DocumentEditor({ initial, defaultType }: { initial?: AccDocument
               <Label htmlFor="paddr">ที่อยู่ผู้ซื้อ</Label>
               <Textarea id="paddr" rows={2} value={partyAddress} onChange={(e) => setPartyAddress(e.target.value)} />
             </div>
-            {docType === "credit_note" && (
-              <div className="space-y-2">
-                <Label htmlFor="ref">ID เอกสารเดิมที่ลดหนี้</Label>
-                <Input id="ref" inputMode="numeric" value={refDocId} onChange={(e) => setRefDocId(e.target.value.replace(/\D/g, ""))} />
+            {adjusts && (
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="ref">ใบกำกับภาษีเดิมที่{docType === "credit_note" ? "ลดหนี้" : "เพิ่มหนี้"}</Label>
+                <TaxInvoicePicker
+                  value={refDocId}
+                  onChange={(d) => {
+                    setRefDocId(String(d.id));
+                    // the buyer is the same as on the tax invoice
+                    if (!partyName) setPartyName(d.partyName ?? "");
+                    if (!partyTaxId) setPartyTaxId(d.partyTaxId ?? "");
+                    if (!partyAddress) setPartyAddress(d.partyAddress ?? "");
+                  }}
+                />
               </div>
             )}
           </CardContent>
@@ -261,6 +271,53 @@ function Row({ label, value }: { label: string; value: number }) {
     <div className="flex justify-between">
       <span className="text-muted-foreground">{label}</span>
       <span className="tabular-nums">{formatMoney(value)}</span>
+    </div>
+  );
+}
+
+/** Issued tax invoices to pick from (search by number or buyer); credit and debit notes must cite one. */
+function TaxInvoicePicker({ value, onChange }: { value: string; onChange: (d: AccDocument) => void }) {
+  const [q, setQ] = useState("");
+  const list = useQuery({
+    queryKey: ["accounting", "documents", "tax-invoices", q],
+    queryFn: async () => {
+      const [ti, tr] = await Promise.all(
+        (["tax_invoice", "tax_invoice_receipt"] as const).map((docType) =>
+          apiFetch<Paged<AccDocument>>("/accounting/documents", { query: { docType, q, pageSize: 20 } }).then((r) => r.data),
+        ),
+      );
+      return [...ti, ...tr].filter((d) => d.status === "issued" || d.status === "paid").sort((a, b) => b.docDate.localeCompare(a.docDate));
+    },
+  });
+  return (
+    <div className="space-y-2">
+      <Input id="ref" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาเลขที่ใบกำกับภาษี หรือชื่อผู้ซื้อ" aria-label="ค้นหาใบกำกับภาษีเดิม" />
+      <div className="max-h-48 overflow-y-auto rounded-lg border border-border">
+        {list.isPending ? (
+          <p className="p-3 text-sm text-muted-foreground">กำลังโหลด…</p>
+        ) : !list.data?.length ? (
+          <p className="p-3 text-sm text-muted-foreground">ไม่พบใบกำกับภาษีที่ออกแล้ว</p>
+        ) : (
+          list.data.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => onChange(d)}
+              className={`flex min-h-11 w-full items-center justify-between gap-3 border-b border-border px-3 py-2 text-left text-sm last:border-0 hover:bg-muted ${
+                String(d.id) === value ? "bg-primary/10 font-medium" : ""
+              }`}
+            >
+              <span className="min-w-0">
+                <span className="block">{d.docNo}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {d.partyName ?? "-"} · {formatThaiDate(d.docDate)}
+                </span>
+              </span>
+              <span className="shrink-0 tabular-nums">{formatMoney(d.total)}</span>
+            </button>
+          ))
+        )}
+      </div>
     </div>
   );
 }

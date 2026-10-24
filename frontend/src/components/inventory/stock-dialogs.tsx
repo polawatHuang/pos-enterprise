@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, apiFetch } from "@/lib/api";
 import type { Product, ProductDetail, Warehouse } from "@/lib/types";
 import { formatMoney, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
@@ -49,6 +50,7 @@ function WarehouseSelect({ id, value, onChange, warehouses, label }: { id: strin
 /** Multi-line dialog used for receiving and transferring stock. */
 export function MultiLineStockDialog({ action, warehouses, onDone }: { action: "receive" | "transfer"; warehouses: Warehouse[]; onDone: () => void }) {
   const invalidate = useInvalidate();
+  const router = useRouter();
   const [from, setFrom] = useState(String(warehouses[0]?.id ?? ""));
   const [to, setTo] = useState(String(warehouses[1]?.id ?? warehouses[0]?.id ?? ""));
   const [reference, setReference] = useState("");
@@ -66,7 +68,9 @@ export function MultiLineStockDialog({ action, warehouses, onDone }: { action: "
     setBusy(true);
     try {
       if (action === "receive") {
-        await api.post("/inventory/receive", {
+        const r = await apiFetch<{ document?: { id: number; docNo: string } }>("/inventory/receive", {
+          method: "POST",
+          json: {
           warehouseId: Number(from),
           reference: reference || undefined,
           items: lines.map((l) => ({
@@ -75,8 +79,12 @@ export function MultiLineStockDialog({ action, warehouses, onDone }: { action: "
             ...(l.unitCost !== "" ? { unitCost: Number(l.unitCost) } : {}),
             ...(l.expiryDate ? { expiryDate: l.expiryDate } : {}),
           })),
+          },
         });
-        toast.success(`รับสินค้าเข้า ${lines.length} รายการแล้ว`);
+        const doc = r.document;
+        toast.success(`รับสินค้าเข้า ${lines.length} รายการแล้ว${doc ? ` · ${doc.docNo}` : ""}`, {
+          action: doc ? { label: "ดู/พิมพ์", onClick: () => router.push(`/inventory/documents/${doc.id}`) } : undefined,
+        });
       } else {
         // In-transit transfer: stock leaves now, the destination confirms what arrived (สั่งซื้อ & รับของ > โอนย้าย)
         const t = await api.post<{ transferNo: string }>("/purchasing/transfers", {
@@ -184,6 +192,7 @@ const BIG_CHANGE_BAHT = 1000;
 
 export function AdjustDialog({ warehouses, onDone }: { warehouses: Warehouse[]; onDone: () => void }) {
   const invalidate = useInvalidate();
+  const router = useRouter();
   const { user } = useAuth();
   // the user's own branch store first: the main warehouse was the default and took counts by mistake
   const own = warehouses.find((w) => w.branchId === user?.branchId) ?? warehouses[0];
@@ -211,13 +220,16 @@ export function AdjustDialog({ warehouses, onDone }: { warehouses: Warehouse[]; 
     }
     setBusy(true);
     try {
-      const r = await api.post<{ before?: number; after?: number; unchanged?: boolean }>("/inventory/adjust", {
+      const r = await api.post<{ before?: number; after?: number; unchanged?: boolean; document?: { id: number; docNo: string } }>("/inventory/adjust", {
         warehouseId: Number(warehouseId),
         productId: product.id,
         countedQuantity: Number(counted),
         reason,
       });
-      toast.success(r.unchanged ? "ยอดตรงกับระบบอยู่แล้ว" : `ปรับยอดจาก ${r.before} เป็น ${r.after}`);
+      const doc = r.document;
+      toast.success(r.unchanged ? "ยอดตรงกับระบบอยู่แล้ว" : `ปรับยอดจาก ${r.before} เป็น ${r.after}${doc ? ` · ${doc.docNo}` : ""}`, {
+        action: doc ? { label: "ดู/พิมพ์", onClick: () => router.push(`/inventory/documents/${doc.id}`) } : undefined,
+      });
       invalidate();
       onDone();
     } catch (err) {

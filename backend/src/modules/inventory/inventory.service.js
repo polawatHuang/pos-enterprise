@@ -11,7 +11,7 @@ const { conflict, notFound, badRequest } = require('../../core/errors');
  */
 async function applyMovement(
   conn,
-  { orgId, warehouseId, productId, quantity, type, unitCost = null, refType = null, refId = null, note = null, userId = null, allowNegative = false },
+  { orgId, warehouseId, productId, quantity, type, unitCost = null, refType = null, refId = null, stockDocumentId = null, note = null, userId = null, allowNegative = false },
 ) {
   if (!quantity) throw badRequest('จำนวนต้องไม่เป็นศูนย์');
   await conn.query(
@@ -33,9 +33,9 @@ async function applyMovement(
     { after, warehouseId, productId },
   );
   await conn.query(
-    `INSERT INTO stock_movements (org_id, warehouse_id, product_id, variant_id, type, quantity, unit_cost, ref_type, ref_id, note, created_by)
-     VALUES (:orgId, :warehouseId, :productId, 0, :type, :quantity, :unitCost, :refType, :refId, :note, :userId)`,
-    { orgId, warehouseId, productId, type, quantity, unitCost, refType, refId, note, userId },
+    `INSERT INTO stock_movements (org_id, warehouse_id, product_id, variant_id, type, quantity, unit_cost, ref_type, ref_id, stock_document_id, note, created_by)
+     VALUES (:orgId, :warehouseId, :productId, 0, :type, :quantity, :unitCost, :refType, :refId, :stockDocumentId, :note, :userId)`,
+    { orgId, warehouseId, productId, type, quantity, unitCost, refType, refId, stockDocumentId, note, userId },
   );
   return { before, after };
 }

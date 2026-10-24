@@ -61,8 +61,11 @@ export function PoDetail({ id }: { id: number }) {
         const list = items
           .map((i) => ({ productId: i.productId, quantity: val(i) ?? 0, ...(exp[i.productId] ? { expiryDate: exp[i.productId] } : {}) }))
           .filter((x) => x.quantity > 0);
-        await api.post(`/purchasing/orders/${id}/receive`, { items: list.length ? list : [{ productId: items[0].productId, quantity: 0 }], close });
-        toast.success(close ? "รับของและปิดใบสั่งซื้อแล้ว" : "รับของเข้าสต๊อกแล้ว");
+        const r = await api.post<PurchaseOrder & { receipt: { id: number; docNo: string } | null }>(`/purchasing/orders/${id}/receive`, {
+          items: list.length ? list : [{ productId: items[0].productId, quantity: 0 }],
+          close,
+        });
+        toast.success(`${close ? "รับของและปิดใบสั่งซื้อแล้ว" : "รับของเข้าสต๊อกแล้ว"}${r.receipt ? ` · ใบรับสินค้า ${r.receipt.docNo}` : ""}`);
         setRecv({});
       } else {
         if (what === "cancel" && !window.confirm("ยกเลิกใบสั่งซื้อนี้?")) return;
@@ -226,6 +229,16 @@ export function PoDetail({ id }: { id: number }) {
           </p>
         </div>
         {p.note && <p className="mt-2 whitespace-pre-line text-xs text-muted-foreground">หมายเหตุ: {p.note}</p>}
+        {!!p.receipts?.length && (
+          <p className="mt-3 flex flex-wrap items-center gap-2 text-sm print:hidden">
+            <span className="text-muted-foreground">ใบรับสินค้า:</span>
+            {p.receipts.map((g) => (
+              <Link key={g.id} href={`/inventory/documents/${g.id}`} className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-muted">
+                {g.docNo} · {formatThaiDate(g.docDate)}
+              </Link>
+            ))}
+          </p>
+        )}
         <div className="mt-10 hidden grid-cols-2 gap-10 text-center text-sm print:grid">
           <p className="border-t border-black pt-1">ผู้สั่งซื้อ</p>
           <p className="border-t border-black pt-1">ผู้อนุมัติ</p>

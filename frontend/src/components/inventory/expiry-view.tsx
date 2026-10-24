@@ -181,8 +181,8 @@ function WasteDialog({ lot, onDone }: { lot: ExpiryLot; onDone: () => void }) {
   const save = async () => {
     setBusy(true);
     try {
-      const r = await api.post<{ value: number }>(`/inventory/expiry/lots/${lot.lotId}/waste`, { qty: Number(qty), reason });
-      toast.success(`บันทึกของเสีย ${formatMoney(r.value)} แล้ว`);
+      const r = await api.post<{ value: number; document?: { id: number; docNo: string } }>(`/inventory/expiry/lots/${lot.lotId}/waste`, { qty: Number(qty), reason });
+      toast.success(`บันทึกของเสีย ${formatMoney(r.value)} แล้ว${r.document ? ` · ${r.document.docNo}` : ""}`);
       onDone();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "ไม่สำเร็จ");

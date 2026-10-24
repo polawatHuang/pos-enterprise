@@ -59,12 +59,14 @@ const ACTIONS: { label: string; href: string; icon: LucideIcon; permission: stri
   { label: "ดูสินค้าใกล้หมดอายุ", href: "/inventory/expiry", icon: Hourglass, permission: "inventory:read", keywords: "หมดอายุ expiry ของเสีย" },
   { label: "เบิกสินค้าสวัสดิการพนักงาน", href: "/inventory/welfare", icon: HeartHandshake, permission: "welfare:request", keywords: "สวัสดิการ เบิก พนักงาน welfare" },
   { label: "สร้างเอกสาร (ใบเสนอราคา/ใบกำกับภาษี)", href: "/accounting/documents/new", icon: FilePlus2, permission: "accounting:write", keywords: "เอกสาร invoice ใบเสร็จ" },
+  { label: "สร้างใบวางบิล", href: "/accounting/documents/new?type=billing_note", icon: FilePlus2, permission: "accounting:write", keywords: "วางบิล billing note ใบแจ้งหนี้ค้าง" },
+  { label: "ศูนย์เอกสาร (ค้นหาเอกสารทุกประเภท)", href: "/documents", icon: FilePlus2, permission: "inventory:read", keywords: "เอกสาร ใบสั่งซื้อ ใบรับสินค้า ใบโอน po gr" },
   { label: "สร้างวิดีโอ AI", href: "/videos", icon: Video, permission: "video:create", keywords: "วิดีโอ video คลิป" },
   { label: "สินค้าคงเหลือทั้งหมด", href: "/inventory", icon: Boxes, permission: "inventory:read", keywords: "คงเหลือ stock" },
 ];
 
 /** "See all" pages that accept ?q= */
-const SEE_ALL: Record<string, string> = { products: "/products", documents: "/accounting/documents", trends: "/trends" };
+const SEE_ALL: Record<string, string> = { products: "/products", documents: "/documents", trends: "/trends" };
 const RECENT_KEY = "search.recent";
 
 function readRecent(): string[] {
