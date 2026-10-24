@@ -42,6 +42,7 @@ module.exports = {
   id: 'opn',
   label: 'Opn Payments (Omise)',
   fields: [{ key: 'secretKey', label: 'Secret key (skey_…)', secret: true }],
+  webhookHint: 'นำไปใส่ใน Dashboard ของ Opn (Webhooks) — ระบบใช้เหตุการณ์ charge.complete',
   /** A key that cannot be right is refused before it is saved. */
   validateCredentials(creds) {
     if (!/^skey_(test_)?[A-Za-z0-9]+$/.test(creds.secretKey ?? '')) return 'Secret key ของ Opn ขึ้นต้นด้วย skey_ (หรือ skey_test_ สำหรับโหมดทดสอบ)';

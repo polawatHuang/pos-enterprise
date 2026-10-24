@@ -19,7 +19,8 @@ const limiter = rateLimit({
   keyGenerator: (req) => ipKeyGenerator(req.ip ?? ''),
 });
 
-router.post('/:provider/:key', limiter, async (req, res) => {
+// most providers post JSON (parsed app-wide); some post a form
+router.post('/:provider/:key', limiter, express.urlencoded({ extended: false, limit: '64kb' }), async (req, res) => {
   try {
     const r = await intents.handleWebhook(String(req.params.provider), String(req.params.key), req.body ?? {});
     res.json({ ok: true, ...r });

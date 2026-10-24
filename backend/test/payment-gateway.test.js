@@ -149,3 +149,92 @@ describe('paying with an intent', () => {
     assert.ok([409, 400].includes(s.status), String(s.status));
   });
 });
+
+describe('GB Prime Pay', () => {
+  const realFetch = global.fetch;
+  const calls = [];
+  const txns = new Map(); // referenceNo -> enquiry answer
+  let gbKey;
+
+  before(() => {
+    global.fetch = async (url, init = {}) => {
+      const u = new URL(url);
+      calls.push({ host: u.host, path: u.pathname, init });
+      const json = (b, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } });
+      if (u.pathname === '/v3/qrcode/text') return json({ resultCode: '00', referenceNo: new URLSearchParams(init.body).get('referenceNo'), qrcode: '00020101021230830016A0000006770101120115010556' });
+      if (u.pathname === '/v1/check_status_txn') {
+        const ref = JSON.parse(init.body).referenceNo;
+        return json(txns.get(ref) ?? { resultCode: '02', resultMessage: 'not found' });
+      }
+      if (u.pathname === '/checkCustomerKey') return json({ resultCode: '00', merchantName: 'ร้านทดสอบ' });
+      if (u.pathname === '/checkPrivateKey') return json({ resultCode: '00' });
+      return json({ message: 'unexpected' }, 404);
+    };
+  });
+  after(() => {
+    global.fetch = realFetch;
+  });
+
+  test('keys are checked, saved one at a time, and the sandbox switch picks the test server', async () => {
+    assert.equal((await manager.put('/api/pos/payment-gateway', { provider: 'gbprimepay', enabled: true, credentials: { token: 'short' } })).status, 400);
+    const token = 'tok_' + 'a'.repeat(40);
+    const secret = 'sec_' + 'b'.repeat(28);
+    const saved = await manager.put('/api/pos/payment-gateway', { provider: 'gbprimepay', enabled: true, credentials: { token, secretKey: secret, sandbox: '1' } });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.data.mode, 'test');
+    assert.equal(saved.body.data.flags.sandbox, true);
+    assert.equal(JSON.stringify(saved.body).includes('aaaaaaaa'), false);
+    gbKey = saved.body.data.webhookKey;
+    // changing only the switch keeps both keys
+    const live = await manager.put('/api/pos/payment-gateway', { provider: 'gbprimepay', enabled: true, credentials: { sandbox: '' } });
+    assert.equal(live.body.data.mode, 'live');
+    assert.equal((await manager.put('/api/pos/payment-gateway', { provider: 'gbprimepay', enabled: true, credentials: { sandbox: '1' } })).body.data.mode, 'test');
+
+    const t = await manager.post('/api/pos/payment-gateway/test', {});
+    assert.equal(t.status, 200, JSON.stringify(t.body));
+    assert.equal(t.body.data.account, 'ร้านทดสอบ');
+    const priv = calls.find((c) => c.path === '/checkPrivateKey');
+    assert.equal(priv.host, 'api.globalprimepay.com');
+    assert.equal(priv.init.headers.Authorization, `Basic ${Buffer.from(`${secret}:`).toString('base64')}`);
+  });
+
+  test('QR from the token; paid only when the enquiry says so; then the sale claims it', async () => {
+    const made = await cashier.post('/api/pos/payment-intents', { amount: 100 });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.match(made.body.data.qrPayload, /^000201/);
+    const qrCall = calls.filter((c) => c.path === '/v3/qrcode/text').at(-1);
+    const form = new URLSearchParams(qrCall.init.body);
+    assert.equal(form.get('amount'), '100.00');
+    assert.match(form.get('referenceNo'), /^\d{15}$/);
+    assert.ok(form.get('token').startsWith('tok_'));
+    const ref = form.get('referenceNo');
+
+    // the webhook body is not believed: the enquiry has nothing yet
+    const early = await request(app).post(`/api/public/payments/gbprimepay/${gbKey}`).send({ referenceNo: ref, resultCode: '00', amount: 100 });
+    assert.equal(early.body.status, 'pending');
+    // an enquiry for another reference or an unclear status is not a payment either
+    txns.set(ref, { resultCode: '00', txn: { referenceNo: 'other', status: 'S', amount: 100 } });
+    assert.equal((await request(app).post(`/api/public/payments/gbprimepay/${gbKey}`).send({ referenceNo: ref })).body.status, 'pending');
+    txns.set(ref, { resultCode: '00', txn: { referenceNo: ref, status: 'P', amount: 100 } });
+    assert.equal((await request(app).post(`/api/public/payments/gbprimepay/${gbKey}`).send({ referenceNo: ref })).body.status, 'pending');
+
+    // form-encoded webhooks work too
+    txns.set(ref, { resultCode: '00', txn: { referenceNo: ref, resultCode: '00', status: 'S', amount: '100.00', gbpReferenceNo: 'gbp1' } });
+    const paid = await request(app).post(`/api/public/payments/gbprimepay/${gbKey}`).type('form').send({ referenceNo: ref, resultCode: '00' });
+    assert.equal(paid.status, 200);
+    assert.equal(paid.body.status, 'paid');
+    const sale = await sell({ items: [{ productId: state.productId, quantity: 1 }], payments: [{ method: 'promptpay', amount: 100, intentId: made.body.data.id }] });
+    assert.equal(sale.status, 201, JSON.stringify(sale.body));
+    state.orderIds.push(sale.body.data.id);
+    assert.equal(sale.body.data.payments[0].reference, ref);
+  });
+
+  test('a paid amount that differs from the bill is not accepted', async () => {
+    const made = (await cashier.post('/api/pos/payment-intents', { amount: 100 })).body.data;
+    const ref = new URLSearchParams(calls.filter((c) => c.path === '/v3/qrcode/text').at(-1).init.body).get('referenceNo');
+    txns.set(ref, { resultCode: '00', txn: { referenceNo: ref, status: 'S', amount: 1 } });
+    const r = await request(app).post(`/api/public/payments/gbprimepay/${gbKey}`).send({ referenceNo: ref });
+    assert.equal(r.body.status, 'failed');
+    assert.equal((await cashier.get(`/api/pos/payment-intents/${made.id}`)).body.data.status, 'failed');
+  });
+});
