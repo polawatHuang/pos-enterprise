@@ -35,7 +35,13 @@ export function receiptDoc(order: PosOrder, settings: PosSettings | undefined, t
     const branch = order.branchNo ? ` (สาขา ${order.branchNo === "00000" ? "สำนักงานใหญ่" : order.branchNo})` : "";
     b.push({ kind: "text", text: `เลขประจำตัวผู้เสียภาษี ${org.taxId}${branch}`, align: "center" });
   }
-  b.push({ kind: "text", text: org?.vatRegistered ? "ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ" : "ใบเสร็จรับเงิน", align: "center", bold: true });
+  if (order.offline) {
+    // no real number or tax invoice until the bill reaches the system
+    b.push({ kind: "text", text: "ใบเสร็จชั่วคราว (ออฟไลน์)", align: "center", bold: true, boxed: true });
+    b.push({ kind: "text", text: "ขอใบกำกับภาษีได้หลังบิลถูกบันทึกเข้าระบบ", align: "center", small: true });
+  } else {
+    b.push({ kind: "text", text: org?.vatRegistered ? "ใบเสร็จรับเงิน/ใบกำกับภาษีอย่างย่อ" : "ใบเสร็จรับเงิน", align: "center", bold: true });
+  }
   if (voided) b.push({ kind: "text", text: "*** ยกเลิกแล้ว ***", align: "center", bold: true, boxed: true });
   b.push({ kind: "rule" });
   b.push({ kind: "text", text: `เลขที่ ${order.orderNo}` });

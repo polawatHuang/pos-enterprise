@@ -691,6 +691,8 @@ export interface SlipCheck {
 export interface PosOrder {
   id: number;
   orderNo: string;
+  /** a temporary receipt for a cash bill sold offline (not sent to the server yet) */
+  offline?: boolean;
   /** id of the public receipt link /r/<token> (null on bills made before it existed) */
   receiptToken?: string | null;
   taxInvoice?: { status: "pending" | "issued"; name: string; taxId: string; branchNo: string; address: string; email: string | null; documentId: number | null; docNo: string | null } | null;

@@ -5,6 +5,8 @@
  * first-party. Set NEXT_PUBLIC_API_URL (e.g. https://api.example.com) only when frontend and
  * backend share a parent domain and you want the browser to call the API directly (CORS mode).
  */
+import { setReachable } from "./reachability";
+
 const API_BASE = `${(process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/+$/, "")}/api`;
 
 export class ApiError extends Error {
@@ -87,6 +89,7 @@ async function parse<T>(res: Response): Promise<T> {
 const NO_REFRESH = new Set(["/auth/login", "/auth/refresh", "/auth/logout"]);
 
 function networkError(): never {
+  setReachable(false);
   throw new ApiError(0, "NETWORK", "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบอินเทอร์เน็ต");
 }
 
@@ -104,6 +107,8 @@ export async function apiFetch<T>(
     });
 
   let res = await doFetch().catch(networkError);
+  // an answer from the server (even an error) means the connection works; 502-504 is the proxy saying the backend is down
+  setReachable(res.status < 502 || res.status > 504);
   if (res.status === 401 && !skipRefresh && !NO_REFRESH.has(path)) {
     if (await refreshSession()) res = await doFetch().catch(networkError);
     else if (typeof window !== "undefined") {

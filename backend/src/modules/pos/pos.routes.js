@@ -29,6 +29,19 @@ const money = z.coerce.number().min(0).max(99_999_999);
 
 /* ---------------------------------------------------------------- catalog */
 
+/**
+ * Everything the till needs to keep scanning when the internet drops: one flat list, refreshed in
+ * the background while online. Pack/carton units and promotions are left out (offline sells plain
+ * pieces at list price).
+ */
+router.get('/catalog/offline', async (req, res) => {
+  const rows = await db.query(
+    `${CATALOG_SELECT} WHERE p.org_id = :orgId AND p.status = 'active' AND p.open_price = 0 ORDER BY p.name LIMIT 5000`,
+    { orgId: req.user.orgId, warehouseId: await sellingWarehouse(req) },
+  );
+  res.json({ data: rows.map(mapCatalog) });
+});
+
 const CATALOG_SELECT = `
   SELECT p.id, p.sku, p.barcode, p.name, p.price, p.unit, p.image_url, p.category_id, p.vat_type,
          COALESCE(sl.quantity, 0) AS stock, c.age_restricted, c.sale_block, p.track_expiry, p.open_price,
@@ -651,6 +664,10 @@ router.post(
       customerId: z.number().int().positive().nullable().optional(),
       pointsUsed: z.number().int().min(0).max(10_000_000).optional(),
       ageConfirmed: z.boolean().optional(),
+      /** a bill the till sold offline: its own id (sending twice = one sale), when it was sold, what the till charged */
+      clientRef: z.uuid().optional(),
+      soldAt: z.iso.datetime().optional(),
+      expectedTotal: money.optional(),
       payment: z
         .object({
           method: z.enum(['cash', 'promptpay', 'card', 'transfer', 'ewallet']),
@@ -679,8 +696,15 @@ router.post(
     const seller = ticket ? { ...req.user, permissions: [...req.user.permissions, 'pos:manage'] } : req.user;
     const result = await service.checkout(seller, req.valid.body);
     const methods = req.valid.body.payments?.map((p) => p.method) ?? [req.valid.body.payment?.method];
-    audit(req, 'pos.checkout', 'sales_order', result.orderId, { total: result.total, methods, approvedBy: ticket?.managerId });
-    res.status(201).json({ data: { ...(await service.getOrder(req.user.orgId, result.orderId)), change: result.change } });
+    const expected = req.valid.body.expectedTotal;
+    // an offline bill that came out at a different total than the till charged (a price changed meanwhile)
+    const mismatch = expected != null && Math.abs(result.total - expected) > 0.009 ? { charged: expected, recorded: result.total } : null;
+    if (!result.duplicate) {
+      audit(req, 'pos.checkout', 'sales_order', result.orderId, { total: result.total, methods, approvedBy: ticket?.managerId, offline: Boolean(req.valid.body.clientRef), mismatch });
+    }
+    res.status(result.duplicate ? 200 : 201).json({
+      data: { ...(await service.getOrder(req.user.orgId, result.orderId)), change: result.change, duplicate: Boolean(result.duplicate), mismatch },
+    });
   },
 );
 

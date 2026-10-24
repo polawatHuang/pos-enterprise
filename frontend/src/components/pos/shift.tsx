@@ -15,6 +15,7 @@ import { DialogContent } from "@/components/ui/overlays";
 import { METHOD_LABEL, ReceiptBlocks } from "./receipt";
 import { shiftReportDoc } from "./receipt-doc";
 import { openDrawer } from "./printer";
+import { useOfflineBills } from "./offline";
 import { POS_SETTINGS_KEY } from "./settings-dialog";
 
 export const SHIFT_KEY = ["pos", "shift"] as const;
@@ -115,6 +116,9 @@ export const CASH_LABEL: Record<CashMoveType, string> = { pickup: "นำเข�
 /** Blind close: the cashier counts notes and coins first; the expected amount is revealed afterwards. */
 export function CloseShiftDialog({ shift, onClosed }: { shift: Shift; onClosed: (report: ShiftReport) => void }) {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  // bills sold offline must reach the system before the day's cash is counted against it
+  const unsent = useOfflineBills().filter((b) => b.userId === user?.id).length;
   const [counts, setCounts] = useState<Record<number, string>>({});
   const [note, setNote] = useState("");
   const [reveal, setReveal] = useState(false);
@@ -191,7 +195,12 @@ export function CloseShiftDialog({ shift, onClosed }: { shift: Shift; onClosed: 
           aria-invalid={reveal && needsReason && !note.trim()}
           maxLength={255}
         />
-        <Button onClick={close} disabled={busy || !reveal || (needsReason && !note.trim())} variant={reveal && needsReason ? "danger" : "default"}>
+        {unsent > 0 && (
+          <p role="alert" className="rounded-lg bg-warning-soft p-2.5 text-sm font-medium text-warning">
+            ยังมีบิลออฟไลน์ {unsent} ใบที่ยังไม่ได้ส่งเข้าระบบ — รอให้ส่งเสร็จก่อนปิดกะ (ดูที่แถบสีเหลืองหน้าขาย)
+          </p>
+        )}
+        <Button onClick={close} disabled={busy || !reveal || unsent > 0 || (needsReason && !note.trim())} variant={reveal && needsReason ? "danger" : "default"}>
           {busy && <Loader2 className="animate-spin" />}
           {reveal && needsReason ? `ยืนยันปิดกะ (เงิน${diffWord} ${formatMoney(Math.abs(diff))})` : "ยืนยันปิดกะ และพิมพ์สรุปปิดกะ"}
         </Button>

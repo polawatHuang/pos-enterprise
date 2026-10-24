@@ -59,6 +59,7 @@ export function PaymentDialog({
   onAddSuggestion,
   onQr,
   onGatewayPaid,
+  offline = false,
   onConfirm,
 }: {
   total: number;
@@ -73,6 +74,8 @@ export function PaymentDialog({
   onQr: (payload: string | null, method: PaymentMethod, amount: number, image?: string | null) => void;
   /** the provider confirmed the money (customer display shows "paid") */
   onGatewayPaid?: (amount: number) => void;
+  /** no connection: cash only, no automatic QR */
+  offline?: boolean;
   onConfirm: (p: PaymentResult) => void;
 }) {
   const [method, setMethod] = useState<PaymentMethod>(initialMethod);
@@ -210,8 +213,10 @@ export function PaymentDialog({
             role="radio"
             aria-checked={method === value}
             onClick={() => pick(value)}
+            disabled={offline && value !== "cash"}
+            title={offline && value !== "cash" ? "ออฟไลน์ — รับได้เฉพาะเงินสด" : undefined}
             className={cn(
-              "relative flex flex-col items-center gap-1 rounded-xl border px-1 py-2.5 text-xs font-medium transition-colors sm:text-sm",
+              "relative flex flex-col items-center gap-1 rounded-xl border px-1 py-2.5 text-xs font-medium transition-colors sm:text-sm disabled:cursor-not-allowed disabled:opacity-40",
               method === value ? "border-primary bg-primary-soft text-primary" : "border-border hover:bg-accent",
             )}
           >
@@ -222,6 +227,7 @@ export function PaymentDialog({
         ))}
       </div>
 
+      {offline && <p className="mt-2 rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">ออฟไลน์ — รับเงินสดได้อย่างเดียว บิลจะส่งเข้าระบบเมื่อเน็ตกลับ</p>}
       {method === "cash" ? (
         <form
           className="mt-4 grid gap-3"
