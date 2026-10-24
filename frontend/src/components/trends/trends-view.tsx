@@ -625,7 +625,12 @@ export function Analysis({ a }: { a: TrendDetail["aiAnalysis"] & object }) {
         <p>{a.contentAngle}</p>
       </div>
       {a.risks.length > 0 && <List title="ความเสี่ยง" items={a.risks} icon={<AlertTriangle className="size-3.5 text-warning" />} />}
-      {a.provider && <p className="text-[11px] text-muted-foreground">วิเคราะห์โดย {a.provider === "minimax" ? "MiniMax" : "Claude"} · ใช้ประกอบการตัดสินใจ ไม่ใช่คำแนะนำทางกฎหมาย</p>}
+      {a.provider && (
+        <p className="text-[11px] text-muted-foreground">
+          วิเคราะห์โดย {a.provider === "minimax" ? "MiniMax" : "Claude"}
+          {a.model ? ` · ${a.model}` : ""} · ใช้ประกอบการตัดสินใจ ไม่ใช่คำแนะนำทางกฎหมาย
+        </p>
+      )}
     </div>
   );
 }

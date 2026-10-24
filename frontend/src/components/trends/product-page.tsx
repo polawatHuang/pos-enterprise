@@ -14,6 +14,7 @@ import {
   Loader2,
   MessageSquareText,
   OctagonAlert,
+  Search,
   Sparkles,
   Star,
   ThumbsDown,
@@ -22,7 +23,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { KaloExtraKind, TrendDetail } from "@/lib/types";
+import type { KaloExtraKind, TrendDetail, WebFacts } from "@/lib/types";
 import { cn, formatCompact, formatDateTime, formatNumber, formatThaiDate } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,12 @@ import { baht, Growth, periodShort, VERDICT } from "./kalo-ui";
  */
 export function TrendProductPage({ id }: { id: number }) {
   const { can } = useAuth();
-  const q = useQuery({ queryKey: ["trends", "detail", id], queryFn: () => api.get<TrendDetail>(`/scraping/trends/${id}`) });
+  const q = useQuery({
+    queryKey: ["trends", "detail", id],
+    queryFn: () => api.get<TrendDetail>(`/scraping/trends/${id}`),
+    // while the AI searches the web, poll until it is done
+    refetchInterval: (query) => ((query.state.data?.extras.webfacts?.data as WebFacts | undefined)?.status === "running" ? 5_000 : false),
+  });
   if (q.isPending) return <Skeleton className="h-[80vh] w-full rounded-xl" />;
   if (q.isError) return <p className="py-16 text-center text-muted-foreground">{q.error.message}</p>;
   const t = q.data;
@@ -111,6 +117,7 @@ export function TrendProductPage({ id }: { id: number }) {
           <Card className="p-4">
             <ChecklistSection key={`${t.id}-${t.lastSeenAt}-${t.pickScore}`} t={t} canEdit={canRun} />
           </Card>
+          <WebFactsCard t={t} canRun={canRun} />
         </div>
         <div className="space-y-4">
           <SelectScoreCard t={t} canEdit={canRun} />
@@ -411,8 +418,9 @@ function FetchButton({ t, kind, label }: { t: TrendDetail; kind: KaloExtraKind; 
   const run = async () => {
     setBusy(true);
     try {
-      const r = await api.post<{ cached: boolean; credits: number }>(`/scraping/trends/${t.id}/kalodata/${kind}`);
+      const r = await api.post<{ cached: boolean; credits: number; derived?: Record<string, number> | null }>(`/scraping/trends/${t.id}/kalodata/${kind}`);
       toast.success(r.cached ? "ใช้ข้อมูลที่ดึงไว้แล้ว (ไม่เสียเครดิต)" : `ดึงข้อมูลแล้ว ใช้ ${r.credits} เครดิต`);
+      if (r.derived) toast.success(`เติมเช็กลิสต์จากรีวิว ${r.derived.sample} รายการ: ${Object.keys(r.derived).filter((k) => k !== "sample").length} ช่อง`);
       await qc.invalidateQueries({ queryKey: ["trends", "detail", t.id] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "ดึงข้อมูลไม่สำเร็จ");
@@ -613,5 +621,93 @@ function PointList({ title, items, icon }: { title: string; items?: unknown[]; i
         ))}
       </ul>
     </div>
+  );
+}
+
+/* ---------------------------------------------------- AI web search facts */
+
+const hostOf = (u: string) => {
+  try {
+    return new URL(u).hostname.replace(/^www\./, "");
+  } catch {
+    return u;
+  }
+};
+
+/**
+ * "ให้ AI ค้นข้อมูลร้าน/รีวิวจากเว็บ": the checklist facts Kalodata does not have, each with the page it
+ * came from. Only empty fields are filled; values without a page the search returned are dropped.
+ */
+function WebFactsCard({ t, canRun }: { t: TrendDetail; canRun: boolean }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const w = t.extras.webfacts?.data as WebFacts | undefined;
+  const running = w?.status === "running";
+  const run = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/scraping/trends/${t.id}/web-facts`);
+      toast.success("AI เริ่มค้นข้อมูลแล้ว ใช้เวลาประมาณ 1–3 นาที");
+      await qc.invalidateQueries({ queryKey: ["trends", "detail", t.id] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "เริ่มค้นไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const show = (v: number | boolean) => (v === true ? "มี" : v === false ? "ไม่มี" : formatNumber(v));
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="flex items-center gap-1.5 font-semibold">
+            <Search className="size-4 text-primary" /> ข้อมูลร้าน/รีวิวจากเว็บ
+          </h2>
+          <p className="text-xs text-muted-foreground">AI ค้นหน้าสินค้า/หน้าร้าน แล้วเติมช่องที่ยังว่างในเช็กลิสต์ ทุกค่ามีลิงก์ที่มา</p>
+        </div>
+        {canRun && (
+          <Button size="sm" variant={w ? "outline" : "default"} onClick={() => void run()} disabled={busy || running}>
+            {busy || running ? <Loader2 className="animate-spin" /> : <Sparkles />}
+            {running ? "AI กำลังค้นเว็บ…" : w ? "ค้นใหม่" : "ให้ AI ค้นข้อมูล"}
+          </Button>
+        )}
+      </div>
+      {!w ? (
+        <p className="text-sm text-muted-foreground">ยังไม่ได้ค้น — ใช้ AI ที่ตั้งค่าไว้ (ไม่ใช้เครดิต Kalodata)</p>
+      ) : running ? (
+        <p className="text-sm text-muted-foreground">กำลังค้นหน้าเว็บที่เกี่ยวกับสินค้านี้… หน้านี้จะอัปเดตเองเมื่อเสร็จ</p>
+      ) : (
+        <>
+          {w.status === "failed" && <p className="rounded-lg bg-danger-soft p-3 text-sm text-danger">ค้นไม่สำเร็จ: {w.error}</p>}
+          {w.facts && w.facts.length > 0 ? (
+            <ul className="divide-y divide-border text-sm">
+              {w.facts.map((f) => (
+                <li key={f.field} className="flex items-start justify-between gap-3 py-2">
+                  <span className="min-w-0">
+                    <span className="font-medium">{f.label}</span>
+                    <a href={f.sourceUrl} target="_blank" rel="noreferrer noopener" className="block truncate text-xs text-primary hover:underline">
+                      {hostOf(f.sourceUrl)}
+                      {f.note ? ` · ${f.note}` : ""}
+                    </a>
+                  </span>
+                  <span className="shrink-0 text-right">
+                    <span className="font-semibold tabular-nums">{show(f.value)}</span>
+                    <span className="block text-[11px] text-muted-foreground">{f.applied === false ? "มีข้อมูลอยู่แล้ว ไม่ทับ" : "เติมในเช็กลิสต์แล้ว"}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            w.status === "done" && <p className="text-sm text-muted-foreground">AI ไม่เจอข้อมูลที่มีแหล่งยืนยันได้</p>
+          )}
+          {w.summary && <p className="text-xs text-muted-foreground">{w.summary}</p>}
+          <p className="text-[11px] text-muted-foreground">
+            {w.dropped?.length ? `ตัดทิ้ง ${w.dropped.length} ค่าที่ไม่มีหน้าเว็บยืนยัน · ` : ""}
+            {w.provider ? `ค้นโดย ${w.provider === "minimax" ? "MiniMax" : "Claude"}${w.model ? ` · ${w.model}` : ""} · ` : ""}
+            {w.finishedAt ? formatDateTime(w.finishedAt) : ""} · ตรวจกับหน้าเว็บจริงก่อนตัดสินใจ
+          </p>
+        </>
+      )}
+    </Card>
   );
 }

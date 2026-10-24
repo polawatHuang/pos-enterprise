@@ -1282,6 +1282,20 @@ export interface SelectDetail {
 
 export type KaloExtraKind = "detail" | "analysis" | "comments" | "videos" | "creators";
 
+/** "ให้ AI ค้นข้อมูลร้าน/รีวิวจากเว็บ": each value with the page it was read from. */
+export interface WebFacts {
+  status: "running" | "done" | "failed";
+  facts?: { field: string; label: string; value: number | boolean; sourceUrl: string; sourceTitle: string | null; note: string | null; applied?: boolean }[];
+  dropped?: { field: string | null; value: unknown; reason: string }[];
+  summary?: string | null;
+  searches?: number;
+  provider?: string;
+  model?: string | null;
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
 export interface KaloExtra<T = unknown> {
   data: T;
   credits: number;
@@ -1432,7 +1446,7 @@ export interface TrendDetail extends TrendItem {
   snapshots: { capturedAt: string; price: number | null; soldCount: number | null; rating: number | null; commissionRate: number | null }[];
   selectDetail: SelectDetail | null;
   months: { period: string; revenue: number | null; sales: number | null; growth: number | null; price: number | null; commissionRate: number | null; rank: number | null }[];
-  extras: Partial<Record<KaloExtraKind, KaloExtra>>;
+  extras: Partial<Record<KaloExtraKind | "webfacts", KaloExtra>>;
   extraCost: Record<KaloExtraKind, number>;
   categoryPath: { id: string; name: string; level: number }[];
 }

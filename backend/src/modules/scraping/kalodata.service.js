@@ -609,7 +609,36 @@ async function fetchExtra(orgId, trend, kind, userId) {
   else if (kind === 'creators') data = await kalodata.creatorRank({ product_id: pid, date_range: 'last30Day', page_size: 10 });
   else throw badRequest('ไม่รู้จักชนิดข้อมูล');
   if (kind !== 'detail') await saveExtra(trend.id, kind, data, EXTRA_COST[kind], userId);
-  return { data, fetchedAt: new Date(), cached: false, credits: EXTRA_COST[kind] };
+  const derived = kind === 'comments' ? await fillFromComments(trend.id, data) : null;
+  return { data, fetchedAt: new Date(), cached: false, credits: EXTRA_COST[kind], derived };
+}
+
+/**
+ * The review summary lists the original comments it was built from. When they carry star ratings or
+ * photos/videos, work out the checklist's rating, 4–5 star share and media reviews from them — only
+ * for fields still empty (a sample of comments is weaker evidence than the shop page).
+ */
+async function fillFromComments(trendId, data) {
+  const comments = Array.isArray(data?.original_comments) ? data.original_comments : [];
+  const ratingOf = (c) => num(c?.rating ?? c?.star ?? c?.stars ?? c?.score);
+  const rated = comments.map(ratingOf).filter((r) => r != null && r >= 0 && r <= 5);
+  const hasMedia = (c) =>
+    ['images', 'image_urls', 'imgs', 'videos', 'video_urls'].some((k) => Array.isArray(c?.[k]) && c[k].length) || Boolean(c?.has_image || c?.has_video);
+  const mediaKnown = comments.some((c) => ['images', 'image_urls', 'imgs', 'videos', 'video_urls', 'has_image', 'has_video'].some((k) => k in (c ?? {})));
+  const out = {};
+  if (rated.length >= 5) {
+    out.rating = Math.round((rated.reduce((a, b) => a + b, 0) / rated.length) * 100) / 100;
+    out.positive_review_pct = Math.round((rated.filter((r) => r >= 4).length / rated.length) * 10000) / 100;
+  }
+  if (mediaKnown) out.media_review_count = comments.filter(hasMedia).length;
+  const cols = Object.keys(out);
+  if (!cols.length) return null;
+  const t = await db.one(`SELECT ${cols.join(', ')} FROM trending_products WHERE id = :id`, { id: trendId });
+  const filled = Object.fromEntries(cols.filter((c) => t[c] == null).map((c) => [c, out[c]]));
+  if (!Object.keys(filled).length) return null;
+  await db.query(`UPDATE trending_products SET ${Object.keys(filled).map((c) => `${c} = :${c}`).join(', ')} WHERE id = :id`, { id: trendId, ...filled });
+  await db.tx((conn) => rescore(conn, trendId));
+  return { ...filled, sample: comments.length };
 }
 
 module.exports = {
@@ -626,6 +655,7 @@ module.exports = {
   scheduleMonthly,
   step,
   getExtras,
+  fillFromComments,
   fetchExtra,
   lastFullMonth,
   shiftPeriod,

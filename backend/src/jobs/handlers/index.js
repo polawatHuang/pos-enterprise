@@ -62,6 +62,9 @@ handlers['inventory.alerts'] = () => require('../../modules/inventory/alerts').r
 /** Daily sales summary to LINE OA at each org's set time (default 18:00), once a day. */
 handlers['reports.daily_sales'] = () => require('../../modules/reports/daily-sales').runDue();
 
+/** "ให้ AI ค้นข้อมูลร้าน/รีวิวจากเว็บ" for one trend product: one model call per job. */
+handlers['trend.facts'] = (payload) => require('../../modules/scraping/web-facts').step(payload);
+
 /** Kalodata monthly market pull: one short step per job, re-queued until the run is done. */
 handlers['kalodata.step'] = (payload) => require('../../modules/scraping/kalodata.service').step(payload);
 

@@ -1566,7 +1566,7 @@ CREATE TABLE trend_product_months (
 
 CREATE TABLE trend_product_extras (
   trending_product_id BIGINT UNSIGNED NOT NULL,
-  kind                ENUM('detail','analysis','comments','videos','creators') NOT NULL,
+  kind                ENUM('detail','analysis','comments','videos','creators','webfacts') NOT NULL,
   data                JSON NULL,
   credits             DECIMAL(8,2) NOT NULL DEFAULT 0,
   fetched_by          BIGINT UNSIGNED NULL,
@@ -1824,6 +1824,6 @@ CREATE TABLE leave_requests (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts');
 
 SET FOREIGN_KEY_CHECKS = 1;
