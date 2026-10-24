@@ -49,6 +49,8 @@ import { LineDialog } from "./line-dialog";
 import { ApprovalCancelled, ManagerPinHost, withApproval } from "./manager-approval";
 import { OpenPriceDialog } from "./open-price-dialog";
 import { PosGuide } from "./pos-guide";
+import { openDrawer, PrinterDialog, printOnUsb, printReceipt, usePrinterSettings } from "./printer";
+import { receiptDoc, shiftReportDoc } from "./receipt-doc";
 import { MemberDialog } from "./member-dialog";
 import { METHOD_NAME, PaymentDialog, type PaymentResult } from "./payment-dialog";
 import { Receipt } from "./receipt";
@@ -74,6 +76,7 @@ type Modal =
   | "keys"
   | "openprice"
   | "practice"
+  | "printer"
   | null;
 
 const GUIDE_KEY = "pos.guide.done";
@@ -103,6 +106,7 @@ export function PosView() {
   const categories = useCategories();
   const favorites = useFavorites();
   const { tax } = useTaxSettings();
+  const printer = usePrinterSettings();
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -460,6 +464,13 @@ export function PosView() {
       clearBill();
       setReceipt(order);
       setModal("receipt");
+      // USB printer: the receipt prints by itself and the drawer opens for cash
+      const tookCash = p.payments.some((t) => t.method === "cash");
+      if (printer?.kind && printer.autoPrint) {
+        printOnUsb(receiptDoc(order, settings.data, tax), { openDrawer: tookCash }).catch((err) =>
+          toast.warning(`พิมพ์ใบเสร็จไม่สำเร็จ: ${err instanceof Error ? err.message : err} — กด พิมพ์ใบเสร็จ อีกครั้ง`),
+        );
+      } else if (tookCash) void openDrawer();
       void qc.invalidateQueries({ queryKey: ["pos"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
       void qc.invalidateQueries({ queryKey: ["inventory"] });
@@ -546,7 +557,7 @@ export function PosView() {
         <ShiftReportView report={report} />
       </div>
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <Button variant="outline" onClick={() => window.print()}>
+        <Button variant="outline" onClick={() => void printReceipt(shiftReportDoc(report))}>
           <Printer /> พิมพ์
         </Button>
         <Button onClick={closeModal}>ปิด</Button>
@@ -587,6 +598,7 @@ export function PosView() {
         <ToolButton icon={MonitorSmartphone} label="จอลูกค้า" onClick={() => window.open("/customer-display", "pos-customer-display", "popup,width=1024,height=700")} />
         <ToolButton icon={HelpCircle} label="วิธีใช้" onClick={() => setGuide(true)} />
         <ToolButton icon={Keyboard} label="คีย์ลัด" k="F1" onClick={() => setModal("keys")} className="hidden lg:inline-flex" />
+        <ToolButton icon={Printer} label="เครื่องพิมพ์" onClick={() => setModal("printer")} className="hidden lg:inline-flex" />
         {!training && can("pos:manage") && settings.data && <ToolButton icon={Settings2} label="ตั้งค่า" onClick={() => setModal("settings")} />}
         {training ? (
           <Button size="sm" className="h-11 sm:h-8" onClick={() => (clearBill(), setTraining(false))}>
@@ -957,6 +969,7 @@ export function PosView() {
         )}
         {modal === "held" && <HeldDialog onRecall={(b) => void recall(b)} />}
         {modal === "keys" && <ShortcutsDialog />}
+        {modal === "printer" && <PrinterDialog />}
         {modal === "openprice" && <OpenPriceDialog key={openItem?.id ?? 0} item={openItem} onAdd={addOpen} />}
         {modal === "practice" && practice && (
           <DialogContent title="ฝึกขายสำเร็จ" description="ของจริงจะขึ้นใบเสร็จตรงนี้ — บิลนี้ไม่ถูกบันทึก" className="max-w-sm">
@@ -1010,13 +1023,16 @@ export function PosView() {
               <Receipt order={receipt} settings={settings.data} />
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={() => window.print()}>
+              <Button variant="outline" onClick={() => void printReceipt(receiptDoc(receipt, settings.data, tax))}>
                 <Printer /> พิมพ์ใบเสร็จ
               </Button>
               <Button onClick={closeModal} autoFocus>
                 ขายบิลถัดไป
               </Button>
             </div>
+            <button type="button" onClick={() => setModal("printer")} className="mt-3 min-h-10 w-full text-center text-xs text-muted-foreground hover:underline">
+              เครื่องพิมพ์: {printer?.kind ? printer.name : "ใช้หน้าพิมพ์ของเบราว์เซอร์"} · ตั้งค่า
+            </button>
           </DialogContent>
         )}
       </Dialog>

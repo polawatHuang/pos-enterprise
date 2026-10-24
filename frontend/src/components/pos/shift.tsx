@@ -7,12 +7,14 @@ import { GraduationCap, Loader2, Store, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Branch, CashMovement, CashMoveType, Shift, ShiftReport } from "@/lib/types";
-import { cn, formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
+import { cn, formatDateTime, formatMoney } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Card, Input, Label, NativeSelect } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
-import { METHOD_LABEL } from "./receipt";
+import { METHOD_LABEL, ReceiptBlocks } from "./receipt";
+import { shiftReportDoc } from "./receipt-doc";
+import { openDrawer } from "./printer";
 import { POS_SETTINGS_KEY } from "./settings-dialog";
 
 export const SHIFT_KEY = ["pos", "shift"] as const;
@@ -227,6 +229,7 @@ export function CashDialog({ onDone }: { onDone: () => void }) {
       if (!type) return;
       await api.post("/pos/shift/cash", { type, amount: Number(amount), reason: reason || CASH_LABEL[type] });
       toast.success(`บันทึก${CASH_LABEL[type]} ${formatMoney(Number(amount))} แล้ว`);
+      void openDrawer();
       await qc.invalidateQueries({ queryKey: SHIFT_KEY });
       onDone();
     } catch (err) {
@@ -303,62 +306,9 @@ export function CashDialog({ onDone }: { onDone: () => void }) {
   );
 }
 
-/** 80mm X/Z report; printed with the same `.print-receipt` stylesheet as receipts. */
+/** 80mm X/Z report; printed with the same `.print-receipt` stylesheet as receipts (or on the USB printer). */
 export function ShiftReportView({ report }: { report: ShiftReport }) {
-  const c = report.stats.cash;
-  return (
-    <div className="print-receipt mx-auto w-full max-w-[300px] bg-white p-4 font-mono text-[12px] leading-snug text-black">
-      <p className="text-center text-[14px] font-bold">{report.kind === "Z" ? "สรุปปิดกะ" : "สรุประหว่างกะ"}</p>
-      <p className="text-center">{report.branchName}</p>
-      <p>พนักงาน {report.cashierName}</p>
-      <p>เปิด {new Date(report.openedAt).toLocaleString("th-TH")}</p>
-      {report.closedAt && <p>ปิด {new Date(report.closedAt).toLocaleString("th-TH")}</p>}
-      <Hr />
-      <R label="จำนวนบิล" value={String(report.stats.orders)} />
-      <R label="ยอดขายสุทธิ" value={formatMoney(report.stats.sales)} />
-      <R label="ส่วนลดท้ายบิล" value={formatMoney(report.discount)} />
-      {report.promoDiscount > 0 && <R label="ส่วนลดโปรโมชั่น" value={formatMoney(report.promoDiscount)} />}
-      <R label="VAT" value={formatMoney(report.vat)} />
-      {report.stats.voided > 0 && <R label="บิลยกเลิก" value={String(report.stats.voided)} />}
-      {report.pointsUsed > 0 && <R label="แต้มที่ใช้" value={String(report.pointsUsed)} />}
-      <Hr />
-      {Object.entries(report.stats.byMethod).map(([m, v]) => (
-        <R key={m} label={METHOD_LABEL[m] ?? m} value={formatMoney(v)} />
-      ))}
-      <Hr />
-      <R label="เงินทอนตั้งต้น" value={formatMoney(report.openingCash)} />
-      {c.pay_in > 0 && <R label="นำเงินเข้า" value={formatMoney(c.pay_in)} />}
-      {c.pay_out > 0 && <R label="จ่ายออก" value={formatMoney(-c.pay_out)} />}
-      {c.pickup > 0 && <R label="นำเข้าตู้เซฟ" value={formatMoney(-c.pickup)} />}
-      <R label="เงินสดที่ควรมี" value={formatMoney(report.expectedCash)} bold />
-      {report.closingCash !== null && (
-        <>
-          <R label="นับได้จริง" value={formatMoney(report.closingCash)} />
-          <R label={(report.difference ?? 0) >= 0 ? "เกิน" : "ขาด"} value={formatMoney(Math.abs(report.difference ?? 0))} bold />
-          {report.note && <p>สาเหตุ: {report.note}</p>}
-        </>
-      )}
-      {report.topItems.length > 0 && (
-        <>
-          <Hr />
-          <p className="font-bold">ขายดีในกะ</p>
-          {report.topItems.slice(0, 5).map((t) => (
-            <R key={t.name} label={`${t.name} x${formatNumber(t.quantity)}`} value={formatMoney(t.amount)} />
-          ))}
-        </>
-      )}
-    </div>
-  );
-}
-
-const Hr = () => <div className="my-2 border-t border-dashed border-black" />;
-function R({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
-  return (
-    <p className={cn("flex justify-between gap-2", bold && "font-bold")}>
-      <span className="truncate">{label}</span>
-      <span className="shrink-0">{value.replace("฿", "")}</span>
-    </p>
-  );
+  return <ReceiptBlocks blocks={shiftReportDoc(report, METHOD_LABEL)} />;
 }
 
 function Info({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
