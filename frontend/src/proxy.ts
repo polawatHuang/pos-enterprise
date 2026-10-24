@@ -8,7 +8,8 @@ import { NextResponse, type NextRequest } from "next/server";
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const hasSession = request.cookies.has("pe_session");
-  const isAuthPage = pathname === "/login";
+  // /login and the customer's own receipt page (opened from the QR on a receipt) need no session
+  const isAuthPage = pathname === "/login" || pathname.startsWith("/r/");
 
   if (!hasSession && !isAuthPage) {
     const url = new URL("/login", request.url);

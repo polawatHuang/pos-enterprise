@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, Loader2, Printer, Search, Undo2 } from "lucide-react";
+import { Ban, FileText, Loader2, Printer, Search, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { PosOrder, PosOrderRow } from "@/lib/types";
 import { formatDateTime, formatMoney } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
-import { Badge, Input } from "@/components/ui/primitives";
+import { Badge, Input, Label, Textarea } from "@/components/ui/primitives";
+import { useTaxSettings } from "@/lib/tax";
 import { DialogContent } from "@/components/ui/overlays";
 import { METHOD_LABEL } from "./receipt";
 import { ReturnView } from "./return-view";
@@ -36,6 +37,25 @@ export function BillsDialog({ onReprint }: { onReprint: (o: PosOrder) => void })
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [returning, setReturning] = useState<PosOrder | null>(null);
+  const { tax } = useTaxSettings();
+  const [taxFor, setTaxFor] = useState<number | null>(null);
+  const [buyer, setBuyer] = useState({ name: "", taxId: "", branchNo: "00000", address: "" });
+  const [taxBusy, setTaxBusy] = useState(false);
+
+  /** Issue the full tax invoice: from what the customer sent (pending) or typed here. */
+  const issueTax = async (id: number, typed = false) => {
+    setTaxBusy(true);
+    try {
+      const r = await api.post<{ docNo: string }>(`/pos/orders/${id}/tax-invoice`, typed ? buyer : {});
+      toast.success(`ออกใบกำกับภาษีเลขที่ ${r.docNo} แล้ว`);
+      setTaxFor(null);
+      refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "ออกใบกำกับภาษีไม่สำเร็จ");
+    } finally {
+      setTaxBusy(false);
+    }
+  };
 
   const reprint = async (id: number) => onReprint(await api.get<PosOrder>(`/pos/orders/${id}`));
   const refresh = () => {
@@ -120,12 +140,51 @@ export function BillsDialog({ onReprint }: { onReprint: (o: PosOrder) => void })
                     <Undo2 /> {b.status === "completed" ? "คืนสินค้า" : "ประวัติการคืน"}
                   </Button>
                 )}
+                {tax.vatRegistered && b.status === "completed" && b.refundedAmount === 0 && b.taxRequest !== "issued" && (
+                  <Button
+                    variant={b.taxRequest === "pending" ? "default" : "outline"}
+                    size="sm"
+                    disabled={taxBusy}
+                    onClick={() => (b.taxRequest === "pending" ? void issueTax(b.id) : setTaxFor(taxFor === b.id ? null : b.id))}
+                  >
+                    <FileText /> {b.taxRequest === "pending" ? "ออกใบกำกับ (ลูกค้าขอแล้ว)" : "ใบกำกับภาษีเต็มรูป"}
+                  </Button>
+                )}
+                {b.taxRequest === "issued" && <Badge tone="success">ออกใบกำกับแล้ว</Badge>}
                 {b.status === "completed" && b.refundedAmount === 0 && (
                   <Button variant="ghost" size="sm" className="text-danger" onClick={() => setVoiding(voiding === b.id ? null : b.id)}>
                     <Ban /> ยกเลิกบิล
                   </Button>
                 )}
               </div>
+              {taxFor === b.id && (
+                <form
+                  className="mt-2 grid gap-2 rounded-xl border border-border p-3"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void issueTax(b.id, true);
+                  }}
+                >
+                  <p className="text-xs text-muted-foreground">กรอกข้อมูลผู้ซื้อ (หรือให้ลูกค้าสแกน QR ท้ายใบเสร็จแล้วกรอกเอง)</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label htmlFor={`tb-name-${b.id}`}>ชื่อ</Label>
+                      <Input id={`tb-name-${b.id}`} value={buyer.name} onChange={(e) => setBuyer({ ...buyer, name: e.target.value })} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor={`tb-tax-${b.id}`}>เลขผู้เสียภาษี 13 หลัก</Label>
+                      <Input id={`tb-tax-${b.id}`} inputMode="numeric" value={buyer.taxId} onChange={(e) => setBuyer({ ...buyer, taxId: e.target.value.replace(/\D/g, "").slice(0, 13) })} />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor={`tb-addr-${b.id}`}>ที่อยู่</Label>
+                    <Textarea id={`tb-addr-${b.id}`} rows={2} value={buyer.address} onChange={(e) => setBuyer({ ...buyer, address: e.target.value })} />
+                  </div>
+                  <Button type="submit" size="sm" className="h-10 w-fit" disabled={taxBusy || !buyer.name.trim() || buyer.taxId.length !== 13 || !buyer.address.trim()}>
+                    {taxBusy && <Loader2 className="animate-spin" />} ออกใบกำกับภาษี
+                  </Button>
+                </form>
+              )}
               {voiding === b.id && (
                 <div className="mt-2 flex gap-2">
                   <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="เหตุผลที่ยกเลิก" className="h-9" autoFocus />
