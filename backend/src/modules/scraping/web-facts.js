@@ -145,47 +145,108 @@ async function apply(trendId, kept) {
   await db.tx((conn) => rescore(conn, trendId));
 }
 
-/** Job handler: one model call; continue on pause_turn, finish on submit_facts. */
-async function step(payload) {
-  const { trendId } = payload;
+const FACTS_SCHEMA = SUBMIT_TOOL.input_schema;
+const SUBMIT_NOW = 'หยุดค้นได้แล้ว ส่งผลจากหน้าเว็บที่ค้นเจอแล้วด้วย submit_facts ตอนนี้ ข้อที่ไม่เจอให้ข้าม (summary เป็นภาษาไทย)';
+
+const cleanText = (res) =>
+  ai
+    .textOf(res)
+    .replace(/<think>[\s\S]*?<\/think>/g, '')
+    .trim();
+
+/** The model stopped without submit_facts: ask again with the tool forced; failing that, extract from its notes. */
+async function forceSubmit(payload) {
   try {
     const res = await ai.createMessage({
       system: SYSTEM,
       messages: payload.messages,
+      // the history holds web_search calls, so the tool stays declared; the choice forces submit_facts
       tools: [webSearchTool(), SUBMIT_TOOL],
+      toolChoice: { type: 'tool', name: 'submit_facts' },
       maxTokens: 4000,
+      timeoutMs: SEARCH_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+    const submit = (res.content ?? []).find((b) => b.type === 'tool_use' && b.name === 'submit_facts');
+    if (submit) return { input: submit.input, model: res.model };
+  } catch {
+    /* some providers refuse a forced tool after server-side search: extract from the notes below */
+  }
+  const sources = payload.hits.map((h) => `- ${h.title ?? ''} ${h.url}`).join('\n');
+  const { data, model } = await ai.extractStructured({
+    system: 'แปลงบันทึกการค้นเว็บให้เป็นข้อมูลตาม schema ใช้เฉพาะค่าที่บันทึกบอกว่าเห็นบนหน้าเว็บ ห้ามเดา sourceUrl ต้องมาจากรายการแหล่งที่ค้นเจอเท่านั้น summary เป็นภาษาไทย',
+    schema: FACTS_SCHEMA,
+    toolName: 'submit_facts',
+    toolDescription: SUBMIT_TOOL.description,
+    maxTokens: 3000,
+    content: [{ type: 'text', text: `บันทึกการค้น:\n${payload.transcript || '-'}\n\nแหล่งที่ค้นเจอ:\n${sources || '-'}` }],
+  });
+  return { input: data, model };
+}
+
+/** Thai summary written by the system when the model gave none (its own notes are not shown). */
+function systemSummary({ searches, hits, kept }) {
+  if (kept.length) return null;
+  if (!searches) return 'AI ไม่ได้ค้นเว็บ — ผู้ให้บริการ AI อาจยังไม่เปิดการค้นเว็บสำหรับ key นี้';
+  if (!hits.length) return `ค้นเว็บ ${searches} ครั้ง แต่ผู้ให้บริการไม่ส่งรายการหน้าเว็บกลับมา จึงยืนยันแหล่งที่มาไม่ได้`;
+  return `ค้นเว็บ ${searches} ครั้ง พบ ${new Set(hits.map((h) => normUrl(h.url))).size} หน้า แต่ไม่เจอตัวเลขที่หน้าเว็บแสดงไว้ชัดเจน`;
+}
+
+async function finish(trendId, { input, model }, { hits, searches }) {
+  const { kept, dropped } = verify(input?.facts, hits);
+  await apply(trendId, kept);
+  const summary = typeof input?.summary === 'string' && input.summary.trim() ? input.summary.trim().slice(0, 500) : systemSummary({ searches, hits, kept });
+  await saveState(trendId, {
+    status: 'done',
+    facts: kept,
+    dropped,
+    summary,
+    searches,
+    sources: new Set(hits.map((h) => normUrl(h.url))).size,
+    provider: ai.providerId(),
+    model: model ?? null,
+    finishedAt: new Date().toISOString(),
+  });
+  return { kept: kept.length, dropped: dropped.length };
+}
+
+/**
+ * Job handler. `research`: one model call with web search; continue on pause_turn, finish on
+ * submit_facts. A turn that ends without submit_facts goes to `submit`, which forces the tool.
+ */
+async function step(payload) {
+  const { trendId } = payload;
+  try {
+    if (payload.step === 'submit') return await finish(trendId, await forceSubmit(payload), payload);
+    const res = await ai.createMessage({
+      system: SYSTEM,
+      messages: payload.messages,
+      tools: [webSearchTool(), SUBMIT_TOOL],
+      maxTokens: 8000,
       timeoutMs: SEARCH_TIMEOUT_MS,
       maxRetries: 0, // a retry would search (and bill) again
     });
     const hits = [...payload.hits, ...searchHits(res.content)];
     const searches = payload.searches + (res.content ?? []).filter((b) => b?.type === 'server_tool_use').length;
     const submit = (res.content ?? []).find((b) => b.type === 'tool_use' && b.name === 'submit_facts');
-    if (!submit && res.stop_reason === 'pause_turn' && payload.continuations < MAX_CONTINUATIONS) {
-      await enqueue(
-        'trend.facts',
-        { ...payload, messages: [...payload.messages, { role: 'assistant', content: res.content }], hits, searches, continuations: payload.continuations + 1 },
-        { maxAttempts: 1 },
-      );
-      return { continued: true };
-    }
-    const { kept, dropped } = verify(submit?.input?.facts, hits);
-    await apply(trendId, kept);
-    const text = ai
-      .textOf(res)
-      .replace(/<think>[\s\S]*?<\/think>/g, '')
-      .trim();
-    await saveState(trendId, {
-      status: 'done',
-      facts: kept,
-      dropped,
-      summary: submit?.input?.summary ?? (text.slice(0, 500) || null),
-      searches,
-      sources: hits.length,
-      provider: ai.providerId(),
-      model: res.model ?? null,
-      finishedAt: new Date().toISOString(),
-    });
-    return { kept: kept.length, dropped: dropped.length };
+    if (submit) return await finish(trendId, { input: submit.input, model: res.model }, { hits, searches });
+    const messages = [...payload.messages, { role: 'assistant', content: res.content }];
+    const paused = res.stop_reason === 'pause_turn' && payload.continuations < MAX_CONTINUATIONS;
+    await enqueue(
+      'trend.facts',
+      paused
+        ? { ...payload, messages, hits, searches, continuations: payload.continuations + 1 }
+        : {
+            ...payload,
+            step: 'submit',
+            messages: [...messages, { role: 'user', content: SUBMIT_NOW }],
+            hits,
+            searches,
+            transcript: [payload.transcript, cleanText(res)].filter(Boolean).join('\n').slice(-20_000),
+          },
+      { maxAttempts: 1 },
+    );
+    return { continued: true };
   } catch (err) {
     const msg = String(err?.message ?? err);
     const reason =

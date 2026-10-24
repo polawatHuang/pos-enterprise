@@ -702,6 +702,7 @@ function WebFactsCard({ t, canRun }: { t: TrendDetail; canRun: boolean }) {
           )}
           {w.summary && <p className="text-xs text-muted-foreground">{w.summary}</p>}
           <p className="text-[11px] text-muted-foreground">
+            {w.searches ? `ค้น ${w.searches} ครั้ง · ${w.sources ?? 0} หน้า · ` : ""}
             {w.dropped?.length ? `ตัดทิ้ง ${w.dropped.length} ค่าที่ไม่มีหน้าเว็บยืนยัน · ` : ""}
             {w.provider ? `ค้นโดย ${w.provider === "minimax" ? "MiniMax" : "Claude"}${w.model ? ` · ${w.model}` : ""} · ` : ""}
             {w.finishedAt ? formatDateTime(w.finishedAt) : ""} · ตรวจกับหน้าเว็บจริงก่อนตัดสินใจ
