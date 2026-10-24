@@ -164,7 +164,7 @@ function productDetail(b) {
   };
 }
 
-const state = { balance: 315, calls: [] };
+const state = { balance: 315, calls: [], commentStatus: null };
 
 function respond(path, body = {}, method = 'POST') {
   state.calls.push({ path, body, method });
@@ -209,6 +209,10 @@ function respond(path, body = {}, method = 'POST') {
         { key: 'เหมาะกับ', value: 'ผิวมัน ผิวผสม' },
       ],
     });
+  if (path.endsWith('/tiktok/product/comment/insight') && body.country_code !== String(body.country_code ?? '').toLowerCase()) {
+    return { success: false, message: 'country_code must be lower case' };
+  }
+  if (path.endsWith('/tiktok/product/comment/insight') && state.commentStatus) return { status: state.commentStatus, text: '<html>554 insight not ready</html>' };
   if (path.endsWith('/tiktok/product/comment/insight'))
     return ok({
       product_id: body.product_id,
@@ -264,7 +268,10 @@ function installFetch(base = 'https://kalo.test/openapi/v1') {
     if (!String(url).startsWith(base)) return real(url, opts);
     const body = opts.body ? JSON.parse(opts.body) : {};
     const json = respond(String(url).slice(base.length), body, opts.method ?? 'GET');
-    return { ok: json.success !== false, status: json.success === false ? 400 : 200, json: async () => json };
+    // a raw (non-JSON) failure, e.g. Kalodata's HTTP 554
+    if (json.status) return { ok: false, status: json.status, text: async () => json.text, json: async () => JSON.parse(json.text) };
+    const status = json.success === false ? 400 : 200;
+    return { ok: status === 200, status, text: async () => JSON.stringify(json), json: async () => json };
   };
   return () => {
     global.fetch = real;
