@@ -22,19 +22,22 @@ const { upsertItems, rescore } = require('./trends.service');
  */
 
 const SETTINGS_KEY = 'trends.kalodata';
-const DEFAULTS = { enabled: false, dayOfMonth: 2, lastPeriod: null };
+// scope 'category' pulls one category (≈4–6 credits); 'all' the whole market (≈30)
+const DEFAULTS = { enabled: false, dayOfMonth: 2, lastPeriod: null, scope: 'category', categoryId: null, categoryName: null, categoryLevel: null };
 const PLATFORM = 'kalodata';
 const TOP_L2 = 60; // level-2 categories that get their own product list and level-3 breakdown
 const PRODUCTS_PER_L2 = 50;
 const DETAIL_PRODUCTS = 100;
+const DETAIL_PRODUCTS_SCOPED = 30;
+const SCOPE_L2_CHILDREN = 12; // a level-1 pick: product lists for its biggest level-2 children
 /** Category rank/detail accept only last7Day/last30Day/last90Day/last180Day/last365Day. */
 const CATEGORY_RANGE = 'last30Day';
-const MIN_CREDITS = 40;
+const MIN_CREDITS = 40; // whole market; a one-category pull needs about twice its estimate
 const STEP_BUDGET_MS = 25_000;
 const TASK_RETRIES = 2;
 const EST_CREDITS = 30;
 /** Steps that, when they keep failing, fail the whole pull (instead of being skipped with a warning). */
-const CRITICAL = new Set(['balance', 'cat1', 'plan2', 'planDetails']);
+const CRITICAL = new Set(['balance', 'cat1', 'plan2', 'planDetails', 'scope']);
 
 const parse = (v) => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v);
 const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -54,6 +57,13 @@ async function saveSettings(orgId, patch) {
     { orgId, k: SETTINGS_KEY, v: JSON.stringify(next) },
   );
   return next;
+}
+
+/** Rough credits for one pull with these settings (shown before the user pulls). */
+function estimateCredits(s) {
+  if (s.scope === 'all') return EST_CREDITS;
+  if (!s.categoryId) return null;
+  return s.categoryLevel === 1 ? 6 : 4;
 }
 
 /** Bangkok calendar: the month that just ended is the one to pull. */
@@ -99,9 +109,21 @@ async function startMonthly(orgId, { period = null, userId = null } = {}) {
   const p = period ?? lastFullMonth();
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(p)) throw badRequest('เดือนต้องเป็น YYYY-MM');
   if (p > lastFullMonth()) throw badRequest('ดึงได้เฉพาะเดือนที่จบแล้ว');
+  const s = await getSettings(orgId);
+  if (s.scope !== 'all' && !s.categoryId) throw badRequest('เลือกหมวดหมู่ที่จะดึงก่อน (หรือเลือก "ทั้งตลาด")');
   if (await openRun(orgId)) throw conflict('กำลังดึงข้อมูล Kalodata อยู่ รอให้เสร็จก่อน');
   const sourceId = await ensureSource(orgId);
-  const state = { period: p, tasks: [{ t: 'balance' }], credits: 0, counts: { categories: 0, products: 0, details: 0 }, warnings: [] };
+  const scope = s.scope === 'all' ? null : { id: s.categoryId, name: s.categoryName, level: s.categoryLevel };
+  const state = {
+    period: p,
+    scope,
+    startedAt: new Date().toISOString(),
+    minCredits: scope ? estimateCredits(s) * 2 : MIN_CREDITS,
+    tasks: [{ t: 'balance' }],
+    credits: 0,
+    counts: { categories: 0, products: 0, details: 0 },
+    warnings: [],
+  };
   const r = await db.query(
     "INSERT INTO scrape_runs (source_id, status, stage, triggered_by, state) VALUES (:sourceId, 'running', 'balance', :userId, :state)",
     { sourceId, userId, state: JSON.stringify(state) },
@@ -120,6 +142,7 @@ async function scheduleMonthly(now = new Date()) {
   for (const row of rows) {
     const s = { ...DEFAULTS, ...(parse(row.value) ?? {}) };
     if (!s.enabled || day < s.dayOfMonth || s.lastPeriod === period) continue;
+    if (s.scope !== 'all' && !s.categoryId) continue; // nothing chosen yet
     if (await openRun(row.org_id)) continue;
     // a failed attempt waits a day before the next try, so a bad key or empty wallet does not loop
     const failed = await db.one(
@@ -181,7 +204,7 @@ async function prevSales(trendId, period, sales, growth) {
 }
 
 /** Store a product list (rank rows) as trend items, with their Kalodata fields and month history. */
-async function saveProducts(orgId, sourceId, period, rows, { l2 = null, rankBase = 0 } = {}) {
+async function saveProducts(orgId, sourceId, period, rows, { l2 = null, leaf = null, l1 = null, ranked = true } = {}) {
   const list = (rows ?? []).filter((r) => r?.product_id && r?.product_name);
   if (!list.length) return [];
   const existing = new Map(
@@ -207,8 +230,9 @@ async function saveProducts(orgId, sourceId, period, rows, { l2 = null, rankBase
       monthlySold: sales,
       prevMonthlySold: await prevSales(existing.get(String(r.product_id)), period, sales, num(r.revenue_growth_rate)),
       commissionRate: num(r.commission_rate),
-      category: l2?.name ?? null,
-      categoryRank: l2 ? rankBase + i + 1 : null,
+      // a level-3 pick ranks and benchmarks products within that level-3 category
+      category: leaf?.name ?? l2?.name ?? null,
+      categoryRank: ranked && (l2 || leaf) ? i + 1 : null,
       raw: { kalodata: r, period },
     });
   }
@@ -223,9 +247,10 @@ async function saveProducts(orgId, sourceId, period, rows, { l2 = null, rankBase
     if (!id) continue;
     const split = { video: num(r.video_revenue), live: num(r.live_revenue), showcase: num(r.showcase_revenue) };
     await db.query(
-      `UPDATE trending_products SET kalo_category_id = COALESCE(:cat, kalo_category_id), revenue = :revenue, revenue_growth_rate = :growth,
+      `UPDATE trending_products SET kalo_category_id = COALESCE(:cat, kalo_category_id), kalo_leaf_id = COALESCE(:leaf, kalo_leaf_id),
+              revenue = :revenue, revenue_growth_rate = :growth,
               launch_date = COALESCE(:launch, launch_date), channel_split = :split WHERE id = :id`,
-      { id, cat: l2?.id ?? null, revenue: num(r.revenue), growth: num(r.revenue_growth_rate), launch: /^\d{4}-\d{2}-\d{2}/.test(r.launch_date ?? '') ? r.launch_date.slice(0, 10) : null, split: JSON.stringify(split) },
+      { id, cat: l2?.id ?? leaf?.parentId ?? l1 ?? null, leaf: leaf?.id ?? null, revenue: num(r.revenue), growth: num(r.revenue_growth_rate), launch: /^\d{4}-\d{2}-\d{2}/.test(r.launch_date ?? '') ? r.launch_date.slice(0, 10) : null, split: JSON.stringify(split) },
     );
     await db.query(
       `INSERT INTO trend_product_months (trending_product_id, period, revenue, sales, growth_rate, unit_price, commission_rate, live_revenue, video_revenue, showcase_revenue, rank_in_category)
@@ -244,7 +269,7 @@ async function saveProducts(orgId, sourceId, period, rows, { l2 = null, rankBase
         live: split.live,
         video: split.video,
         showcase: split.showcase,
-        rank: l2 ? rankBase + i + 1 : null,
+        rank: ranked && (l2 || leaf) ? i + 1 : null,
       },
     );
   }
@@ -257,7 +282,7 @@ async function applyDetail(orgId, trendId, period, d, credits = 0) {
   const l2 = d.sec_cate_id ? await db.one('SELECT category_id, name FROM trend_categories WHERE org_id = :orgId AND category_id = :id ORDER BY period DESC LIMIT 1', { orgId, id: String(d.sec_cate_id) }) : null;
   await db.query(
     `UPDATE trending_products SET creator_count = :creators, video_count = :videos, live_count = :lives, review_count = COALESCE(:reviews, review_count),
-            kalo_leaf_id = COALESCE(:leaf, kalo_leaf_id), kalo_category_id = COALESCE(kalo_category_id, :l2),
+            kalo_leaf_id = COALESCE(:leaf, kalo_leaf_id), kalo_category_id = COALESCE(:l2, kalo_category_id),
             category = COALESCE(category, :l2name), launch_date = COALESCE(:launch, launch_date),
             channel_split = JSON_SET(COALESCE(channel_split, JSON_OBJECT()), '$.video', :video, '$.live', :live, '$.mall', :mall),
             image_url = COALESCE(image_url, :image) WHERE id = :id`,
@@ -298,10 +323,11 @@ async function runTask(task, st, ctx) {
     case 'balance': {
       const b = await kalodata.balance();
       st.balanceStart = num(b?.totalRemain);
-      if (st.balanceStart != null && st.balanceStart < MIN_CREDITS) {
-        throw Object.assign(new Error(`เครดิต Kalodata เหลือ ${st.balanceStart} ไม่พอ (ต้องมีอย่างน้อย ${MIN_CREDITS}) — เติมเครดิตแล้วกดดึงใหม่`), { fatal: true });
+      const min = st.minCredits ?? MIN_CREDITS;
+      if (st.balanceStart != null && st.balanceStart < min) {
+        throw Object.assign(new Error(`เครดิต Kalodata เหลือ ${st.balanceStart} ไม่พอ (ต้องมีอย่างน้อย ${min}) — เติมเครดิตแล้วกดดึงใหม่`), { fatal: true });
       }
-      st.tasks.push({ t: 'cat1' });
+      st.tasks.push(st.scope ? { t: 'scope' } : { t: 'cat1' });
       return 'categories';
     }
     case 'cat1': {
@@ -362,8 +388,47 @@ async function runTask(task, st, ctx) {
       }
       return 'categories';
     }
+    case 'scope': {
+      // one category: itself, its children, its products (+ risers/new/high-commission inside it)
+      const { id, level, name } = st.scope;
+      const self = await kalodata.categoryRank({ date_range: CATEGORY_RANGE, category_level: level, category_ids: [id] });
+      st.credits += rankCost(self);
+      st.counts.categories += await upsertCategories(
+        orgId,
+        P,
+        level,
+        (self ?? []).filter((c) => String(c.category_id) === String(id)),
+      );
+      let children = [];
+      if (level < 3) {
+        children = (await kalodata.categoryRank({ date_range: CATEGORY_RANGE, category_level: level + 1, category_ids: [id] })) ?? [];
+        st.credits += rankCost(children);
+        st.counts.categories += await upsertCategories(orgId, P, level + 1, children, String(id));
+      }
+      st.tasks.push({ t: 'catDetail', id: String(id) });
+      if (level === 1) {
+        const top = [...children].sort((a, b) => (num(b.revenue) ?? 0) - (num(a.revenue) ?? 0)).slice(0, SCOPE_L2_CHILDREN);
+        for (const c of top) st.tasks.push({ t: 'cat3', id: String(c.category_id) });
+        for (const c of top) st.tasks.push({ t: 'products', id: String(c.category_id), name: c.category_name });
+      } else if (level === 2) {
+        st.tasks.push({ t: 'products', id: String(id), name, size: 100 });
+      } else {
+        const parent = await db.one('SELECT parent_id FROM trend_categories WHERE org_id = :orgId AND category_id = :id AND parent_id IS NOT NULL LIMIT 1', { orgId, id: String(id) });
+        st.tasks.push({ t: 'productsLeaf', id: String(id), name, parentId: parent?.parent_id ?? null });
+      }
+      for (const kind of ['rising', 'new', 'commission']) st.tasks.push({ t: 'special', kind });
+      st.tasks.push({ t: 'planDetails' });
+      return 'categories';
+    }
+    case 'productsLeaf': {
+      const rows = await kalodata.productRank({ date_range: P, category_ids: [task.id], page_size: 100 });
+      st.credits += rankCost(rows);
+      const ids = await saveProducts(orgId, sourceId, P, rows, { leaf: { id: task.id, name: task.name, parentId: task.parentId } });
+      st.counts.products += ids.length;
+      return 'products';
+    }
     case 'products': {
-      const rows = await kalodata.productRank({ date_range: P, category_ids: [task.id], page_size: PRODUCTS_PER_L2 });
+      const rows = await kalodata.productRank({ date_range: P, category_ids: [task.id], page_size: task.size ?? PRODUCTS_PER_L2 });
       st.credits += rankCost(rows);
       const ids = await saveProducts(orgId, sourceId, P, rows, { l2: { id: task.id, name: task.name } });
       st.counts.products += ids.length;
@@ -375,9 +440,12 @@ async function runTask(task, st, ctx) {
         new: { launch_date: '<30' },
         commission: { is_affiliate: 1, commission_rate: '>=15' },
       }[task.kind];
-      const rows = await kalodata.productRank({ date_range: P, page_size: 100, ...body });
+      const sc = st.scope;
+      const rows = await kalodata.productRank({ date_range: P, page_size: sc ? 50 : 100, ...(sc ? { category_ids: [sc.id] } : {}), ...body });
       st.credits += rankCost(rows);
-      const ids = await saveProducts(orgId, sourceId, P, rows);
+      // inside a level-2/3 pick the category is known; a level-1 pick files them under it until the detail says which child
+      const where = !sc ? {} : sc.level === 1 ? { l1: sc.id } : sc.level === 2 ? { l2: { id: sc.id, name: sc.name } } : { leaf: { id: sc.id, name: sc.name, parentId: (await db.one('SELECT parent_id FROM trend_categories WHERE org_id = :orgId AND category_id = :id AND parent_id IS NOT NULL LIMIT 1', { orgId, id: sc.id }))?.parent_id ?? null } };
+      const ids = await saveProducts(orgId, sourceId, P, rows, { ...where, ranked: false });
       st.counts.products += ids.length;
       return 'products';
     }
@@ -386,10 +454,15 @@ async function runTask(task, st, ctx) {
       const rows = await db.query(
         `SELECT t.id, t.external_id FROM trending_products t
            LEFT JOIN trend_product_extras x ON x.trending_product_id = t.id AND x.kind = 'detail' AND x.fetched_at > UTC_TIMESTAMP() - INTERVAL 20 DAY
-          WHERE t.org_id = :orgId AND t.platform = 'kalodata' AND t.last_seen_at > UTC_TIMESTAMP() - INTERVAL 1 DAY AND x.trending_product_id IS NULL
+          WHERE t.org_id = :orgId AND t.platform = 'kalodata' AND t.last_seen_at >= :since AND x.trending_product_id IS NULL
             AND t.status <> 'ignored'
           ORDER BY t.kalo_category_id IS NULL DESC, t.pick_score DESC, t.revenue DESC LIMIT :n`,
-        { orgId, n: DETAIL_PRODUCTS },
+        {
+          orgId,
+          n: st.scope ? DETAIL_PRODUCTS_SCOPED : DETAIL_PRODUCTS,
+          // products touched by this pull (state from before this field: the last day)
+          since: st.startedAt ? new Date(new Date(st.startedAt).getTime() - 60_000) : new Date(Date.now() - 86_400_000),
+        },
       );
       for (const r of rows) st.tasks.push({ t: 'detail', id: r.id, pid: r.external_id });
       st.tasks.push({ t: 'finish' });
@@ -482,6 +555,20 @@ async function step({ runId }) {
   return { done: true, credits: st.credits };
 }
 
+/** The category list for the picker: level 1 + level 2 under each (≈ 0.1 × (1 + level-1 count) credits). */
+async function loadCategoryList(orgId) {
+  const period = (await getSettings(orgId)).lastPeriod ?? lastFullMonth();
+  const l1 = (await kalodata.categoryRank({ date_range: CATEGORY_RANGE, category_level: 1 })) ?? [];
+  let credits = rankCost(l1);
+  let count = await upsertCategories(orgId, period, 1, l1);
+  for (const c of l1) {
+    const l2 = (await kalodata.categoryRank({ date_range: CATEGORY_RANGE, category_level: 2, category_ids: [String(c.category_id)] })) ?? [];
+    credits += rankCost(l2);
+    count += await upsertCategories(orgId, period, 2, l2, String(c.category_id));
+  }
+  return { categories: count, credits: Math.round(credits * 100) / 100 };
+}
+
 /* --------------------------------------------------- on-demand per product */
 
 const EXTRA_TTL_DAYS = 14;
@@ -518,6 +605,8 @@ async function fetchExtra(orgId, trend, kind, userId) {
 
 module.exports = {
   SETTINGS_KEY,
+  estimateCredits,
+  loadCategoryList,
   EST_CREDITS,
   EXTRA_COST,
   EXTRA_TTL_DAYS,

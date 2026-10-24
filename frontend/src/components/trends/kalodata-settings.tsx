@@ -1,18 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, CircleSlash, Coins, Download, KeyRound, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleSlash, Coins, Download, Globe, KeyRound, Loader2, RefreshCw, Search, Tag } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import type { KaloRun, KaloSettings } from "@/lib/types";
+import type { KaloCategoryOption, KaloRun, KaloSettings } from "@/lib/types";
 import { cn, formatDateTime, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
-import { Badge, Label, NativeSelect, Skeleton } from "@/components/ui/primitives";
+import { Badge, Input, Label, NativeSelect, Skeleton } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
-import { periodLabel } from "./kalo-ui";
+import { baht, Growth, periodLabel } from "./kalo-ui";
 
 const STAGE: Record<string, string> = {
   balance: "ตรวจเครดิต",
@@ -44,12 +44,13 @@ export function KalodataSettingsDialog() {
   });
   const [busy, setBusy] = useState<string | null>(null);
 
-  const save = async (patch: { enabled?: boolean; dayOfMonth?: number }) => {
+  const save = async (patch: { enabled?: boolean; dayOfMonth?: number; scope?: "category" | "all"; categoryId?: string | null }) => {
     setBusy("save");
     try {
       await api.put("/scraping/kalodata/settings", patch);
       await qc.invalidateQueries({ queryKey: ["trends"] });
       if (patch.enabled !== undefined) toast.success(patch.enabled ? "เปิดดึงข้อมูลอัตโนมัติแล้ว" : "ปิดดึงข้อมูลอัตโนมัติแล้ว");
+      if (patch.categoryId || patch.scope === "all") toast.success(patch.scope === "all" ? "ดึงทั้งตลาด" : "เลือกหมวดแล้ว");
     } catch (err) {
       toast.error(
         err instanceof ApiError && err.code === "INTEGRATION_NOT_CONFIGURED"
@@ -64,7 +65,7 @@ export function KalodataSettingsDialog() {
   };
   const runNow = async () => {
     const s = q.data;
-    if (!s) return;
+    if (!s || s.estimateCredits == null) return;
     if (
       !window.confirm(
         `ดึงข้อมูล ${periodLabel(pullPeriod(s))} ตอนนี้? ใช้ประมาณ ${s.estimateCredits} เครดิต (ราว ${Math.round(s.estimateCredits * 0.1 * 36)} บาท)`,
@@ -137,6 +138,8 @@ export function KalodataSettingsDialog() {
             </button>
           </div>
 
+          <CategoryPicker s={s} canEdit={canRun && busy === null} onChange={(patch) => void save(patch)} />
+
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="kalo-day">ดึงทุกวันที่</Label>
@@ -170,8 +173,14 @@ export function KalodataSettingsDialog() {
             </div>
             <div className="rounded-lg bg-muted/50 p-3">
               <p className="text-xs text-muted-foreground">ใช้ต่อเดือนประมาณ</p>
-              <p className="text-lg font-semibold tabular-nums">{s.estimateCredits} เครดิต</p>
-              <p className="text-xs text-muted-foreground">≈ ${(s.estimateCredits * 0.1).toFixed(0)} USD</p>
+              {s.estimateCredits == null ? (
+                <p className="text-sm text-muted-foreground">เลือกหมวดก่อน</p>
+              ) : (
+                <>
+                  <p className="text-lg font-semibold tabular-nums">~{s.estimateCredits} เครดิต</p>
+                  <p className="text-xs text-muted-foreground">≈ ${(s.estimateCredits * 0.1).toFixed(1)} USD</p>
+                </>
+              )}
             </div>
           </div>
 
@@ -181,7 +190,7 @@ export function KalodataSettingsDialog() {
           </p>
 
           {canRun && (
-            <Button variant="outline" onClick={() => void runNow()} disabled={busy !== null || s.running || !s.configured}>
+            <Button variant="outline" onClick={() => void runNow()} disabled={busy !== null || s.running || !s.configured || s.estimateCredits == null}>
               {busy === "run" || s.running ? <Loader2 className="animate-spin" /> : <Download />}{" "}
               {s.running
                 ? "กำลังดึงข้อมูล…"
@@ -218,6 +227,164 @@ export function KalodataSettingsDialog() {
   );
 }
 
+const LEVEL = { 1: "หมวดหลัก", 2: "หมวดรอง", 3: "หมวดย่อย" } as const;
+
+/** Which category to pull: search the categories already pulled (free), or the whole market. */
+function CategoryPicker({
+  s,
+  canEdit,
+  onChange,
+}: {
+  s: KaloSettings;
+  canEdit: boolean;
+  onChange: (patch: { scope?: "category" | "all"; categoryId?: string | null }) => void;
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(s.scope === "category" && !s.category);
+  const [text, setText] = useState("");
+  const q = useDeferredValue(text.trim());
+  const [loading, setLoading] = useState(false);
+  const options = useQuery({
+    queryKey: ["trends", "kalodata", "category-options", q],
+    queryFn: () => api.get<{ items: KaloCategoryOption[]; needsLoad: boolean }>("/scraping/kalodata/category-options", q ? { q } : {}),
+    enabled: open,
+  });
+  const pick = (patch: { scope?: "category" | "all"; categoryId?: string | null }) => {
+    onChange(patch);
+    setOpen(false);
+    setText("");
+  };
+  const loadList = async () => {
+    if (!window.confirm("โหลดรายชื่อหมวดหลักและหมวดรองจาก Kalodata? ใช้ประมาณ 3 เครดิต (ครั้งเดียว)")) return;
+    setLoading(true);
+    try {
+      const r = await api.post<{ categories: number; credits: number }>("/scraping/kalodata/category-options/load");
+      toast.success(`โหลดแล้ว ${formatNumber(r.categories)} หมวด ใช้ ${r.credits} เครดิต`);
+      await qc.invalidateQueries({ queryKey: ["trends", "kalodata", "category-options"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "โหลดไม่สำเร็จ");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-xl border border-border p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-medium">ดึงข้อมูลหมวดไหน</p>
+          {s.scope === "all" ? (
+            <p className="flex items-center gap-1.5 text-sm">
+              <Globe className="size-4 text-primary" /> ทั้งตลาด <span className="text-xs text-muted-foreground">(ทุกหมวด ใช้เครดิตมาก)</span>
+            </p>
+          ) : s.category ? (
+            <p className="text-sm">
+              <span className="inline-flex items-center gap-1.5 font-medium">
+                <Tag className="size-4 text-primary" /> {s.category.name}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {s.category.path ? `${s.category.path} · ` : ""}
+                {LEVEL[s.category.level]} · ดึงเฉพาะหมวดนี้ หมวดย่อย และสินค้าในหมวด
+              </span>
+            </p>
+          ) : (
+            <p className="text-sm text-warning">ยังไม่ได้เลือกหมวด — เลือกก่อนดึงข้อมูล</p>
+          )}
+        </div>
+        {canEdit && !open && (
+          <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+            เปลี่ยน
+          </Button>
+        )}
+      </div>
+      {open && (
+        <div className="space-y-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              autoFocus
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="ค้นหาหมวด เช่น ครีม หูฟัง ของเล่น"
+              className="pl-9"
+              aria-label="ค้นหาหมวด"
+            />
+          </div>
+          <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border" role="listbox" aria-label="หมวดหมู่">
+            <li>
+              <button
+                type="button"
+                role="option"
+                aria-selected={s.scope === "all"}
+                disabled={!canEdit}
+                onClick={() => pick({ scope: "all", categoryId: null })}
+                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm hover:bg-muted/50"
+              >
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                  <Globe className="size-4 text-primary" /> ทั้งตลาด
+                </span>
+                <span className="text-xs text-muted-foreground">~30 เครดิต/รอบ</span>
+              </button>
+            </li>
+            {options.isPending ? (
+              <li className="p-3">
+                <Skeleton className="h-16" />
+              </li>
+            ) : options.data?.needsLoad ? (
+              <li className="space-y-2 p-3 text-sm text-muted-foreground">
+                <p>ยังไม่มีรายชื่อหมวดในระบบ</p>
+                <Button size="sm" variant="outline" onClick={() => void loadList()} disabled={loading || !canEdit}>
+                  {loading ? <Loader2 className="animate-spin" /> : <Coins className="text-warning" />} โหลดรายชื่อหมวด · ~3 เครดิต
+                </Button>
+              </li>
+            ) : !options.data?.items.length ? (
+              <li className="p-3 text-sm text-muted-foreground">ไม่พบหมวดที่ตรงกับ &quot;{q}&quot;</li>
+            ) : (
+              options.data.items.map((o) => (
+                <li key={o.id}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={s.category?.id === o.id}
+                    disabled={!canEdit}
+                    onClick={() => pick({ categoryId: o.id })}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm hover:bg-muted/50",
+                      s.category?.id === o.id && "bg-primary/10",
+                    )}
+                  >
+                    <span className="min-w-0">
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-medium">{o.name}</span>
+                        <Badge tone="neutral">{LEVEL[o.level]}</Badge>
+                      </span>
+                      {o.path && <span className="block truncate text-xs text-muted-foreground">{o.path}</span>}
+                    </span>
+                    <span className="shrink-0 text-right text-xs tabular-nums">
+                      {baht(o.revenue)}
+                      <span className="block">
+                        <Growth value={o.growth} />
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>หมวดหลักใช้ ~6 เครดิต · หมวดรอง/ย่อยใช้ ~4 เครดิต ต่อรอบ</span>
+            {(s.category || s.scope === "all") && (
+              <button type="button" className="min-h-9 font-medium hover:text-foreground" onClick={() => setOpen(false)}>
+                ยกเลิก
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RunRow({ r }: { r: KaloRun }) {
   return (
     <li className="space-y-1 p-3 text-sm">
@@ -230,6 +397,7 @@ function RunRow({ r }: { r: KaloRun }) {
           <Loader2 className="size-4 animate-spin text-primary" />
         )}
         <span className="font-medium">{r.period ? periodLabel(r.period) : "—"}</span>
+        <span className="text-xs text-muted-foreground">{r.scopeName ?? "ทั้งตลาด"}</span>
         <Badge tone={r.status === "succeeded" ? "success" : r.status === "failed" ? "danger" : "primary"}>
           {r.status === "running" ? (STAGE[r.stage ?? ""] ?? "กำลังดึง") : r.status === "succeeded" ? "สำเร็จ" : "ไม่สำเร็จ"}
         </Badge>

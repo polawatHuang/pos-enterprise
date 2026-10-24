@@ -108,8 +108,21 @@ describe('monthly pull', () => {
     assert.equal(await svc.scheduleMonthly(new Date('2026-10-05T03:00:00Z')), 0);
   });
 
+  test('one category by default: nothing chosen → no pull, by hand or by schedule', async () => {
+    const res = await admin.post('/api/scraping/kalodata/run', { period: PERIOD });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error.message, /เลือกหมวด/);
+    await admin.put('/api/scraping/kalodata/settings', { enabled: true });
+    assert.equal(await svc.scheduleMonthly(new Date('2026-10-05T03:00:00Z')), 0);
+    const st = await admin.get('/api/scraping/kalodata/settings');
+    assert.equal(st.body.data.scope, 'category');
+    assert.equal(st.body.data.estimateCredits, null);
+  });
+
   test('switched on: starts once the day comes, never twice for a month', async () => {
-    const put = await admin.put('/api/scraping/kalodata/settings', { enabled: true, dayOfMonth: 3 });
+    // the whole market (the old behaviour) when chosen
+    const put = await admin.put('/api/scraping/kalodata/settings', { enabled: true, dayOfMonth: 3, scope: 'all' });
+    assert.equal(put.body.data.estimateCredits, 30);
     assert.equal(put.status, 200, JSON.stringify(put.body));
     assert.equal(await svc.scheduleMonthly(new Date('2026-10-02T03:00:00Z')), 0, 'before the set day');
     assert.equal(await svc.scheduleMonthly(new Date('2026-10-05T03:00:00Z')), 1);
@@ -287,5 +300,90 @@ describe('product page extras', () => {
     assert.equal(patch.status, 200, JSON.stringify(patch.body));
     assert.equal(patch.body.data.selectScore, Number(p.select_score) + 5);
     assert.equal(patch.body.data.selectDetail.items.find((i) => i.key === 'content').score, 5);
+  });
+});
+
+describe('one category only', () => {
+  const runFor = async (categoryId) => {
+    const put = await admin.put('/api/scraping/kalodata/settings', { categoryId });
+    assert.equal(put.status, 200, JSON.stringify(put.body));
+    await db.query("DELETE FROM trending_products WHERE org_id = 1 AND platform = 'kalodata'");
+    mock.state.calls.length = 0;
+    const res = await admin.post('/api/scraping/kalodata/run', { period: PERIOD });
+    assert.equal(res.status, 202, JSON.stringify(res.body));
+    await finishRun(res.body.data.runId);
+    return { status: put.body.data, run: (await admin.get('/api/scraping/kalodata/settings')).body.data.runs[0] };
+  };
+
+  test('the picker searches pulled categories by name and parent, for free', async () => {
+    const calls = mock.state.calls.length;
+    const res = await admin.get(`/api/scraping/kalodata/category-options?q=${encodeURIComponent('ดูแลผิว')}`);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const skin = res.body.data.items.find((i) => i.id === '10011');
+    assert.equal(skin.path, 'ความงามและของใช้ส่วนตัว');
+    assert.ok(res.body.data.items.some((i) => i.level === 3 && i.path === 'ความงามและของใช้ส่วนตัว › ดูแลผิวหน้า'));
+    const byParent = await admin.get(`/api/scraping/kalodata/category-options?q=${encodeURIComponent('แม่และเด็ก')}`);
+    assert.ok(byParent.body.data.items.length >= 5, 'the category and those under it');
+    assert.equal(mock.state.calls.length, calls);
+  });
+
+  test('a level-2 pick asks Kalodata about that category only and costs a few credits', async () => {
+    const { status, run } = await runFor('10011');
+    assert.equal(status.category.name, 'ดูแลผิวหน้า');
+    assert.equal(status.category.path, 'ความงามและของใช้ส่วนตัว');
+    assert.equal(status.estimateCredits, 4);
+    assert.equal(run.status, 'succeeded', JSON.stringify(run));
+    const kaloCalls = mock.state.calls.filter((c) => c.path.includes('/tiktok/category/rank') || c.path.includes('/tiktok/product/rank'));
+    assert.ok(kaloCalls.every((c) => JSON.stringify(c.body.category_ids) === '["10011"]'), JSON.stringify(kaloCalls.map((c) => c.body.category_ids)));
+    const cats = await db.query("SELECT category_id FROM trend_categories WHERE org_id = 1 AND period = :p AND (category_id = '10011' OR parent_id = '10011')", { p: PERIOD });
+    assert.equal(cats.length, 4, 'itself + 3 children');
+    const prods = await db.query("SELECT kalo_category_id FROM trending_products WHERE org_id = 1 AND platform = 'kalodata'");
+    assert.ok(prods.length >= 100);
+    assert.ok(prods.every((x) => x.kalo_category_id === '10011'));
+    const details = mock.state.calls.filter((c) => c.path.endsWith('/tiktok/product/detail'));
+    assert.ok(details.length <= 30, `${details.length} details`);
+    assert.ok(run.credits < 6, `credits ${run.credits}`);
+
+    const report = await admin.get(`/api/scraping/categories?period=${PERIOD}`);
+    assert.equal(report.body.data.summary.scope.id, '10011');
+    assert.equal(report.body.data.summary.scope.focusParentId, '10011');
+    assert.equal(report.body.data.summary.fastest.level, 3);
+    const auto = await admin.get(`/api/scraping/categories?period=${PERIOD}&auto=1`);
+    assert.equal(auto.body.data.parentId, '10011');
+    assert.equal(auto.body.data.items.length, 3);
+    assert.deepEqual(auto.body.data.breadcrumb.map((b) => b.id), ['1001', '10011']);
+  });
+
+  test('a level-3 pick files products under that leaf', async () => {
+    const { run } = await runFor('100111');
+    assert.equal(run.status, 'succeeded', JSON.stringify(run));
+    const prods = await db.query("SELECT kalo_category_id, kalo_leaf_id, category FROM trending_products WHERE org_id = 1 AND platform = 'kalodata'");
+    assert.ok(prods.length > 0);
+    assert.ok(prods.every((x) => x.kalo_leaf_id === '100111' && x.kalo_category_id === '10011'));
+    const list = await admin.get('/api/scraping/trends?kaloCategory=100111&status=all&pageSize=100');
+    assert.equal(list.body.meta.total, prods.length);
+    const report = await admin.get(`/api/scraping/categories?period=${PERIOD}`);
+    assert.equal(report.body.data.summary.scope.focusParentId, '10011', 'no children: open at its parent');
+  });
+
+  test('a level-1 pick takes its sub-categories and their products', async () => {
+    const { status, run } = await runFor('1002');
+    assert.equal(status.estimateCredits, 6);
+    assert.equal(run.status, 'succeeded', JSON.stringify(run));
+    const prods = await db.query("SELECT DISTINCT kalo_category_id FROM trending_products WHERE org_id = 1 AND platform = 'kalodata'");
+    assert.ok(prods.length >= 2);
+    assert.ok(prods.every((x) => String(x.kalo_category_id).startsWith('1002')));
+  });
+
+  test('no categories yet: the picker offers to load the list', async () => {
+    await db.query('DELETE FROM trend_categories WHERE org_id = 1');
+    const empty = await admin.get('/api/scraping/kalodata/category-options');
+    assert.equal(empty.body.data.needsLoad, true);
+    const load = await admin.post('/api/scraping/kalodata/category-options/load');
+    assert.equal(load.status, 200, JSON.stringify(load.body));
+    assert.equal(load.body.data.categories, 30);
+    const opts = await admin.get('/api/scraping/kalodata/category-options');
+    assert.equal(opts.body.data.items.length, 30);
+    assert.ok(opts.body.data.items.find((i) => i.id === '10011').path);
   });
 });

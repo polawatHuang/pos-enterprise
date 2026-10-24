@@ -54,21 +54,22 @@ function category(id, name, dateRange, scale) {
   };
 }
 
+/** Every category: id → { id, name, level } (ids nest by prefix: 1001 → 10011 → 100111). */
+const NODES = new Map();
+for (const [l1, n1] of L1) {
+  NODES.set(l1, { id: l1, name: n1, level: 1 });
+  for (const [l2, n2] of l2Of(l1)) {
+    NODES.set(l2, { id: l2, name: n2, level: 2 });
+    for (const [l3, n3] of l3Of(l2, n2)) NODES.set(l3, { id: l3, name: n3, level: 3 });
+  }
+}
+const SCALE = { 1: 90_000_000, 2: 20_000_000, 3: 6_000_000 };
+
+/** Like the API: category_ids limits to those categories and their descendants. */
 function categoryRank(b) {
   const level = b.category_level ?? 1;
-  let rows;
-  if (level === 1) rows = L1.map(([id, name]) => category(id, name, b.date_range, 90_000_000));
-  else if (level === 2) {
-    const parents = b.category_ids?.length ? b.category_ids : L1.map(([id]) => id);
-    rows = parents.flatMap((p) => (L2_NAMES[p] ? l2Of(p).map(([id, name]) => category(id, name, b.date_range, 20_000_000)) : []));
-  } else {
-    const parents = b.category_ids ?? [];
-    rows = parents.flatMap((p) => {
-      const l1 = p.slice(0, 4);
-      const l2 = L2_NAMES[l1] ? l2Of(l1).find(([id]) => id === p) : null;
-      return l2 ? l3Of(...l2).map(([id, name]) => category(id, name, b.date_range, 6_000_000)) : [];
-    });
-  }
+  const within = (id) => !b.category_ids?.length || b.category_ids.some((c) => id.startsWith(String(c)));
+  const rows = [...NODES.values()].filter((n) => n.level === level && within(n.id)).map((n) => category(n.id, n.name, b.date_range, SCALE[level]));
   rows.sort((a, b2) => b2.revenue - a.revenue);
   return rows.slice(0, b.page_size ?? 10).map((r, i) => ({ ...r, rank: i + 1 }));
 }
@@ -101,10 +102,18 @@ function productRank(b) {
   const size = b.page_size ?? 10;
   let rows;
   if (b.category_ids?.length) {
-    const l2 = b.category_ids[0];
-    const l2row = L2_NAMES[l2.slice(0, 4)] ? l2Of(l2.slice(0, 4)).find(([id]) => id === l2) : null;
-    if (!l2row) return [];
-    rows = Array.from({ length: size }, (_, i) => product(`${l2}${String(i + 1).padStart(3, '0')}`, `${l2row[1]} รุ่นที่ ${i + 1}`, l2, i, b.date_range));
+    const node = NODES.get(String(b.category_ids[0]));
+    if (!node) return [];
+    // a level-1 list is made of its first child's products; filtered lists get their own ids
+    const base = node.level === 1 ? `${node.id}1` : node.id;
+    const special = b.launch_date || b.is_affiliate || b.sort_field?.field === 'revenue_growth_rate';
+    rows = Array.from({ length: size }, (_, i) => {
+      const n = special ? 500 + i : i + 1;
+      return product(`${base}${String(n).padStart(3, '0')}`, `${node.name} รุ่นที่ ${n}`, base, i, b.date_range);
+    });
+    if (b.launch_date) rows = rows.map((r) => ({ ...r, launch_date: '2026-10-05' }));
+    if (b.is_affiliate) rows = rows.map((r) => ({ ...r, commission_rate: 15 + hash(r.product_id) * 15 }));
+    if (b.sort_field?.field === 'revenue_growth_rate') rows = rows.map((r) => ({ ...r, revenue_growth_rate: 40 + hash(r.product_id) * 200 }));
   } else {
     // market-wide lists: products from several categories plus a few only seen here
     const tag = b.launch_date ? 'n' : b.is_affiliate ? 'c' : 'r';
@@ -125,6 +134,7 @@ function productRank(b) {
 function productDetail(b) {
   const id = String(b.product_id);
   const l2 = /^9/.test(id) ? '10011' : id.slice(0, 5);
+  const l3 = id.length >= 9 && !/^9/.test(id) ? id.slice(0, 6) : `${l2}1`;
   const base = product(id, `สินค้า ${id}`, l2, 2, b.date_range);
   return {
     product_id: id,
@@ -133,7 +143,7 @@ function productDetail(b) {
     product_shop_id: base.seller_id,
     pri_cate_id: l2.slice(0, 4),
     sec_cate_id: l2,
-    ter_cate_id: `${l2}1`,
+    ter_cate_id: l3,
     max_price: base.unit_price * 1.2,
     min_price: base.unit_price,
     revenue: base.revenue,

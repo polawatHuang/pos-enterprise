@@ -1318,8 +1318,20 @@ export interface KaloStatus {
   nextPeriod: string;
   /** last month that has ended — the newest one Kalodata can be asked for */
   latestFull: string;
-  estimateCredits: number;
+  /** null until a category is chosen (scope "category") */
+  estimateCredits: number | null;
   running: boolean;
+  scope: "category" | "all";
+  category: { id: string; name: string; level: 1 | 2 | 3; path: string } | null;
+}
+
+export interface KaloCategoryOption {
+  id: string;
+  name: string;
+  level: 1 | 2 | 3;
+  path: string;
+  revenue: number | null;
+  growth: number | null;
 }
 
 export interface KaloRun {
@@ -1327,6 +1339,8 @@ export interface KaloRun {
   status: "running" | "succeeded" | "failed";
   stage: string | null;
   period: string | null;
+  /** the category this pull was limited to; null = the whole market */
+  scopeName: string | null;
   credits: number | null;
   balanceUsed: number | null;
   counts: { categories: number; products: number; details: number } | null;
@@ -1348,6 +1362,8 @@ export interface CategoryReport {
   period: string | null;
   periods: string[];
   breadcrumb: { id: string; name: string; level: number }[];
+  /** the category whose children are listed (null = by level) */
+  parentId: string | null;
   items: KaloCategory[];
   summary: {
     revenue: number;
@@ -1358,6 +1374,8 @@ export interface CategoryReport {
     opportunity: { id: string; name: string; growth: number | null; top3: number | null; level: number } | null;
     tracked: number;
     products: number;
+    /** the one category being pulled, when the pull is limited to it */
+    scope: (KaloCategory & { period: string; path: string; focusParentId: string | null }) | null;
   } | null;
   kalodata: KaloStatus;
 }
