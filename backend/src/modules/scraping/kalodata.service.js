@@ -9,7 +9,10 @@ const { upsertItems, rescore } = require('./trends.service');
 
 /**
  * Monthly pull of TikTok Shop Thailand market data from Kalodata (the "standard" depth, ~25–40 credits):
- *   1. category ranking, levels 1–3 with parents (level 3 only under the top level-2 categories)
+ *   1. category ranking, levels 1–3 with parents (level 3 only under the top level-2 categories).
+ *      Kalodata's category endpoints only take rolling windows (last7Day…last365Day), not a calendar
+ *      month, so categories are the last 30 days at pull time, stored under the month being pulled
+ *      (the pull runs early in the next month, so that is about the same window)
  *   2. channel split + daily trend of each level-1 category
  *   3. best sellers of the top level-2 categories, then market-wide risers, new launches and
  *      high-commission affiliate products
@@ -24,7 +27,8 @@ const PLATFORM = 'kalodata';
 const TOP_L2 = 60; // level-2 categories that get their own product list and level-3 breakdown
 const PRODUCTS_PER_L2 = 50;
 const DETAIL_PRODUCTS = 100;
-const BACKFILL_MONTHS = 5; // first run: category history for the sparkline
+/** Category rank/detail accept only last7Day/last30Day/last90Day/last180Day/last365Day. */
+const CATEGORY_RANGE = 'last30Day';
 const MIN_CREDITS = 40;
 const STEP_BUDGET_MS = 25_000;
 const TASK_RETRIES = 2;
@@ -301,18 +305,16 @@ async function runTask(task, st, ctx) {
       return 'categories';
     }
     case 'cat1': {
-      const rows = await kalodata.categoryRank({ date_range: P, category_level: 1 });
+      const rows = await kalodata.categoryRank({ date_range: CATEGORY_RANGE, category_level: 1 });
       st.credits += rankCost(rows);
       st.counts.categories += await upsertCategories(orgId, P, 1, rows);
       for (const c of rows ?? []) st.tasks.push({ t: 'cat2', id: String(c.category_id) });
       st.tasks.push({ t: 'plan2' });
       for (const c of rows ?? []) st.tasks.push({ t: 'catDetail', id: String(c.category_id) });
-      const history = await db.one('SELECT COUNT(DISTINCT period) AS n FROM trend_categories WHERE org_id = :orgId AND period < :p', { orgId, p: P });
-      if (Number(history.n) === 0) for (let i = 1; i <= BACKFILL_MONTHS; i += 1) st.tasks.push({ t: 'history', period: shiftPeriod(P, -i) });
       return 'categories';
     }
     case 'cat2': {
-      const rows = await kalodata.categoryRank({ date_range: P, category_level: 2, category_ids: [task.id] });
+      const rows = await kalodata.categoryRank({ date_range: CATEGORY_RANGE, category_level: 2, category_ids: [task.id] });
       st.credits += rankCost(rows);
       st.counts.categories += await upsertCategories(orgId, P, 2, rows, task.id);
       return 'categories';
@@ -328,13 +330,13 @@ async function runTask(task, st, ctx) {
       return 'categories';
     }
     case 'cat3': {
-      const rows = await kalodata.categoryRank({ date_range: P, category_level: 3, category_ids: [task.id] });
+      const rows = await kalodata.categoryRank({ date_range: CATEGORY_RANGE, category_level: 3, category_ids: [task.id] });
       st.credits += rankCost(rows);
       st.counts.categories += await upsertCategories(orgId, P, 3, rows, task.id);
       return 'categories';
     }
     case 'catDetail': {
-      const d = await kalodata.categoryDetail(task.id, P);
+      const d = await kalodata.categoryDetail(task.id, CATEGORY_RANGE);
       st.credits += kalodata.COST.detail;
       if (d) {
         await db.query(
@@ -358,14 +360,6 @@ async function runTask(task, st, ctx) {
           },
         );
       }
-      return 'categories';
-    }
-    case 'history': {
-      const l1 = await kalodata.categoryRank({ date_range: task.period, category_level: 1 });
-      const l2 = await kalodata.categoryRank({ date_range: task.period, category_level: 2, page_size: 100 });
-      st.credits += rankCost(l1) + rankCost(l2);
-      await upsertCategories(orgId, task.period, 1, l1);
-      await upsertCategories(orgId, task.period, 2, l2);
       return 'categories';
     }
     case 'products': {
