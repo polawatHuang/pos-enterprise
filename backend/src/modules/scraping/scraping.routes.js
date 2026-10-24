@@ -14,6 +14,7 @@ const { CHECKS, SATURATED_RANK } = require('./lifecycle');
 const { csvToItems, csvTemplate, FIELDS, TEMPLATE_COLUMNS, TEMPLATE_ROWS } = require('./csv');
 const { PLATFORMS, startRun } = require('./sources');
 const kalo = require('./kalodata.service');
+const webFacts = require('./web-facts');
 const { router: kaloRouter, productScope } = require('./kalodata.routes');
 
 const router = express.Router();
@@ -449,7 +450,7 @@ router.get('/trends/:id', requirePermission('scraping:read'), validate({ params:
         commissionRate: n(m.commission_rate),
         rank: n(m.rank_in_category),
       })),
-      extras: t.platform === 'kalodata' ? await kalo.getExtras(t.id) : {},
+      extras: await kalo.getExtras(t.id),
       extraCost: kalo.EXTRA_COST,
       categoryPath: await categoryPath(t),
       snapshots: snaps.reverse().map((s) => ({
@@ -790,8 +791,76 @@ const ANALYSIS_SYSTEM = `คุณเป็นนักวิเคราะห�
 - สินค้าอันดับ 1–10 ของหมวดมีคนทำคลิปขายเยอะแล้ว ให้มองหาอันดับ 11 ขึ้นไป
 - ใช้ผลเช็กลิสต์ (ดาวสินค้า/ร้าน การตอบกลับ การจัดส่ง ค่าคอม แฟลชเซล รีวิว) ประกอบ ข้อที่ "ไม่มีข้อมูล" ให้แนะนำว่าต้องไปตรวจอะไรเพิ่ม
 - ถ้ามีโปรไฟล์ช่อง ให้ประเมินว่าสินค้าเข้ากับตัวตนช่องหรือไม่ (ช่องที่ขายของตรงกับความสนใจของตัวเองจะเล่าได้จริงใจกว่า)
+- ถ้ามีข้อมูลจาก Kalodata (จุดขาย สรุปรีวิวลูกค้า คลิปที่ขายได้ ครีเอเตอร์) ให้ใช้เป็นหลักฐานหลัก:
+  ไอเดียเปิดคลิปและมุมเล่าเรื่องต้องอิงจุดขาย/สถานการณ์ใช้งานจริง, ข้อที่ลูกค้าบ่นให้แนะนำวิธีตอบในคลิป,
+  ถอดสิ่งที่คลิปขายดีทำซ้ำกัน (ไม่ลอกบทพูด), ช่องทางขายหลัก (วิดีโอ/ไลฟ์) บอกว่าควรทำคอนเทนต์แบบไหน
+- ข้อมูลที่ "ค้นจากเว็บ" มี URL ที่มาและอาจมาจากแพลตฟอร์มอื่น ให้ใช้ประกอบอย่างระวัง
 - ระบุความเสี่ยงด้านกฎหมายโฆษณาไทย (เครื่องสำอาง อาหารเสริม เครื่องมือแพทย์ ต้องระวังคำเคลม) อย่างตรงไปตรงมา
 - เขียนภาษาไทย กระชับ`;
+
+const firstText = (o) =>
+  o == null ? '' : typeof o === 'string' || typeof o === 'number' ? String(o) : (Object.values(o).find((v) => typeof v === 'string' && v.length > 1) ?? '');
+const texts = (arr, n = 6) => (Array.isArray(arr) ? arr.slice(0, n).map(firstText).filter(Boolean) : []);
+const hostOf = (u) => {
+  try {
+    return new URL(u).hostname.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+};
+
+/** Kalodata numbers, the 30-point score and every insight already fetched for the product, for the AI prompt. */
+async function analysisExtras(t) {
+  const ex = await kalo.getExtras(t.id);
+  const out = {};
+  if (t.platform === 'kalodata') {
+    out['ข้อมูล Kalodata (TikTok Shop ไทย)'] = {
+      'ยอดขาย (บาท)': n(t.revenue),
+      'เติบโตจากเดือนก่อน (%)': n(t.revenue_growth_rate),
+      ครีเอเตอร์ที่โปรโมต: n(t.creator_count),
+      'วิดีโอ / ไลฟ์': t.video_count != null ? `${n(t.video_count)} / ${n(t.live_count) ?? 0}` : null,
+      'สัดส่วนยอดขายตามช่องทาง': parseJson(t.channel_split),
+      วันวางขาย: t.launch_date ? new Date(t.launch_date).toISOString().slice(0, 10) : null,
+    };
+  }
+  const sel = parseJson(t.select_detail);
+  if (sel) {
+    out['คะแนนคัดเลือก (6 หัวข้อ เต็ม 30)'] = {
+      รวม: `${sel.total}/30 (รู้ ${sel.known}/6 หัวข้อ)`,
+      ...Object.fromEntries(sel.items.map((i) => [i.label, i.score == null ? `ยังไม่รู้ — ${i.reason}` : `${i.score}/5 — ${i.reason}`])),
+      ...(sel.stops?.length ? { ควรชะลอเพราะ: sel.stops } : {}),
+    };
+  }
+  const a = ex.analysis?.data;
+  if (a) out['จุดขายจาก Kalodata'] = { ไฮไลต์: texts(a.highlights, 8), คุณสมบัติ: (a.attributes ?? []).slice(0, 10).map((x) => `${x.key}: ${x.value}`) };
+  const c = ex.comments?.data;
+  if (c) {
+    out['สรุปรีวิวลูกค้า (Kalodata)'] = {
+      สรุป: firstText(c.comment_summary?.summary ?? c.comment_summary),
+      ลูกค้าชม: texts(c.positive_points),
+      ลูกค้าบ่น: texts(c.pain_points),
+      สถานการณ์ใช้งาน: texts(c.usage_scenarios),
+    };
+  }
+  const v = ex.videos?.data;
+  if (Array.isArray(v) && v.length) {
+    out['คลิปที่ขายสินค้านี้ได้ (Kalodata)'] = v.slice(0, 6).map((x) => ({
+      ชื่อคลิป: x.video_title,
+      ยอดวิว: n(x.views),
+      'ยอดขาย (บาท)': n(x.revenue),
+      ยิงโฆษณา: Number(x.ad) === 1,
+    }));
+  }
+  const cr = ex.creators?.data;
+  if (Array.isArray(cr) && cr.length) {
+    out['ครีเอเตอร์ที่ขายได้ (Kalodata)'] = cr.slice(0, 5).map((x) => ({ ผู้ติดตาม: n(x.creator_followers), 'ยอดขาย (บาท)': n(x.revenue), ชิ้น: n(x.sales_volumn) }));
+  }
+  const w = ex.webfacts?.data;
+  if (w?.status === 'done' && w.facts?.length) {
+    out['ข้อมูลที่ค้นจากเว็บ (มีที่มา)'] = w.facts.map((f) => `${f.label}: ${f.value === true ? 'มี' : f.value === false ? 'ไม่มี' : f.value} (${hostOf(f.sourceUrl) ?? 'เว็บ'}${f.note ? `, ${f.note}` : ''})`);
+  }
+  return out;
+}
 
 const STATUS_TH = {
   pass: 'ผ่าน',
@@ -848,6 +917,7 @@ router.post(
       'เหตุผลของ Phase': notes?.reasons ?? [],
       'ยอดขายเทียบยอดสูงสุดของหมวด (%)': n(t.phase_ratio),
       เช็กลิสต์: Object.fromEntries(checklist.map((c) => [c.label, STATUS_TH[c.status] ?? c.status])),
+      ...(await analysisExtras(t)),
     };
     const channel = profile
       ? `\n\nโปรไฟล์ช่อง "${profile.name}"${profile.on_camera ? '' : ' (ไม่ออกหน้ากล้อง)'}:\n${profile.persona}` +
@@ -1161,6 +1231,16 @@ router.post(
     res.status(201).json({ data: { id: r.insertId, shortUrl, subId } });
   },
 );
+
+/* ------------------------------------------- AI web search for checklist facts */
+
+/** Start "ให้ AI ค้นข้อมูลร้าน/รีวิวจากเว็บ"; the product page polls the 'webfacts' extra until done. */
+router.post('/trends/:id/web-facts', requirePermission('scraping:run'), validate({ params: idParam }), async (req, res) => {
+  const t = await getTrend(req.user.orgId, req.valid.params.id);
+  const state = await webFacts.start(t, req.user.id);
+  audit(req, 'scraping.webfacts', 'trending_product', t.id);
+  res.status(202).json({ data: state });
+});
 
 /* -------------------------------------------------- Kalodata extras per product */
 
