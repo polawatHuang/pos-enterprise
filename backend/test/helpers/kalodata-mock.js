@@ -156,8 +156,10 @@ function productDetail(b) {
 
 const state = { balance: 315, calls: [] };
 
-function respond(path, body = {}) {
-  state.calls.push({ path, body });
+function respond(path, body = {}, method = 'POST') {
+  state.calls.push({ path, body, method });
+  // like the real API: balance is GET, everything else POST
+  if ((path.endsWith('/credit/balance') ? 'GET' : 'POST') !== method) return { success: false, message: `Request method '${method}' not supported` };
   const ok = (data) => ({ success: true, data, message: 'ok', cached: false, code: '0' });
   if (path.endsWith('/credit/balance')) return ok({ totalRemain: state.balance, mainRemain: state.balance });
   if (path.endsWith('/tiktok/category/rank')) return ok(categoryRank(body));
@@ -247,7 +249,7 @@ function installFetch(base = 'https://kalo.test/openapi/v1') {
   global.fetch = async (url, opts = {}) => {
     if (!String(url).startsWith(base)) return real(url, opts);
     const body = opts.body ? JSON.parse(opts.body) : {};
-    const json = respond(String(url).slice(base.length), body);
+    const json = respond(String(url).slice(base.length), body, opts.method ?? 'GET');
     return { ok: json.success !== false, status: json.success === false ? 400 : 200, json: async () => json };
   };
   return () => {

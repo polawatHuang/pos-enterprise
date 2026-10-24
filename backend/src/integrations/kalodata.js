@@ -46,15 +46,15 @@ const adapter = defineAdapter(
     COST,
 
     /** POST an endpoint; returns `data`. Errors carry Kalodata's message in Thai context. */
-    async call(path, body = {}, { market = true, timeoutMs = 30_000 } = {}) {
+    async call(path, body = {}, { market = true, timeoutMs = 30_000, method = 'POST' } = {}) {
       const { KALODATA_API_KEY, KALODATA_API_BASE } = adapter.requireConfig();
       await throttle();
       let res;
       try {
         res = await fetch(`${KALODATA_API_BASE.replace(/\/$/, '')}${path}`, {
-          method: 'POST',
-          headers: { 'secret-key': KALODATA_API_KEY, 'content-type': 'application/json;charset=UTF-8' },
-          body: JSON.stringify(market ? { ...MARKET, ...body } : body),
+          method,
+          headers: { 'secret-key': KALODATA_API_KEY, ...(method === 'GET' ? {} : { 'content-type': 'application/json;charset=UTF-8' }) },
+          body: method === 'GET' ? undefined : JSON.stringify(market ? { ...MARKET, ...body } : body),
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (err) {
@@ -71,7 +71,8 @@ const adapter = defineAdapter(
       return json.data;
     },
 
-    balance: ({ timeoutMs } = {}) => adapter.call('/credit/balance', {}, { market: false, timeoutMs }),
+    // the only GET endpoint in the API
+    balance: ({ timeoutMs } = {}) => adapter.call('/credit/balance', {}, { market: false, timeoutMs, method: 'GET' }),
     categoryRank: (body) => adapter.call('/tiktok/category/rank', { page_size: 100, page_number: 1, ...body }),
     categoryDetail: (categoryId, dateRange) => adapter.call('/tiktok/category/detail', { category_id: String(categoryId), date_range: dateRange }),
     productRank: (body) => adapter.call('/tiktok/product/rank', { page_size: 100, page_number: 1, need_image: 1, need_extra: true, ...body }),
