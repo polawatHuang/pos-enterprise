@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const db = require('../../db/pool');
 const { AppError, badRequest, conflict, notFound } = require('../../core/errors');
 const { applyMovement } = require('../inventory/inventory.service');
+const paymentIntents = require('./payment-intents');
 const { consumeFefo, restoreLots, parseAlloc } = require('../inventory/lots');
 const { postJournal, reverseJournalsFor, saleLines } = require('../accounting/ledger.service');
 const { localDate, localTime } = require('../../utils/dates');
@@ -306,6 +307,7 @@ function settlePayments(payments, total) {
 async function checkout(user, input) {
   const shift = await currentShift(user.id);
   if (!shift) throw conflict('กรุณาเปิดกะก่อนขาย');
+  if (input.payments?.some((p) => p.intentId && p.method !== 'promptpay')) throw badRequest('รายการชำระอัตโนมัติใช้ได้กับ PromptPay เท่านั้น');
   const settings = await getSettings(user.orgId);
   const tax = await getTaxSettings(user.orgId);
   const canOverride = user.permissions.includes('pos:manage');
@@ -477,9 +479,11 @@ async function checkout(user, input) {
       });
     }
     for (const p of payRows) {
+      // a PromptPay QR the provider already confirmed: this sale takes it (once)
+      const intentRef = p.intentId ? await paymentIntents.claimInTx(conn, user, shift, orderId, p) : null;
       await conn.query(
         `INSERT INTO payments (org_id, order_id, method, amount, reference) VALUES (:orgId, :orderId, :method, :amount, :reference)`,
-        { orgId: user.orgId, orderId, method: p.method, amount: p.amount, reference: p.reference ?? p.slipRef ?? null },
+        { orgId: user.orgId, orderId, method: p.method, amount: p.amount, reference: p.reference ?? p.slipRef ?? intentRef ?? null },
       );
       if (p.slipRef) {
         try {

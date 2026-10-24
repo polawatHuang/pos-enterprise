@@ -13,7 +13,9 @@ export interface DisplayLine {
 
 export type DisplayMessage =
   | { type: "cart"; lines: DisplayLine[]; total: number; discount: number; member: { name: string; points: number } | null }
-  | { type: "pay"; total: number; qr: string | null; method: string; bank?: { bank: string; number: string; name: string } | null }
+  | { type: "pay"; total: number; qr: string | null; qrImage?: string | null; method: string; bank?: { bank: string; number: string; name: string } | null }
+  /** the payment provider confirmed the money: show it before the sale finishes */
+  | { type: "paid"; total: number }
   | { type: "age"; asking: boolean }
   | { type: "done"; total: number; change: number; pointsEarned: number }
   | { type: "idle" }

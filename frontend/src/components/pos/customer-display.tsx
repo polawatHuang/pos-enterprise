@@ -6,7 +6,7 @@ import { CheckCircle2, ScanBarcode, ShieldCheck, Sparkles } from "lucide-react";
 import { formatMoney, formatNumber } from "@/lib/utils";
 import { type DisplayMessage, openDisplayChannel } from "./display-channel";
 
-type Screen = Extract<DisplayMessage, { type: "cart" | "pay" | "done" | "idle" }>;
+type Screen = Extract<DisplayMessage, { type: "cart" | "pay" | "paid" | "done" | "idle" }>;
 
 /**
  * Customer-facing screen (second monitor / tablet). Mirrors the cart, shows the PromptPay QR with
@@ -38,7 +38,7 @@ export function CustomerDisplay() {
         if (doneTimer.current) clearTimeout(doneTimer.current);
         doneTimer.current = setTimeout(() => setScreen({ type: "idle" }), 8000);
       }
-      if (m.type === "cart" || m.type === "pay" || m.type === "done" || m.type === "idle") setScreen(m);
+      if (m.type === "cart" || m.type === "pay" || m.type === "paid" || m.type === "done" || m.type === "idle") setScreen(m);
     };
     ch.postMessage({ type: "hello" } satisfies DisplayMessage);
     return () => ch.close();
@@ -84,7 +84,13 @@ export function CustomerDisplay() {
           <p className="text-7xl font-bold tracking-tight text-primary tabular-nums" data-testid="display-total">
             {formatMoney(screen.total)}
           </p>
-          {qrSvg ? (
+          {screen.qrImage ? (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element -- a QR image from the payment provider */}
+              <img src={screen.qrImage} alt="QR PromptPay" className="mt-6 size-[360px] rounded-3xl bg-white object-contain p-4 shadow-xl" data-testid="display-qr" />
+              <p className="mt-4 text-xl">สแกนด้วยแอปธนาคาร ยอดขึ้นอัตโนมัติ</p>
+            </>
+          ) : qrSvg ? (
             <>
               <div className="mt-6 rounded-3xl bg-white p-4 shadow-xl" dangerouslySetInnerHTML={{ __html: qrSvg }} data-testid="display-qr" />
               <p className="mt-4 text-xl">สแกนด้วยแอปธนาคาร ยอดขึ้นอัตโนมัติ</p>
@@ -99,6 +105,14 @@ export function CustomerDisplay() {
             <p className="mt-6 text-2xl text-muted-foreground">ชำระด้วย{screen.method}</p>
           )}
           {cart?.member && <p className="mt-4 text-lg text-muted-foreground">สมาชิก {cart.member.name} · {formatNumber(cart.member.points)} แต้ม</p>}
+        </div>
+      )}
+
+      {screen.type === "paid" && (
+        <div className="m-auto text-center">
+          <CheckCircle2 className="mx-auto size-28 text-success" />
+          <h1 className="mt-4 text-5xl font-bold">ชำระเงินแล้ว</h1>
+          <p className="mt-3 text-3xl font-semibold tabular-nums">{formatMoney(screen.total)}</p>
         </div>
       )}
 

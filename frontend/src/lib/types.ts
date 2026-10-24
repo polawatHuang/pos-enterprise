@@ -806,6 +806,8 @@ export interface PosSettings {
   lineOaId: string;
   /** issue the full tax invoice by itself when the customer fills in the form */
   taxInvoiceAuto: boolean;
+  /** PromptPay that closes the bill by itself (a payment provider is connected and on) */
+  paymentGateway?: { enabled: boolean; provider: string | null };
   /** What this till charges into: the branch's own account when it has one */
   bankAccount: BankAccount;
   promptpayEnabled: boolean;
@@ -1952,4 +1954,25 @@ export interface PublicReceipt {
       total: number;
     } | null;
   };
+}
+
+/** A PromptPay QR made by the shop's payment provider; `paid` once the money arrived. */
+export interface PaymentIntent {
+  id: number;
+  status: "pending" | "paid" | "expired" | "failed" | "cancelled" | "used";
+  amount: number;
+  qrPayload: string | null;
+  qrImage: string | null;
+  expiresAt: string | null;
+  paidAt: string | null;
+}
+
+/** Settings > automatic PromptPay (manager). Keys are never sent back. */
+export interface PaymentGatewayAdmin {
+  provider: string | null;
+  enabled: boolean;
+  providers: { id: string; label: string; fields: { key: string; label: string; secret: boolean }[]; devOnly: boolean }[];
+  hasKey: boolean;
+  mode: "live" | "test" | null;
+  webhookKey: string | null;
 }
