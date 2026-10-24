@@ -44,6 +44,8 @@ const PREFIX = {
   payment_voucher: 'PV',
   purchase_request: 'PR',
   petty_cash_topup: 'PC',
+  payroll_run: 'PY',
+  leave_request: 'LV',
   stock_gr: 'GR',
   stock_aj: 'AJ',
   stock_ws: 'WS',

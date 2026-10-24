@@ -1,5 +1,7 @@
 import {
   BadgePercent,
+  BriefcaseBusiness,
+  CalendarCheck,
   BellRing,
   BarChart3,
   Bot,
@@ -56,7 +58,10 @@ export interface NavGroup {
 }
 
 /** The documents hub (ศูนย์เอกสาร) opens for anyone who reads one kind of document; the server lists only what each may read. */
-export const DOCUMENTS_READ = ["accounting:read", "inventory:read", "inventory:count", "inventory:write", "inventory:approve", "pos:manage", "settings:manage"];
+export const DOCUMENTS_READ = ["accounting:read", "inventory:read", "inventory:count", "inventory:write", "inventory:approve", "pos:manage", "settings:manage", "hr:manage", "leave:approve"];
+
+/** Own leave and payslips: anyone who may file leave, plus approvers and HR. */
+export const HR_SELF = ["leave:request", "leave:approve", "hr:manage"];
 
 /** Customers (CRM) open for anyone who sells, chats with customers or does the books. */
 export const CUSTOMERS_READ = ["pos:sell", "inbox:read", "accounting:read"];
@@ -116,6 +121,13 @@ export const navGroups: NavGroup[] = [
       { href: "/accounting/petty-cash", label: "เงินสดย่อย", icon: PiggyBank, permission: "accounting:read", phase: 1 },
       { href: "/accounting/tax", label: "ภาษี", icon: Landmark, permission: "accounting:read", phase: 1 },
       { href: "/accounting/reports", label: "รายงานการเงิน", icon: BarChart3, permission: "accounting:read", phase: 1 },
+    ],
+  },
+  {
+    label: "บุคคล",
+    items: [
+      { href: "/hr", label: "พนักงาน & เงินเดือน", icon: BriefcaseBusiness, permission: "hr:manage", phase: 1 },
+      { href: "/hr/leave", label: "ใบลา & สลิปเงินเดือน", icon: CalendarCheck, permission: HR_SELF, phase: 1, essential: true },
     ],
   },
   {

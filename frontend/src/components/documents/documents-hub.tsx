@@ -57,6 +57,8 @@ const SOURCE_CATEGORIES: Record<string, DocCategory[]> = {
   stock_transfers: ["stock"],
   stock_counts: ["stock"],
   welfare: ["hr"],
+  payroll: ["hr"],
+  leave: ["hr"],
   transactions: ["finance"],
   pos_returns: ["sales"],
   pos_sales: ["sales"],

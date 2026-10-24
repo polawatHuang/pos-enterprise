@@ -61,6 +61,8 @@ const ACTIONS: { label: string; href: string; icon: LucideIcon; permission: stri
   { label: "สร้างเอกสาร (ใบเสนอราคา/ใบกำกับภาษี)", href: "/accounting/documents/new", icon: FilePlus2, permission: "accounting:write", keywords: "เอกสาร invoice ใบเสร็จ" },
   { label: "จ่ายเงินผู้ขาย / ตั้งหนี้", href: "/accounting/payables", icon: FilePlus2, permission: "accounting:read", keywords: "เจ้าหนี้ ใบสำคัญจ่าย ตั้งหนี้ ap payment voucher" },
   { label: "เงินสดย่อย", href: "/accounting/petty-cash", icon: FilePlus2, permission: "accounting:read", keywords: "petty cash เบิกเงินสดย่อย" },
+  { label: "ทำเงินเดือน", href: "/hr?tab=payroll", icon: FilePlus2, permission: "hr:manage", keywords: "เงินเดือน payroll สลิป ประกันสังคม ภงด1" },
+  { label: "ยื่นใบลา", href: "/hr/leave", icon: FilePlus2, permission: "leave:request", keywords: "ลา ลาป่วย ลากิจ พักร้อน leave" },
   { label: "ขอซื้อสินค้า (ใบขอซื้อ)", href: "/purchasing?tab=requests", icon: FilePlus2, permission: "inventory:read", keywords: "ใบขอซื้อ pr purchase request" },
   { label: "สร้างใบวางบิล", href: "/accounting/documents/new?type=billing_note", icon: FilePlus2, permission: "accounting:write", keywords: "วางบิล billing note ใบแจ้งหนี้ค้าง" },
   { label: "ศูนย์เอกสาร (ค้นหาเอกสารทุกประเภท)", href: "/documents", icon: FilePlus2, permission: "inventory:read", keywords: "เอกสาร ใบสั่งซื้อ ใบรับสินค้า ใบโอน po gr" },

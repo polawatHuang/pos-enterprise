@@ -2012,6 +2012,8 @@ export interface HubDocument {
     | "stock_transfer"
     | "stock_count"
     | "welfare"
+    | "payroll_run"
+    | "leave_request"
     | "transaction"
     | "pos_return"
     | "pos_sale";
@@ -2152,4 +2154,127 @@ export interface PettyCash {
   balance: number;
   topups: { id: number; topupNo: string; date: string; amount: number; fromMethod: string; note: string | null; status: "posted" | "void"; by: string | null }[];
   expenses: { id: number; date: string; category: string; description: string | null; counterparty: string | null; paid: number; status: "posted" | "void" }[];
+}
+
+/* -------------------------------------------------------------- บุคคล / HR */
+
+export interface Employee {
+  id: number;
+  userId: number | null;
+  userEmail: string | null;
+  empCode: string;
+  title: string | null;
+  fullName: string;
+  displayName: string;
+  nationalId: string | null;
+  birthDate: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  branchId: number | null;
+  branchName: string | null;
+  position: string | null;
+  department: string | null;
+  payType: "monthly" | "daily";
+  baseSalary: number;
+  startDate: string;
+  endDate: string | null;
+  status: "active" | "resigned";
+  ssoEnrolled: boolean;
+  ssoNumber: string | null;
+  taxExtraDeductions: number;
+  bankName: string | null;
+  bankAccount: string | null;
+  annualLeaveDays: number;
+  note: string | null;
+}
+
+export interface PayrollItem {
+  id: number;
+  employeeId: number;
+  empCode: string;
+  name: string;
+  position: string | null;
+  payType: "monthly" | "daily";
+  rate: number;
+  nationalId: string | null;
+  bankName: string | null;
+  bankAccount: string | null;
+  daysWorked: number | null;
+  basePay: number;
+  overtime: number;
+  allowance: number;
+  bonus: number;
+  otherIncome: number;
+  deduction: number;
+  gross: number;
+  ssoBase: number;
+  ssoEmployee: number;
+  ssoEmployer: number;
+  wht: number;
+  whtManual: boolean;
+  net: number;
+  note: string | null;
+}
+
+export interface PayrollRun {
+  id: number;
+  runNo: string;
+  period: string;
+  payDate: string;
+  status: "draft" | "approved" | "paid" | "void";
+  headcount: number;
+  totalGross: number;
+  totalSsoEmployee: number;
+  totalSsoEmployer: number;
+  totalWht: number;
+  totalDeductions: number;
+  totalNet: number;
+  paymentMethod: string | null;
+  note: string | null;
+  createdBy: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  paidAt: string | null;
+  items?: PayrollItem[];
+}
+
+export interface Payslip extends PayrollItem {
+  period: string;
+  runNo: string;
+  runStatus: PayrollRun["status"];
+  payDate: string;
+  netText: string;
+  ytd: { gross: number; wht: number; sso: number };
+  org: { name: string; legalName: string | null; taxId: string | null; address: string | null };
+}
+
+export type LeaveType = "sick" | "personal" | "vacation" | "maternity" | "other";
+
+export interface LeaveRequest {
+  id: number;
+  leaveNo: string;
+  employeeId: number;
+  empCode: string;
+  employeeName: string;
+  position: string | null;
+  leaveType: LeaveType;
+  startDate: string;
+  endDate: string;
+  days: number;
+  reason: string | null;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  requestedAt: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  rejectReason: string | null;
+}
+
+export interface HrOrg {
+  name: string;
+  legalName: string | null;
+  taxId: string | null;
+  address: string | null;
+  phone?: string | null;
+  branchNo?: string;
 }

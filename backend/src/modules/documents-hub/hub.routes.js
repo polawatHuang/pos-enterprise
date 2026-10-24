@@ -135,6 +135,26 @@ const SOURCES = [
     party: 'u.full_name',
   },
   {
+    key: 'payroll',
+    can: (u) => has(u, 'hr:manage'),
+    sql: `SELECT 'payroll_run' AS source, r.id, 'payroll_run' AS type, 'hr' AS category, r.run_no AS doc_no, r.pay_date AS doc_date,
+                 CONCAT('เงินเดือน ', r.period) AS party, r.total_net AS amount, r.status, r.created_at AS sort_at
+            FROM payroll_runs r WHERE r.org_id = :orgId`,
+    day: 'r.pay_date',
+    no: 'r.run_no',
+    party: "CONCAT('เงินเดือน ', r.period)",
+  },
+  {
+    key: 'leave',
+    can: (u) => has(u, 'hr:manage', 'leave:approve'),
+    sql: `SELECT 'leave_request' AS source, l.id, 'leave_request' AS type, 'hr' AS category, l.leave_no AS doc_no, l.start_date AS doc_date,
+                 CONCAT(COALESCE(e.title, ''), e.full_name) AS party, NULL AS amount, l.status, l.requested_at AS sort_at
+            FROM leave_requests l JOIN employees e ON e.id = l.employee_id WHERE l.org_id = :orgId`,
+    day: 'l.start_date',
+    no: 'l.leave_no',
+    party: 'e.full_name',
+  },
+  {
     key: 'transactions',
     can: (u) => has(u, 'accounting:read'),
     sql: `SELECT 'transaction' AS source, x.id, x.type, 'finance' AS category, CONCAT(IF(x.type = 'income', 'IN-', 'EX-'), x.id) AS doc_no,

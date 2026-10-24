@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -1630,7 +1630,132 @@ CREATE TABLE petty_cash_topups (
   CONSTRAINT fk_topup_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- HR and payroll (027): employees, payroll runs, remittances, leave
+CREATE TABLE employees (
+  id                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id               BIGINT UNSIGNED NOT NULL,
+  user_id              BIGINT UNSIGNED NULL COMMENT 'login of this person, if any',
+  emp_code             VARCHAR(20) NOT NULL,
+  title                VARCHAR(20) NULL COMMENT 'นาย / นาง / นางสาว',
+  full_name            VARCHAR(191) NOT NULL,
+  national_id          CHAR(13) NULL,
+  birth_date           DATE NULL,
+  address              TEXT NULL,
+  phone                VARCHAR(50) NULL,
+  email                VARCHAR(191) NULL,
+  branch_id            BIGINT UNSIGNED NULL,
+  position             VARCHAR(100) NULL,
+  department           VARCHAR(100) NULL,
+  pay_type             ENUM('monthly','daily') NOT NULL DEFAULT 'monthly',
+  base_salary          DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT 'monthly salary, or the daily wage when pay_type = daily',
+  start_date           DATE NOT NULL,
+  end_date             DATE NULL,
+  status               ENUM('active','resigned') NOT NULL DEFAULT 'active',
+  sso_enrolled         TINYINT(1) NOT NULL DEFAULT 1,
+  sso_number           VARCHAR(20) NULL COMMENT 'usually the national id',
+  tax_extra_deductions DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT 'yearly allowances beyond personal / expense / social security',
+  bank_name            VARCHAR(100) NULL,
+  bank_account         VARCHAR(30) NULL,
+  annual_leave_days    DECIMAL(4,1) NOT NULL DEFAULT 6,
+  note                 VARCHAR(255) NULL,
+  created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_emp_code (org_id, emp_code),
+  UNIQUE KEY uq_emp_user (org_id, user_id),
+  KEY idx_emp_status (org_id, status),
+  CONSTRAINT fk_emp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_emp_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_emp_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE payroll_runs (
+  id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id             BIGINT UNSIGNED NOT NULL,
+  run_no             VARCHAR(40) NOT NULL,
+  period             CHAR(7) NOT NULL COMMENT 'YYYY-MM',
+  pay_date           DATE NOT NULL,
+  status             ENUM('draft','approved','paid','void') NOT NULL DEFAULT 'draft',
+  total_gross        DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total_sso_employee DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total_sso_employer DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total_wht          DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total_deductions   DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total_net          DECIMAL(14,2) NOT NULL DEFAULT 0,
+  payment_method     VARCHAR(30) NULL,
+  note               VARCHAR(255) NULL,
+  created_by         BIGINT UNSIGNED NULL,
+  approved_by        BIGINT UNSIGNED NULL,
+  approved_at        DATETIME NULL,
+  paid_at            DATETIME NULL,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_run_no (org_id, run_no),
+  KEY idx_run_period (org_id, period),
+  CONSTRAINT fk_run_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE payroll_items (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  run_id        BIGINT UNSIGNED NOT NULL,
+  employee_id   BIGINT UNSIGNED NOT NULL,
+  days_worked   DECIMAL(5,2) NULL COMMENT 'daily-paid staff',
+  base_pay      DECIMAL(12,2) NOT NULL DEFAULT 0,
+  overtime      DECIMAL(12,2) NOT NULL DEFAULT 0,
+  allowance     DECIMAL(12,2) NOT NULL DEFAULT 0,
+  bonus         DECIMAL(12,2) NOT NULL DEFAULT 0,
+  other_income  DECIMAL(12,2) NOT NULL DEFAULT 0,
+  gross         DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT 'taxable income of the month (40(1))',
+  sso_base      DECIMAL(12,2) NOT NULL DEFAULT 0,
+  sso_employee  DECIMAL(12,2) NOT NULL DEFAULT 0,
+  sso_employer  DECIMAL(12,2) NOT NULL DEFAULT 0,
+  wht           DECIMAL(12,2) NOT NULL DEFAULT 0,
+  wht_manual    TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'the withholding was typed, not computed',
+  deduction     DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT 'unpaid leave, absence, lateness (reduces the pay)',
+  net           DECIMAL(12,2) NOT NULL DEFAULT 0,
+  note          VARCHAR(255) NULL,
+  UNIQUE KEY uq_item_emp (run_id, employee_id),
+  CONSTRAINT fk_item_run FOREIGN KEY (run_id) REFERENCES payroll_runs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_item_emp FOREIGN KEY (employee_id) REFERENCES employees(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE payroll_remittances (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id         BIGINT UNSIGNED NOT NULL,
+  kind           ENUM('pnd1','sso') NOT NULL,
+  period         CHAR(7) NOT NULL,
+  remit_date     DATE NOT NULL,
+  amount         DECIMAL(14,2) NOT NULL,
+  payment_method VARCHAR(30) NOT NULL DEFAULT 'transfer',
+  reference      VARCHAR(100) NULL,
+  status         ENUM('posted','void') NOT NULL DEFAULT 'posted',
+  created_by     BIGINT UNSIGNED NULL,
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_remit_period (org_id, kind, period),
+  CONSTRAINT fk_remit_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE leave_requests (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id        BIGINT UNSIGNED NOT NULL,
+  leave_no      VARCHAR(40) NOT NULL,
+  employee_id   BIGINT UNSIGNED NOT NULL,
+  leave_type    ENUM('sick','personal','vacation','maternity','other') NOT NULL,
+  start_date    DATE NOT NULL,
+  end_date      DATE NOT NULL,
+  days          DECIMAL(4,1) NOT NULL,
+  reason        VARCHAR(255) NULL,
+  status        ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
+  requested_by  BIGINT UNSIGNED NULL,
+  requested_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  decided_by    BIGINT UNSIGNED NULL,
+  decided_at    DATETIME NULL,
+  reject_reason VARCHAR(255) NULL,
+  UNIQUE KEY uq_leave_no (org_id, leave_no),
+  KEY idx_leave_emp (org_id, employee_id, start_date),
+  CONSTRAINT fk_leave_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_leave_emp FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll');
 
 SET FOREIGN_KEY_CHECKS = 1;
