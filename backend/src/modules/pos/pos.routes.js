@@ -13,6 +13,7 @@ const service = require('./pos.service');
 const discounts = require('./discounts');
 const returns = require('./returns');
 const approvals = require('./approvals');
+const taxInvoices = require('./tax-invoice');
 const promotions = require('./promotions');
 const { paymentFor, promptpayIdSchema, bankAccountSchema } = require('./payment-target');
 const { SLIP_SCHEMA, SLIP_SYSTEM } = require('./slip');
@@ -280,6 +281,8 @@ router.put(
       pointsEarnBaht: z.coerce.number().min(0).max(100_000).optional(),
       pointValue: z.coerce.number().min(0).max(1000).optional(),
       cashLimit: money.optional(),
+      lineOaId: z.string().trim().max(40).regex(/^(@[\w.-]{2,39})?$/, 'LINE OA ต้องขึ้นต้นด้วย @ เช่น @myshop').optional(),
+      taxInvoiceAuto: z.boolean().optional(),
       bankAccount: bankAccountSchema.optional(),
     }),
   }),
@@ -647,7 +650,8 @@ router.get(
     const rows = await db.query(
       `SELECT so.id, so.order_no, so.status, so.total, so.refunded_amount, so.ordered_at, u.full_name AS cashier_name, c.name AS customer_name,
               (SELECT CASE WHEN COUNT(DISTINCT p.method) > 1 THEN 'split' ELSE MIN(p.method) END FROM payments p WHERE p.order_id = so.id AND p.amount > 0) AS method,
-              (SELECT COALESCE(SUM(i.quantity), 0) FROM sales_order_items i WHERE i.order_id = so.id) AS items
+              (SELECT COALESCE(SUM(i.quantity), 0) FROM sales_order_items i WHERE i.order_id = so.id) AS items,
+              (SELECT r.status FROM tax_invoice_requests r WHERE r.order_id = so.id) AS tax_request
          FROM sales_orders so LEFT JOIN users u ON u.id = so.created_by LEFT JOIN customers c ON c.id = so.customer_id
         WHERE so.org_id = :orgId AND so.channel = 'pos'
           AND (${q ? search : scope === 'shift' ? 'so.shift_id = :shiftId' : 'so.ordered_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY'})
@@ -664,6 +668,7 @@ router.get(
         orderedAt: r.ordered_at,
         cashierName: r.cashier_name,
         customerName: r.customer_name ?? null,
+        taxRequest: r.tax_request ?? null,
         method: r.method,
         items: Number(r.items),
       })),
@@ -674,6 +679,42 @@ router.get(
 router.get('/orders/:id', validate({ params: z.object({ id: z.coerce.number().int().positive() }) }), async (req, res) => {
   res.json({ data: await service.getOrder(req.user.orgId, req.valid.params.id) });
 });
+
+/** Issue the full tax invoice for a bill (from the customer's request, or typed at the counter). */
+router.post(
+  '/orders/:id/tax-invoice',
+  validate({
+    params: z.object({ id: z.coerce.number().int().positive() }),
+    body: z
+      .object({
+        name: z.string().trim().max(191).optional(),
+        taxId: z.string().trim().max(13).optional(),
+        branchNo: z.string().trim().regex(/^\d{5}$/).optional(),
+        address: z.string().trim().max(1000).optional(),
+      })
+      .default({}),
+  }),
+  async (req, res) => {
+    const { id } = req.valid.params;
+    const saved = await db.one('SELECT name, tax_id, branch_no, address, email FROM tax_invoice_requests WHERE order_id = :id AND org_id = :orgId', {
+      id,
+      orgId: req.user.orgId,
+    });
+    const b = req.valid.body;
+    // what the customer typed is the default; the cashier may correct it
+    const buyer = {
+      name: b.name || saved?.name,
+      taxId: b.taxId || saved?.tax_id,
+      branchNo: b.branchNo || saved?.branch_no || '00000',
+      address: b.address || saved?.address,
+      email: saved?.email ?? null,
+    };
+    taxInvoices.assertBuyer(buyer);
+    const r = await db.tx((conn) => taxInvoices.issueForOrder(conn, req.user, id, buyer));
+    audit(req, 'pos.tax_invoice', 'sales_order', id, { docNo: r.docNo });
+    res.status(201).json({ data: { ...r, order: await service.getOrder(req.user.orgId, id) } });
+  },
+);
 
 router.post(
   '/orders/:id/void',

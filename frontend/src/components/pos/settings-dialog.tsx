@@ -22,6 +22,8 @@ export function PosSettingsDialog({ settings, onDone }: { settings: PosSettings;
   const [pointsEarnBaht, setPointsEarnBaht] = useState(String(settings.pointsEarnBaht));
   const [pointValue, setPointValue] = useState(String(settings.pointValue));
   const [cashLimit, setCashLimit] = useState(String(settings.cashLimit));
+  const [lineOaId, setLineOaId] = useState(settings.lineOaId ?? "");
+  const [taxInvoiceAuto, setTaxInvoiceAuto] = useState(settings.taxInvoiceAuto ?? false);
   const [bank, setBank] = useState(settings.defaults?.bankAccount ?? settings.bankAccount);
   const own = settings.paymentBranch && (settings.paymentBranch.ownPromptpay || settings.paymentBranch.ownBank) ? settings.paymentBranch : null;
   const [busy, setBusy] = useState(false);
@@ -36,6 +38,8 @@ export function PosSettingsDialog({ settings, onDone }: { settings: PosSettings;
         pointsEarnBaht: Number(pointsEarnBaht) || 0,
         pointValue: Number(pointValue) || 0,
         cashLimit: Number(cashLimit) || 0,
+        lineOaId: lineOaId.trim(),
+        taxInvoiceAuto,
         bankAccount: { bank: bank.bank, type: bank.type, number: bank.number, name: bank.name },
       });
       toast.success("บันทึกการตั้งค่า POS แล้ว");
@@ -109,6 +113,21 @@ export function PosSettingsDialog({ settings, onDone }: { settings: PosSettings;
           <Label htmlFor="footer">ข้อความท้ายใบเสร็จ</Label>
           <Input id="footer" value={receiptFooter} onChange={(e) => setReceiptFooter(e.target.value)} />
         </div>
+        <fieldset className="grid gap-3 rounded-xl border border-border p-3">
+          <legend className="px-1 text-sm font-medium">หน้าใบเสร็จของลูกค้า (QR ท้ายใบเสร็จ)</legend>
+          <div className="space-y-1.5">
+            <Label htmlFor="lineoa">LINE Official Account ของร้าน</Label>
+            <Input id="lineoa" value={lineOaId} onChange={(e) => setLineOaId(e.target.value)} placeholder="@myshop" />
+            <p className="text-xs text-muted-foreground">ใส่แล้วหน้าใบเสร็จจะมีปุ่ม “เพิ่มเพื่อน LINE” — เว้นว่าง = ไม่แสดง</p>
+          </div>
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-0.5 size-5" checked={taxInvoiceAuto} onChange={(e) => setTaxInvoiceAuto(e.target.checked)} />
+            <span>
+              ออกใบกำกับภาษีเต็มรูปให้อัตโนมัติเมื่อลูกค้ากรอกข้อมูลครบ
+              <span className="block text-xs text-muted-foreground">ปิดไว้ = พนักงานตรวจข้อมูลแล้วกดออกเองที่หน้า บิล / คืนของ</span>
+            </span>
+          </label>
+        </fieldset>
         <Button onClick={save} disabled={busy}>
           {busy && <Loader2 className="animate-spin" />}
           บันทึก

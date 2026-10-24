@@ -691,6 +691,9 @@ export interface SlipCheck {
 export interface PosOrder {
   id: number;
   orderNo: string;
+  /** id of the public receipt link /r/<token> (null on bills made before it existed) */
+  receiptToken?: string | null;
+  taxInvoice?: { status: "pending" | "issued"; name: string; taxId: string; branchNo: string; address: string; email: string | null; documentId: number | null; docNo: string | null } | null;
   channel: string;
   status: string;
   shiftId: number | null;
@@ -777,6 +780,8 @@ export interface PosOrderRow {
   orderedAt: string;
   cashierName: string | null;
   customerName?: string | null;
+  /** the customer asked for a full tax invoice (pending) or it was issued */
+  taxRequest?: "pending" | "issued" | null;
   method: string | null;
   items: number;
 }
@@ -797,6 +802,10 @@ export interface PosSettings {
   pointsEarnBaht: number;
   pointValue: number;
   cashLimit: number;
+  /** LINE Official Account (@shop) shown on the customer's receipt page */
+  lineOaId: string;
+  /** issue the full tax invoice by itself when the customer fills in the form */
+  taxInvoiceAuto: boolean;
   /** What this till charges into: the branch's own account when it has one */
   bankAccount: BankAccount;
   promptpayEnabled: boolean;
@@ -1913,4 +1922,34 @@ export interface SalesReport {
   income: number;
   expense: number;
   balance: number;
+}
+
+/** What the customer sees at /r/<token> (public, no login). */
+export interface PublicReceipt {
+  orderNo: string;
+  orderedAt: string;
+  status: string;
+  seller: { name: string; taxId: string | null; address: string | null; phone: string | null; branchName: string | null; branchNo: string | null; vatRegistered: boolean };
+  items: { name: string; unitName: string | null; quantity: number; unitPrice: number; lineTotal: number }[];
+  subtotal: number;
+  discount: number;
+  vat: number;
+  total: number;
+  payments: { method: string; amount: number }[];
+  lineOaId: string | null;
+  points: { isMember: boolean; earned: number; canClaim: boolean; wouldEarn: number };
+  taxInvoice: {
+    status: "none" | "pending" | "issued";
+    canRequest: boolean;
+    windowDays: number;
+    invoice: {
+      docNo: string;
+      docDate: string;
+      buyer: { name: string; taxId: string; branchNo: string; address: string };
+      lines: { description: string; quantity: number; unitPrice: number; lineTotal: number }[];
+      subtotal: number;
+      vat: number;
+      total: number;
+    } | null;
+  };
 }

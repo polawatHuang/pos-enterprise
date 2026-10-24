@@ -99,6 +99,7 @@ function createApp() {
   app.use('/api/purchasing', require('./modules/purchasing/purchasing.routes').router);
   app.use('/api/search', require('./modules/search/search.routes').router);
   app.use('/api/notifications', require('./modules/notifications/notifications.routes').router);
+  app.use('/api/public/r', require('./modules/public/receipt.routes').router);
   app.use('/api/pos', require('./modules/pos/pos.routes').router);
   app.use('/api/customers', require('./modules/customers/customers.routes').router);
   app.use('/api/accounting', require('./modules/accounting').router);

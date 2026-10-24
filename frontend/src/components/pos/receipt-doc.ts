@@ -83,6 +83,15 @@ export function receiptDoc(order: PosOrder, settings: PosSettings | undefined, t
     }
     b.push(row("คงเหลือสุทธิ", order.total - order.refundedAmount, { bold: true }));
   }
+  // The customer's own page: a QR to ask for a full tax invoice and to collect points
+  if (order.receiptToken && !voided && typeof window !== "undefined") {
+    b.push({ kind: "rule" });
+    b.push({
+      kind: "qr",
+      data: `${window.location.origin}/r/${order.receiptToken}`,
+      caption: org?.vatRegistered ? "สแกนเพื่อขอใบกำกับภาษีเต็มรูป / สะสมแต้ม" : "สแกนเพื่อดูใบเสร็จ / สะสมแต้ม",
+    });
+  }
   b.push({ kind: "text", text: settings?.receiptFooter || "ขอบคุณที่อุดหนุน", align: "center" });
   return b;
 }

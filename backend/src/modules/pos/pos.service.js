@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const db = require('../../db/pool');
 const { AppError, badRequest, conflict, notFound } = require('../../core/errors');
 const { applyMovement } = require('../inventory/inventory.service');
@@ -34,6 +35,8 @@ const SETTING_KEYS = {
   pointsEarnBaht: 'pos.points_earn_baht',
   pointValue: 'pos.point_value',
   cashLimit: 'pos.cash_limit',
+  lineOaId: 'pos.line_oa_id',
+  taxInvoiceAuto: 'pos.tax_invoice_auto',
   bankAccount: 'org.bank_account',
 };
 const DEFAULTS = {
@@ -43,6 +46,8 @@ const DEFAULTS = {
   pointsEarnBaht: 25, // spend 25 baht = 1 point; 0 turns points off
   pointValue: 0.25, // 1 point = 0.25 baht when redeemed
   cashLimit: 0, // drawer amount that triggers a "move cash to the safe" prompt; 0 = off
+  lineOaId: '', // LINE Official Account (@shop) shown on the customer's receipt page
+  taxInvoiceAuto: false, // issue the full tax invoice by itself when the customer fills in the form
   // Shop account for bank transfers (POS transfer screen, customer display, invoices, slip check)
   bankAccount: { bank: 'ธนาคารกสิกรไทย', type: 'ออมทรัพย์', number: '0621554271', name: 'พลวัต ฮวง' },
 };
@@ -425,10 +430,10 @@ async function checkout(user, input) {
 
     const tmpNo = `TMP-${user.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const [ins] = await conn.query(
-      `INSERT INTO sales_orders (org_id, branch_id, customer_id, shift_id, order_no, channel, status, subtotal, discount,
+      `INSERT INTO sales_orders (org_id, branch_id, customer_id, shift_id, order_no, receipt_token, channel, status, subtotal, discount,
                                  shipping_fee, vat_amount, total, cost_total, platform_fee, points_earned, points_used,
                                  discount_code_id, code_discount, promo_discount, ordered_at, created_by)
-       VALUES (:orgId, :branchId, :customerId, :shiftId, :tmpNo, 'pos', 'completed', :subtotal, :discount,
+       VALUES (:orgId, :branchId, :customerId, :shiftId, :tmpNo, :receiptToken, 'pos', 'completed', :subtotal, :discount,
                0, :vat, :total, :cost, 0, :pointsEarned, :pointsUsed, :codeId, :codeDiscount, :promoDiscount, UTC_TIMESTAMP(), :userId)`,
       {
         orgId: user.orgId,
@@ -436,6 +441,7 @@ async function checkout(user, input) {
         customerId: customer?.id ?? null,
         shiftId: shift.id,
         tmpNo,
+        receiptToken: crypto.randomBytes(16).toString('base64url'),
         ...totals,
         pointsEarned,
         pointsUsed,
@@ -533,9 +539,18 @@ async function getOrder(orgId, orderId) {
   const payments = await db.query('SELECT method, amount, reference, paid_at FROM payments WHERE order_id = :orderId ORDER BY id', {
     orderId,
   });
+  const tir = await db.one(
+    `SELECT r.status, r.name, r.tax_id, r.branch_no, r.address, r.email, r.document_id, d.doc_no
+       FROM tax_invoice_requests r LEFT JOIN documents d ON d.id = r.document_id WHERE r.order_id = :orderId`,
+    { orderId },
+  );
   return {
     id: o.id,
     orderNo: o.order_no,
+    receiptToken: o.receipt_token ?? null,
+    taxInvoice: tir
+      ? { status: tir.status, name: tir.name, taxId: tir.tax_id, branchNo: tir.branch_no, address: tir.address, email: tir.email, documentId: tir.document_id, docNo: tir.doc_no }
+      : null,
     channel: o.channel,
     status: o.status,
     shiftId: o.shift_id,

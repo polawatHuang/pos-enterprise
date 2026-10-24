@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -575,6 +575,7 @@ CREATE TABLE sales_orders (
   customer_id      BIGINT UNSIGNED NULL,
   shift_id         BIGINT UNSIGNED NULL,
   order_no         VARCHAR(40) NOT NULL,
+  receipt_token    CHAR(22) NULL COMMENT 'public receipt link id',
   channel          ENUM('pos','shopee','tiktok','facebook','instagram','line','website','other') NOT NULL DEFAULT 'pos',
   external_order_id VARCHAR(100) NULL,
   status           ENUM('pending','paid','packed','shipped','completed','cancelled','refunded') NOT NULL DEFAULT 'pending',
@@ -597,6 +598,7 @@ CREATE TABLE sales_orders (
   created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_order_no (org_id, order_no),
+  UNIQUE KEY uq_order_receipt_token (receipt_token),
   KEY idx_so_time (org_id, ordered_at),
   KEY idx_so_channel (org_id, channel, ordered_at),
   CONSTRAINT fk_so_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
@@ -947,6 +949,26 @@ CREATE TABLE documents (
   CONSTRAINT fk_doc_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
   CONSTRAINT fk_doc_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
   CONSTRAINT fk_doc_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE tax_invoice_requests (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id      BIGINT UNSIGNED NOT NULL,
+  order_id    BIGINT UNSIGNED NOT NULL,
+  name        VARCHAR(191) NOT NULL,
+  tax_id      VARCHAR(13) NOT NULL,
+  branch_no   VARCHAR(5) NOT NULL DEFAULT '00000',
+  address     VARCHAR(1000) NOT NULL,
+  email       VARCHAR(191) NULL,
+  status      ENUM('pending','issued') NOT NULL DEFAULT 'pending',
+  document_id BIGINT UNSIGNED NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_tir_order (order_id),
+  KEY idx_tir_org_status (org_id, status),
+  CONSTRAINT fk_tir_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_tir_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_tir_doc FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE document_items (
@@ -1432,6 +1454,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt');
 
 SET FOREIGN_KEY_CHECKS = 1;
