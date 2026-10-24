@@ -161,6 +161,10 @@ function respond(path, body = {}, method = 'POST') {
   // like the real API: balance is GET, everything else POST
   if ((path.endsWith('/credit/balance') ? 'GET' : 'POST') !== method) return { success: false, message: `Request method '${method}' not supported` };
   const ok = (data) => ({ success: true, data, message: 'ok', cached: false, code: '0' });
+  const rolling = ['last7Day', 'last30Day', 'last90Day', 'last180Day', 'last365Day'];
+  if (/\/tiktok\/category\//.test(path) && !rolling.includes(body.date_range)) {
+    return { success: false, message: 'date_range must be last7Day/last30Day/last90Day/last180Day/last365Day' };
+  }
   if (path.endsWith('/credit/balance')) return ok({ totalRemain: state.balance, mainRemain: state.balance });
   if (path.endsWith('/tiktok/category/rank')) return ok(categoryRank(body));
   if (path.endsWith('/tiktok/category/detail')) {

@@ -130,8 +130,13 @@ describe('monthly pull', () => {
     assert.deepEqual(cats.map((c) => [c.level, Number(c.n)]), [[1, 6], [2, 24], [3, 72]]);
     const orphan = await db.one('SELECT COUNT(*) AS n FROM trend_categories WHERE org_id = 1 AND period = :p AND level > 1 AND parent_id IS NULL', { p: PERIOD });
     assert.equal(Number(orphan.n), 0);
+    // category endpoints take rolling windows only: one month per pull, history builds up month by month
     const months = await db.one("SELECT COUNT(DISTINCT period) AS n FROM trend_categories WHERE org_id = 1 AND level = 1");
-    assert.equal(Number(months.n), 6, 'this month + 5 months of history on the first pull');
+    assert.equal(Number(months.n), 1);
+    const catCalls = mock.state.calls.filter((c) => c.path.includes('/tiktok/category/'));
+    assert.ok(catCalls.every((c) => c.body.date_range === 'last30Day'));
+    const productCalls = mock.state.calls.filter((c) => c.path.endsWith('/tiktok/product/rank'));
+    assert.ok(productCalls.every((c) => c.body.date_range === PERIOD), 'products use the calendar month');
     const detail = await db.one("SELECT live_revenue, revenue_trend FROM trend_categories WHERE org_id = 1 AND period = :p AND category_id = '1001'", { p: PERIOD });
     assert.ok(Number(detail.live_revenue) > 0);
 
@@ -212,7 +217,7 @@ describe('category report', () => {
     const d = res.body.data;
     assert.equal(d.items.length, 6);
     assert.ok(d.items[0].revenue >= d.items[1].revenue);
-    assert.equal(d.items[0].trend.length, 6);
+    assert.equal(d.items[0].trend.length, 1);
     assert.equal(d.items[0].childCount, 4);
     assert.ok(d.items.every((i) => typeof i.opportunity === 'boolean'));
     assert.ok(d.summary.revenue > 0 && d.summary.growth != null);
@@ -228,7 +233,7 @@ describe('category report', () => {
     assert.equal(page.status, 200);
     assert.equal(page.body.data.children.length, 4);
     assert.ok(page.body.data.channelAdvice?.advice);
-    assert.equal(page.body.data.history.length, 6);
+    assert.equal(page.body.data.history.length, 1);
     const leaf = await admin.get('/api/scraping/categories/100111');
     assert.deepEqual(leaf.body.data.breadcrumb.map((b) => b.level), [1, 2, 3]);
   });

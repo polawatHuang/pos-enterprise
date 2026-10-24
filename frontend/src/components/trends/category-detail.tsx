@@ -64,7 +64,7 @@ export function CategoryDetailView({ id, period: initialPeriod }: { id: string; 
               <SignalBadge c={c} />
               <Badge tone="neutral">{c.level === 1 ? "หมวดหลัก" : c.level === 2 ? "หมวดรอง" : "หมวดย่อย"}</Badge>
             </div>
-            <p className="text-sm text-muted-foreground">TikTok Shop ไทย · ข้อมูล Kalodata · {periodLabel(c.period)}</p>
+            <p className="text-sm text-muted-foreground">TikTok Shop ไทย · ข้อมูล Kalodata รอบ{periodLabel(c.period)} (ยอด 30 วันล่าสุด ณ วันที่ดึง)</p>
           </div>
           <NativeSelect aria-label="เดือน" className="h-10 w-full sm:w-auto" value={c.period} onChange={(e) => setPeriod(e.target.value)}>
             {c.periods.map((p) => (
@@ -93,7 +93,7 @@ export function CategoryDetailView({ id, period: initialPeriod }: { id: string; 
           <MonthlyBars history={c.history} current={c.period} />
           {c.dailyTrend.length > 1 && (
             <>
-              <p className="mt-3 text-xs text-muted-foreground">รายวันใน{periodLabel(c.period)}</p>
+              <p className="mt-3 text-xs text-muted-foreground">รายวัน 30 วันล่าสุด ณ วันที่ดึง</p>
               <DailyLine points={c.dailyTrend} />
             </>
           )}

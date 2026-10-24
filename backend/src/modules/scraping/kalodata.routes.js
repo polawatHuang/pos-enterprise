@@ -289,6 +289,13 @@ router.get(
     const tracked = await db.one("SELECT COUNT(*) AS n FROM trending_products WHERE org_id = :orgId AND platform = 'kalodata' AND status = 'watching'", { orgId });
     const products = await db.one("SELECT COUNT(*) AS n FROM trending_products WHERE org_id = :orgId AND platform = 'kalodata'", { orgId });
 
+    // no stored month before this one: work the previous 30 days back from each category's growth rate
+    const prevRevenue = prev?.r
+      ? Number(prev.r)
+      : l1.every((c) => c.revenue != null && c.growth != null && c.growth > -100)
+        ? l1.reduce((s, c) => s + c.revenue / (1 + c.growth / 100), 0)
+        : null;
+
     res.json({
       data: {
         period,
@@ -297,8 +304,8 @@ router.get(
         items,
         summary: {
           revenue: total,
-          prevRevenue: n(prev?.r),
-          growth: prev?.r ? Math.round((total / Number(prev.r) - 1) * 10000) / 100 : null,
+          prevRevenue: prevRevenue == null ? null : Math.round(prevRevenue),
+          growth: prevRevenue ? Math.round((total / prevRevenue - 1) * 10000) / 100 : null,
           categories: l1.length,
           fastest: fastest && { id: fastest.id, name: fastest.name, growth: fastest.growth, level: 1 },
           opportunity: best && { id: best.id, name: best.name, growth: best.growth, top3: best.top3, level: 2 },
