@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { withOfflineCopy } from "@/lib/offline-cache";
 import type { VatType } from "@/lib/types";
 
 /** Shop VAT settings (Settings > ภาษีมูลค่าเพิ่ม). "vat7" on a product means the shop's standard rate. */
@@ -14,7 +15,7 @@ export const TAX_KEY = ["org", "tax"] as const;
 export const DEFAULT_TAX: TaxSettings = { vatRegistered: true, vatRate: 7, defaultVatType: "vat7" };
 
 export function useTaxSettings() {
-  const q = useQuery({ queryKey: TAX_KEY, queryFn: () => api.get<TaxSettings>("/org/tax"), staleTime: 10 * 60_000 });
+  const q = useQuery({ queryKey: TAX_KEY, queryFn: () => withOfflineCopy("tax", () => api.get<TaxSettings>("/org/tax")), staleTime: 10 * 60_000 });
   return { ...q, tax: q.data ?? DEFAULT_TAX };
 }
 

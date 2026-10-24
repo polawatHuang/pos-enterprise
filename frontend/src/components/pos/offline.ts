@@ -57,22 +57,36 @@ export async function offlineLookup(code: string): Promise<CatalogItem | null> {
   return byName.length === 1 ? byName[0] : null;
 }
 
+/** The product grid from the saved list (search / category / favourites), when the server is out of reach. */
+export async function offlineCatalog(opts: { q?: string; categoryId?: number; ids?: number[]; limit: number }): Promise<CatalogItem[]> {
+  const list = await loadCatalog();
+  const q = opts.q?.trim().toLowerCase();
+  const ids = opts.ids ? new Set(opts.ids) : null;
+  return list
+    .filter((i) => (ids ? ids.has(i.id) : true))
+    .filter((i) => (opts.categoryId ? i.categoryId === opts.categoryId : true))
+    .filter((i) => (q ? i.name.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q) || i.barcode?.toLowerCase() === q : true))
+    .slice(0, opts.limit);
+}
+
 /* -------------------------------------------------------------------- queue */
 
 let bills: OfflineBill[] = [];
-let loaded = false;
+let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
-async function ensureLoaded() {
-  if (loaded) return;
-  loaded = true;
-  try {
-    bills = (await idbAll<OfflineBill>("queue")).sort((a, b) => a.soldAt.localeCompare(b.soldAt));
-  } catch {
-    bills = [];
-  }
-  emit();
+/** One load per page; every caller waits for it (a sync right after a reload must see the queue). */
+function ensureLoaded() {
+  loading ??= (async () => {
+    try {
+      bills = (await idbAll<OfflineBill>("queue")).sort((a, b) => a.soldAt.localeCompare(b.soldAt));
+    } catch {
+      bills = [];
+    }
+    emit();
+  })();
+  return loading;
 }
 if (typeof window !== "undefined") void ensureLoaded();
 

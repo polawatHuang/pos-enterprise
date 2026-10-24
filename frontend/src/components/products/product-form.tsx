@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
+import { withOfflineCopy } from "@/lib/offline-cache";
 import type { Category, Product, ProductDetail, Supplier, Warehouse } from "@/lib/types";
 import { lineVatRate, netOfInclusive, useTaxSettings, vatTypeLabel } from "@/lib/tax";
 import { useAuth } from "@/components/auth/auth-provider";
@@ -59,7 +60,7 @@ export const CATEGORIES_KEY = ["products", "categories"] as const;
 export const useCategories = () =>
   useQuery({
     queryKey: CATEGORIES_KEY,
-    queryFn: () => api.get<Category[]>("/products/categories"),
+    queryFn: () => withOfflineCopy("categories", () => api.get<Category[]>("/products/categories")),
     staleTime: 5 * 60_000,
   });
 

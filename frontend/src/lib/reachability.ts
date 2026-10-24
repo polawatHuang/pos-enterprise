@@ -50,6 +50,9 @@ if (typeof window !== "undefined") {
   });
 }
 
+/** Current answer outside React (e.g. to skip a "server unreachable" toast the offline banner already says). */
+export const isReachable = () => reachable;
+
 export const useOnline = () =>
   useSyncExternalStore(
     (l) => (listeners.add(l), () => void listeners.delete(l)),
