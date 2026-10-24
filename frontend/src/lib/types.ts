@@ -1249,8 +1249,129 @@ export interface TrendItem {
   aiAnalyzedAt: string | null;
   sourcePlatform: string | null;
   aiSearch: TrendAiSearch | null;
+  /** Kalodata (TikTok Shop TH) fields — null for other sources */
+  kaloCategoryId: string | null;
+  kaloLeafId: string | null;
+  revenue: number | null;
+  revenueGrowth: number | null;
+  creatorCount: number | null;
+  videoCount: number | null;
+  liveCount: number | null;
+  launchDate: string | null;
+  channelSplit: { video?: number | null; live?: number | null; showcase?: number | null; mall?: number | null } | null;
+  commissionPerUnit: number | null;
+  selectScore: number | null;
+  selectVerdict: SelectVerdict | null;
+  selectProjected: number | null;
   firstSeenAt: string;
   lastSeenAt: string;
+}
+
+export type SelectVerdict = "test" | "watch" | "skip" | "insufficient";
+export type SelectKey = "demand" | "trend" | "commission" | "competition" | "content" | "trust";
+
+/** The guide's 30-point selection score: six criteria 1–5, unknown = null. */
+export interface SelectDetail {
+  items: { key: SelectKey; label: string; score: number | null; reason: string }[];
+  total: number;
+  known: number;
+  projected: number | null;
+  verdict: SelectVerdict;
+  stops: string[];
+}
+
+export type KaloExtraKind = "detail" | "analysis" | "comments" | "videos" | "creators";
+
+export interface KaloExtra<T = unknown> {
+  data: T;
+  credits: number;
+  fetchedAt: string;
+}
+
+export interface KaloCategory {
+  id: string;
+  parentId: string | null;
+  level: 1 | 2 | 3;
+  name: string;
+  rank: number | null;
+  revenue: number | null;
+  sale: number | null;
+  growth: number | null;
+  top3: number | null;
+  avgShopRevenue: number | null;
+  shopNumber: number | null;
+  activeProducts: number | null;
+  avgPrice: number | null;
+  opportunity: boolean;
+  signal: "opportunity" | "growing" | "concentrated" | "steady" | "shrinking" | null;
+  signalReasons: string[];
+  trend?: { period: string; revenue: number | null }[];
+  childCount?: number;
+  productCount?: number;
+}
+
+export interface KaloStatus {
+  enabled: boolean;
+  dayOfMonth: number;
+  configured: boolean;
+  lastPeriod: string | null;
+  nextPeriod: string;
+  /** last month that has ended — the newest one Kalodata can be asked for */
+  latestFull: string;
+  estimateCredits: number;
+  running: boolean;
+}
+
+export interface KaloRun {
+  id: number;
+  status: "running" | "succeeded" | "failed";
+  stage: string | null;
+  period: string | null;
+  credits: number | null;
+  balanceUsed: number | null;
+  counts: { categories: number; products: number; details: number } | null;
+  tasksLeft: number;
+  warnings: string[];
+  itemsFound: number;
+  itemsNew: number;
+  error: string | null;
+  triggeredBy: string;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface KaloSettings extends KaloStatus {
+  balance: number | { error: string } | null;
+  runs: KaloRun[];
+}
+
+export interface CategoryReport {
+  period: string | null;
+  periods: string[];
+  breadcrumb: { id: string; name: string; level: number }[];
+  items: KaloCategory[];
+  summary: {
+    revenue: number;
+    prevRevenue: number | null;
+    growth: number | null;
+    categories: number;
+    fastest: { id: string; name: string; growth: number; level: number } | null;
+    opportunity: { id: string; name: string; growth: number | null; top3: number | null; level: number } | null;
+    tracked: number;
+    products: number;
+  } | null;
+  kalodata: KaloStatus;
+}
+
+export interface CategoryPage extends KaloCategory {
+  period: string;
+  periods: string[];
+  breadcrumb: { id: string; name: string; level: number }[];
+  history: { period: string; revenue: number | null; sale: number | null; growth: number | null }[];
+  dailyTrend: (number | null)[];
+  channels: { video: number | null; live: number | null; mall: number | null; affiliate: number | null; self: number | null };
+  channelAdvice: { share: { video: number; live: number; mall: number }; top: "video" | "live" | "mall"; advice: string } | null;
+  children: KaloCategory[];
 }
 
 export interface TrendAnalysis {
@@ -1292,6 +1413,11 @@ export interface TrendDetail extends TrendItem {
   benchmark: TrendBenchmark | null;
   aiAnalysis: TrendAnalysis | null;
   snapshots: { capturedAt: string; price: number | null; soldCount: number | null; rating: number | null; commissionRate: number | null }[];
+  selectDetail: SelectDetail | null;
+  months: { period: string; revenue: number | null; sales: number | null; growth: number | null; price: number | null; commissionRate: number | null; rank: number | null }[];
+  extras: Partial<Record<KaloExtraKind, KaloExtra>>;
+  extraCost: Record<KaloExtraKind, number>;
+  categoryPath: { id: string; name: string; level: number }[];
 }
 
 export interface TrendListMeta {
@@ -1350,7 +1476,7 @@ export interface ChannelProfile {
   updatedAt: string;
 }
 
-export type SourcePlatform = "shopee_affiliate" | "apify" | "custom_url" | "tiktok_shop" | "shopee" | "ai_search";
+export type SourcePlatform = "shopee_affiliate" | "apify" | "custom_url" | "tiktok_shop" | "shopee" | "ai_search" | "kalodata";
 
 export type TrendStage = "emerging" | "rising" | "peak" | "declining";
 

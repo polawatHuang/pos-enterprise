@@ -218,7 +218,7 @@ const GROUPS = [
         title: r.title,
         subtitle: `${r.platform} · คะแนนเทรนด์ ${Math.round(Number(r.trend_score ?? 0))}`,
         meta: r.price == null ? null : `฿${r2(r.price).toLocaleString('th-TH')}`,
-        href: `/trends?q=${encodeURIComponent(r.title.slice(0, 60))}`,
+        href: `/trends/products?q=${encodeURIComponent(r.title.slice(0, 60))}`,
       }));
     },
   },

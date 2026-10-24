@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS trend_product_extras, trend_product_months, trend_categories, leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -1352,7 +1352,7 @@ CREATE TABLE post_results (
 CREATE TABLE scrape_sources (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   org_id      BIGINT UNSIGNED NOT NULL,
-  platform    ENUM('tiktok_shop','shopee','shopee_affiliate','apify','custom_url','ai_search') NOT NULL,
+  platform    ENUM('tiktok_shop','shopee','shopee_affiliate','apify','custom_url','ai_search','kalodata') NOT NULL,
   method      ENUM('official_api','scraping_service','http_fetch','ai_web_search') NOT NULL DEFAULT 'official_api',
   name        VARCHAR(191) NOT NULL,
   config      JSON NULL COMMENT 'category ids, keywords, url, actor id',
@@ -1407,6 +1407,15 @@ CREATE TABLE trending_products (
   has_flash_sale  TINYINT(1) NULL,
   category        VARCHAR(191) NULL,
   category_rank   INT NULL COMMENT 'rank in the platform category best-seller list (30 days)',
+  kalo_category_id VARCHAR(32) NULL COMMENT 'Kalodata level-2 category (phase benchmark group)',
+  kalo_leaf_id    VARCHAR(32) NULL COMMENT 'Kalodata level-3 category, from the product detail',
+  revenue         DECIMAL(16,2) NULL COMMENT 'sales value in the latest month (THB)',
+  revenue_growth_rate DECIMAL(10,2) NULL COMMENT '% vs the month before',
+  creator_count   INT NULL,
+  video_count     INT NULL,
+  live_count      INT NULL,
+  launch_date     DATE NULL,
+  channel_split   JSON NULL COMMENT '{video, live, showcase} revenue',
   trend_score     DECIMAL(10,2) NULL,
   lifecycle_phase VARCHAR(2) NULL COMMENT '1-5 rising, A peak, B-E declining',
   phase_ratio     DECIMAL(7,2) NULL COMMENT 'sold as % of the category peak',
@@ -1414,6 +1423,8 @@ CREATE TABLE trending_products (
   checklist       JSON NULL,
   checklist_passed TINYINT NULL,
   pick_score      DECIMAL(6,2) NULL COMMENT 'fit for affiliate selling, 0-100',
+  select_score    TINYINT NULL COMMENT 'selection score out of 30 (6 criteria × 1–5)',
+  select_detail   JSON NULL,
   manual_checks   JSON NULL COMMENT 'criteria confirmed by a person',
   status          ENUM('new','watching','imported','ignored') NOT NULL DEFAULT 'new',
   imported_product_id BIGINT UNSIGNED NULL,
@@ -1428,6 +1439,7 @@ CREATE TABLE trending_products (
   KEY idx_trend_status (org_id, status),
   KEY idx_trend_pick (org_id, pick_score),
   KEY idx_trend_category (org_id, platform, category),
+  KEY idx_trend_kalo (org_id, kalo_category_id),
   CONSTRAINT fk_tp_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_tp_source FOREIGN KEY (source_id) REFERENCES scrape_sources(id) ON DELETE SET NULL,
   CONSTRAINT fk_tp_product FOREIGN KEY (imported_product_id) REFERENCES products(id) ON DELETE SET NULL,
@@ -1505,6 +1517,62 @@ CREATE TABLE trending_snapshots (
   commission_rate     DECIMAL(5,2) NULL,
   KEY idx_ts_product (trending_product_id, captured_at),
   CONSTRAINT fk_ts_product FOREIGN KEY (trending_product_id) REFERENCES trending_products(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Kalodata market data (028)
+CREATE TABLE trend_categories (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id            BIGINT UNSIGNED NOT NULL,
+  period            CHAR(7) NOT NULL COMMENT 'YYYY-MM',
+  category_id       VARCHAR(32) NOT NULL,
+  parent_id         VARCHAR(32) NULL,
+  level             TINYINT NOT NULL,
+  name              VARCHAR(191) NOT NULL,
+  rank_no           INT NULL,
+  revenue           DECIMAL(18,2) NULL,
+  sale              BIGINT NULL,
+  growth_rate       DECIMAL(10,2) NULL COMMENT '% vs the month before',
+  top3_shop_ratio   DECIMAL(6,2) NULL COMMENT '% of revenue taken by the top 3 shops',
+  avg_shop_revenue  DECIMAL(16,2) NULL,
+  shop_number       INT NULL,
+  active_products   INT NULL,
+  live_revenue      DECIMAL(18,2) NULL,
+  video_revenue     DECIMAL(18,2) NULL,
+  mall_revenue      DECIMAL(18,2) NULL,
+  affiliate_revenue DECIMAL(18,2) NULL,
+  self_revenue      DECIMAL(18,2) NULL,
+  revenue_trend     JSON NULL,
+  updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_trend_cat (org_id, period, category_id),
+  KEY idx_trend_cat_level (org_id, period, level, parent_id),
+  CONSTRAINT fk_tcat_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE trend_product_months (
+  trending_product_id BIGINT UNSIGNED NOT NULL,
+  period              CHAR(7) NOT NULL,
+  revenue             DECIMAL(16,2) NULL,
+  sales               BIGINT NULL,
+  growth_rate         DECIMAL(10,2) NULL,
+  unit_price          DECIMAL(14,2) NULL,
+  commission_rate     DECIMAL(5,2) NULL,
+  live_revenue        DECIMAL(16,2) NULL,
+  video_revenue       DECIMAL(16,2) NULL,
+  showcase_revenue    DECIMAL(16,2) NULL,
+  rank_in_category    INT NULL,
+  PRIMARY KEY (trending_product_id, period),
+  CONSTRAINT fk_tpm_product FOREIGN KEY (trending_product_id) REFERENCES trending_products(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE trend_product_extras (
+  trending_product_id BIGINT UNSIGNED NOT NULL,
+  kind                ENUM('detail','analysis','comments','videos','creators') NOT NULL,
+  data                JSON NULL,
+  credits             DECIMAL(8,2) NOT NULL DEFAULT 0,
+  fetched_by          BIGINT UNSIGNED NULL,
+  fetched_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (trending_product_id, kind),
+  CONSTRAINT fk_tpx_product FOREIGN KEY (trending_product_id) REFERENCES trending_products(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Gap-free document numbering per type and month (Revenue Department requires sequential numbers)
@@ -1756,6 +1824,6 @@ CREATE TABLE leave_requests (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata');
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -71,7 +71,7 @@ const ACTIONS: { label: string; href: string; icon: LucideIcon; permission: stri
 ];
 
 /** "See all" pages that accept ?q= */
-const SEE_ALL: Record<string, string> = { products: "/products", documents: "/documents", trends: "/trends" };
+const SEE_ALL: Record<string, string> = { products: "/products", documents: "/documents", trends: "/trends/products" };
 const RECENT_KEY = "search.recent";
 
 function readRecent(): string[] {

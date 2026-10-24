@@ -5,6 +5,7 @@ type Tone = "neutral" | "primary" | "success" | "danger" | "warning";
 export const TREND_PLATFORM: Record<string, { label: string; className: string }> = {
   shopee: { label: "Shopee", className: "bg-[#EE4D2D] text-white" },
   tiktok_shop: { label: "TikTok Shop", className: "bg-black text-white dark:bg-white dark:text-black" },
+  kalodata: { label: "TikTok Shop · Kalodata", className: "bg-black text-white dark:bg-white dark:text-black" },
   lazada: { label: "Lazada", className: "bg-[#0F146D] text-white" },
   other: { label: "อื่นๆ", className: "bg-slate-500 text-white" },
 };
@@ -27,6 +28,11 @@ export const SOURCE_PLATFORM: Record<SourcePlatform, { label: string; method: st
   custom_url: { label: "หน้าเว็บ (JSON-LD)", method: "อ่านหน้าเว็บ", hint: "อ่านข้อมูล schema.org Product จากหน้าเว็บที่อนุญาต (เคารพ robots.txt)" },
   tiktok_shop: { label: "TikTok Shop", method: "API ทางการ", hint: "API ให้ข้อมูลเฉพาะร้านตัวเอง ใช้นำเข้า CSV แทน" },
   shopee: { label: "Shopee Open Platform", method: "API ทางการ", hint: "API ให้ข้อมูลเฉพาะร้านตัวเอง" },
+  kalodata: {
+    label: "Kalodata (TikTok Shop ไทย)",
+    method: "API ทางการ (รายเดือน)",
+    hint: "อันดับหมวดหมู่และสินค้าขายดีของ TikTok Shop ไทย ดึงอัตโนมัติเดือนละครั้ง ตั้งค่าได้ที่หน้าสินค้าเทรนด์",
+  },
   ai_search: {
     label: "AI ค้นหาสินค้าขายดี",
     method: "AI ค้นเว็บ",

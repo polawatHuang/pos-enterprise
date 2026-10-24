@@ -13,6 +13,8 @@ const { upsertItems, rescore, recomputeCategory, getBenchmark } = require('./tre
 const { CHECKS, SATURATED_RANK } = require('./lifecycle');
 const { csvToItems, csvTemplate, FIELDS, TEMPLATE_COLUMNS, TEMPLATE_ROWS } = require('./csv');
 const { PLATFORMS, startRun } = require('./sources');
+const kalo = require('./kalodata.service');
+const { router: kaloRouter, productScope } = require('./kalodata.routes');
 
 const router = express.Router();
 router.use(authenticate);
@@ -147,6 +149,11 @@ router.delete('/sources/:id', requirePermission('scraping:run'), validate({ para
 router.post('/sources/:id/run', requirePermission('scraping:run'), validate({ params: idParam }), async (req, res) => {
   const s = await db.one('SELECT * FROM scrape_sources WHERE id = :id AND org_id = :orgId', { id: req.valid.params.id, orgId: req.user.orgId });
   if (!s) throw notFound('ไม่พบแหล่งข้อมูล');
+  if (s.platform === 'kalodata') {
+    const runId = await kalo.startMonthly(req.user.orgId, { userId: req.user.id });
+    audit(req, 'scraping.kalodata.run', 'scrape_run', runId);
+    return res.status(202).json({ data: { runId } });
+  }
   const p = PLATFORMS[s.platform];
   if (!p?.runnable) throw badRequest(p?.reason ?? 'แหล่งข้อมูลนี้ยังไม่รองรับ');
   if (p.adapter) p.adapter.requireConfig(); // 503 naming the missing keys
@@ -255,6 +262,19 @@ function mapTrend(t) {
     aiAnalyzedAt: t.ai_analyzed_at,
     sourcePlatform: t.source_platform ?? null,
     aiSearch: aiSearchOf(t),
+    kaloCategoryId: t.kalo_category_id ?? null,
+    kaloLeafId: t.kalo_leaf_id ?? null,
+    revenue: n(t.revenue),
+    revenueGrowth: n(t.revenue_growth_rate),
+    creatorCount: n(t.creator_count),
+    videoCount: n(t.video_count),
+    liveCount: n(t.live_count),
+    launchDate: t.launch_date ? new Date(t.launch_date).toISOString().slice(0, 10) : null,
+    channelSplit: parseJson(t.channel_split),
+    commissionPerUnit: t.price != null && t.commission_rate != null ? Math.round(Number(t.price) * Number(t.commission_rate)) / 100 : null,
+    selectScore: n(t.select_score),
+    selectVerdict: parseJson(t.select_detail)?.verdict ?? null,
+    selectProjected: parseJson(t.select_detail)?.projected ?? null,
     firstSeenAt: t.first_seen_at,
     lastSeenAt: t.last_seen_at,
   };
@@ -268,6 +288,17 @@ const SORTS = {
   commission: ['t.commission_rate', 'DESC'],
   price: ['t.price', 'ASC'],
   newest: ['t.first_seen_at', 'DESC'],
+  revenue: ['t.revenue', 'DESC'],
+  growth: ['t.revenue_growth_rate', 'DESC'],
+  select: ['t.select_score', 'DESC'],
+};
+
+/** Product groups of the category report (guide §3.1 / §7): best sellers, risers, new launches, high commission. */
+const GROUPS = {
+  bestseller: { where: '1=1', sort: 'revenue' },
+  rising: { where: 't.revenue_growth_rate >= 20', sort: 'growth' },
+  new: { where: 't.launch_date >= UTC_DATE() - INTERVAL 90 DAY', sort: 'revenue' },
+  commission: { where: 't.commission_rate >= 15', sort: 'commission' },
 };
 
 const PHASE_FILTERS = {
@@ -290,7 +321,11 @@ router.get(
       status: z.enum(['new', 'watching', 'imported', 'ignored', 'active', 'all']).default('active'),
       platform: z.string().trim().max(30).optional(),
       q: z.string().trim().max(100).optional(),
-      sort: z.enum(['pick', 'score', 'velocity', 'sold', 'commission', 'price', 'newest']).default('pick'),
+      sort: z.enum(['pick', 'score', 'velocity', 'sold', 'commission', 'price', 'newest', 'revenue', 'growth', 'select']).optional(),
+      kaloCategory: z.string().trim().max(32).optional(),
+      group: z.enum(['bestseller', 'rising', 'new', 'commission']).optional(),
+      minPrice: z.coerce.number().min(0).optional(),
+      maxPrice: z.coerce.number().min(0).optional(),
       minCommission: z.coerce.number().min(0).max(100).optional(),
       sourceId: z.coerce.number().int().positive().optional(),
       phase: z.enum(['all', '2-4', 'rising', 'declining']).default('all'),
@@ -301,6 +336,13 @@ router.get(
   }),
   async (req, res) => {
     const f = req.valid.query;
+    const sort = f.sort ?? (f.group ? GROUPS[f.group].sort : 'pick');
+    let scopeSql = '1=1';
+    let scope = { ids: [], leaf: null };
+    if (f.kaloCategory) {
+      scope = (await productScope(req.user.orgId, f.kaloCategory)) ?? { ids: [], leaf: '__none__' };
+      scopeSql = scope.leaf ? 't.kalo_leaf_id = :leaf' : scope.ids.length ? 't.kalo_category_id IN (:scopeIds)' : '1=0';
+    }
     const statusSql = { active: "t.status IN ('new','watching')", all: '1=1' }[f.status] ?? 't.status = :status';
     const where = `t.org_id = :orgId AND ${statusSql}
       AND (:platform IS NULL OR t.platform = :platform)
@@ -308,6 +350,8 @@ router.get(
       AND (:minCommission IS NULL OR t.commission_rate >= :minCommission)
       AND (:sourceId IS NULL OR t.source_id = :sourceId)
       AND ${PHASE_FILTERS[f.phase]}
+      AND ${scopeSql} AND ${f.group ? GROUPS[f.group].where : '1=1'}
+      AND (:minPrice IS NULL OR t.price >= :minPrice) AND (:maxPrice IS NULL OR t.price <= :maxPrice)
       ${f.hideTop10 ? `AND (t.category_rank IS NULL OR t.category_rank > ${SATURATED_RANK})` : ''}`;
     const params = {
       orgId: req.user.orgId,
@@ -316,6 +360,10 @@ router.get(
       q: f.q ? `%${f.q}%` : null,
       minCommission: f.minCommission ?? null,
       sourceId: f.sourceId ?? null,
+      leaf: scope.leaf,
+      scopeIds: scope.ids.length ? scope.ids : ['__none__'],
+      minPrice: f.minPrice ?? null,
+      maxPrice: f.maxPrice ?? null,
       limit: f.pageSize,
       offset: (f.page - 1) * f.pageSize,
     };
@@ -323,7 +371,7 @@ router.get(
       db.query(
         `SELECT t.*, s.name AS source_name, s.platform AS source_platform, a.short_url AS affiliate_url FROM trending_products t
            LEFT JOIN scrape_sources s ON s.id = t.source_id LEFT JOIN affiliate_links a ON a.id = t.affiliate_link_id
-          WHERE ${where} ORDER BY ${SORTS[f.sort][0]} IS NULL, ${SORTS[f.sort].join(' ')}, t.id DESC LIMIT :limit OFFSET :offset`,
+          WHERE ${where} ORDER BY ${SORTS[sort][0]} IS NULL, ${SORTS[sort].join(' ')}, t.id DESC LIMIT :limit OFFSET :offset`,
         params,
       ),
       db.one(`SELECT COUNT(*) AS n FROM trending_products t WHERE ${where}`, params),
@@ -343,6 +391,23 @@ router.get(
     });
   },
 );
+
+/** Level 1 → 2 → 3 names of a Kalodata product's category, for the breadcrumb. */
+async function categoryPath(t) {
+  if (!t.kalo_category_id) return [];
+  const parent = await db.one('SELECT parent_id FROM trend_categories WHERE org_id = :orgId AND category_id = :id AND parent_id IS NOT NULL LIMIT 1', {
+    orgId: t.org_id,
+    id: t.kalo_category_id,
+  });
+  const ids = [parent?.parent_id, t.kalo_category_id, t.kalo_leaf_id].filter(Boolean);
+  const rows = await db.query(
+    'SELECT category_id AS id, name, level, period FROM trend_categories WHERE org_id = :orgId AND category_id IN (:ids) ORDER BY period DESC',
+    { orgId: t.org_id, ids },
+  );
+  const seen = new Map();
+  for (const r of rows) if (!seen.has(r.id)) seen.set(r.id, { id: r.id, name: r.name, level: r.level });
+  return [...seen.values()].sort((a, b) => a.level - b.level);
+}
 
 async function getTrend(orgId, id) {
   const t = await db.one(
@@ -369,6 +434,24 @@ router.get('/trends/:id', requirePermission('scraping:read'), validate({ params:
       manualChecks: parseJson(t.manual_checks) ?? {},
       benchmark: await getBenchmark(db.pool, t.org_id, t.platform, t.category),
       aiAnalysis: parseJson(t.ai_analysis),
+      selectDetail: parseJson(t.select_detail),
+      months: (
+        await db.query(
+          'SELECT period, revenue, sales, growth_rate, unit_price, commission_rate, rank_in_category FROM trend_product_months WHERE trending_product_id = :id ORDER BY period',
+          { id: t.id },
+        )
+      ).map((m) => ({
+        period: m.period,
+        revenue: n(m.revenue),
+        sales: n(m.sales),
+        growth: n(m.growth_rate),
+        price: n(m.unit_price),
+        commissionRate: n(m.commission_rate),
+        rank: n(m.rank_in_category),
+      })),
+      extras: t.platform === 'kalodata' ? await kalo.getExtras(t.id) : {},
+      extraCost: kalo.EXTRA_COST,
+      categoryPath: await categoryPath(t),
       snapshots: snaps.reverse().map((s) => ({
         capturedAt: s.captured_at,
         price: n(s.price),
@@ -411,6 +494,7 @@ router.patch(
         status: z.enum(['new', 'watching', 'ignored']).optional(),
         ...Object.fromEntries(Object.entries(TREND_FACTS).map(([k, [, schema]]) => [k, schema.optional()])),
         manualChecks: z.partialRecord(z.enum(CHECK_KEYS), z.boolean().nullable()).optional(),
+        contentScore: z.coerce.number().int().min(1).max(5).nullable().optional(),
       })
       .strict(),
   }),
@@ -428,11 +512,12 @@ router.patch(
       sets.push(`${col} = :${key}`);
       params[key] = key === 'hasFlashSale' && b[key] != null ? Number(b[key]) : key === 'category' ? b[key] || null : b[key];
     }
-    if (b.manualChecks) {
+    if (b.manualChecks || b.contentScore !== undefined) {
       // null clears a manual answer so the data-driven result applies again
       const merged = {
         ...(parseJson(t.manual_checks) ?? {}),
-        ...b.manualChecks,
+        ...(b.manualChecks ?? {}),
+        ...(b.contentScore !== undefined ? { contentScore: b.contentScore } : {}),
       };
       for (const k of Object.keys(merged)) if (merged[k] === null) delete merged[k];
       sets.push('manual_checks = :manual');
@@ -459,6 +544,7 @@ router.patch(
         phaseNotes: parseJson(fresh.phase_notes),
         checklist: parseJson(fresh.checklist) ?? [],
         manualChecks: parseJson(fresh.manual_checks) ?? {},
+        selectDetail: parseJson(fresh.select_detail),
       },
     });
   },
@@ -1075,5 +1161,22 @@ router.post(
     res.status(201).json({ data: { id: r.insertId, shortUrl, subId } });
   },
 );
+
+/* -------------------------------------------------- Kalodata extras per product */
+
+/** Selling points, comment insight, top videos, creators or a fresh detail — costs credits unless cached (14 days). */
+router.post(
+  '/trends/:id/kalodata/:kind',
+  requirePermission('scraping:run'),
+  validate({ params: z.object({ id: z.coerce.number().int().positive(), kind: z.enum(['detail', 'analysis', 'comments', 'videos', 'creators']) }) }),
+  async (req, res) => {
+    const t = await getTrend(req.user.orgId, req.valid.params.id);
+    const r = await kalo.fetchExtra(req.user.orgId, t, req.valid.params.kind, req.user.id);
+    if (!r.cached) audit(req, 'scraping.kalodata.extra', 'trending_product', t.id, { kind: req.valid.params.kind, credits: r.credits });
+    res.json({ data: r });
+  },
+);
+
+router.use(kaloRouter);
 
 module.exports = { router, ANALYSIS_SCHEMA };

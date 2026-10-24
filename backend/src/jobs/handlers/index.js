@@ -62,6 +62,9 @@ handlers['inventory.alerts'] = () => require('../../modules/inventory/alerts').r
 /** Daily sales summary to LINE OA at each org's set time (default 18:00), once a day. */
 handlers['reports.daily_sales'] = () => require('../../modules/reports/daily-sales').runDue();
 
+/** Kalodata monthly market pull: one short step per job, re-queued until the run is done. */
+handlers['kalodata.step'] = (payload) => require('../../modules/scraping/kalodata.service').step(payload);
+
 /** Recurring jobs scheduled by the cron tick (idempotent: one queued instance at a time). */
 const recurring = [
   { type: 'system.cleanup', everyMinutes: 60 * 24 },
@@ -80,6 +83,7 @@ async function scheduleRecurring() {
     if (!existing) await enqueue(r.type, {}, { priority: -10 });
   }
   await require('../../modules/scraping/sources').scheduleDueSources();
+  await require('../../modules/scraping/kalodata.service').scheduleMonthly();
   await require('../../modules/social/publish').dispatchDue();
 }
 

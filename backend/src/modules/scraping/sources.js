@@ -26,6 +26,11 @@ const PLATFORMS = {
     runnable: false,
     reason: 'TikTok Shop Partner API ให้ข้อมูลเฉพาะสินค้าของร้านตัวเอง ไม่มีข้อมูลสินค้าขายดีของตลาด ใช้การนำเข้า CSV จากเครื่องมือวิเคราะห์แทน',
   },
+  kalodata: {
+    method: 'official_api',
+    adapter: require('../../integrations/kalodata'),
+    runnable: true,
+  },
   shopee: {
     method: 'official_api',
     adapter: null,

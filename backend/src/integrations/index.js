@@ -19,6 +19,7 @@ const adapters = [
   require('./shotstack'),
   require('./r2'),
   require('./apify'),
+  require('./kalodata'),
 ];
 
 /** Settings the web UI may change: every adapter's variables plus the AI provider switch. Nothing else (DB, JWT, cron secrets stay server-only). */
@@ -46,6 +47,6 @@ function status() {
 }
 
 /** Services the settings page can test with a live request (see integrations.routes TESTS). */
-const TESTABLE = new Set(['minimax', 'anthropic', 'minimax_media', 'shotstack', 'line', 'elevenlabs', 'meta', 'meta_social']);
+const TESTABLE = new Set(['minimax', 'anthropic', 'minimax_media', 'shotstack', 'line', 'elevenlabs', 'meta', 'meta_social', 'kalodata']);
 
 module.exports = { adapters, status, EDITABLE, TESTABLE };
