@@ -1,6 +1,7 @@
 import {
   ArrowLeftRight,
   Banknote,
+  CalendarCheck,
   ClipboardList,
   FileText,
   HeartHandshake,
@@ -9,6 +10,7 @@ import {
   Receipt,
   ShoppingBag,
   Truck,
+  Users,
   Warehouse,
   type LucideIcon,
 } from "lucide-react";
@@ -37,7 +39,7 @@ export const CATEGORY: Record<DocCategory, { label: string; hint: string; icon: 
     icon: Landmark,
     types: ["payment_voucher", "petty_cash_topup", "income", "expense", "wht_certificate", "substitute_receipt"],
   },
-  hr: { label: "บุคคล", hint: "ใบเบิกสวัสดิการพนักงาน", icon: HeartHandshake, types: ["welfare"] },
+  hr: { label: "บุคคล", hint: "รอบเงินเดือน ใบลา ใบเบิกสวัสดิการพนักงาน", icon: HeartHandshake, types: ["payroll_run", "leave_request", "welfare"] },
 };
 export const CATEGORY_ORDER: DocCategory[] = ["sales", "purchase", "stock", "finance", "hr"];
 
@@ -55,6 +57,8 @@ const TYPE_LABEL: Record<string, string> = {
   stock_transfer: "ใบโอนสินค้า",
   stock_count: "ใบตรวจนับสต๊อก",
   welfare: "ใบเบิกสวัสดิการ",
+  payroll_run: "รอบเงินเดือน",
+  leave_request: "ใบลา",
   income: "บันทึกรายรับ",
   expense: "บันทึกรายจ่าย",
   pos_sale: "ใบเสร็จหน้าร้าน",
@@ -101,6 +105,18 @@ const STATUS: Partial<Record<HubDocument["source"], Record<string, { label: stri
     cancelled: { label: "ยกเลิก", tone: "neutral" },
     reversed: { label: "กลับรายการ", tone: "neutral" },
   },
+  payroll_run: {
+    draft: { label: "ร่าง", tone: "neutral" },
+    approved: { label: "อนุมัติแล้ว รอจ่าย", tone: "primary" },
+    paid: { label: "จ่ายแล้ว", tone: "success" },
+    void: { label: "ยกเลิก", tone: "danger" },
+  },
+  leave_request: {
+    pending: { label: "รออนุมัติ", tone: "warning" },
+    approved: { label: "อนุมัติแล้ว", tone: "success" },
+    rejected: { label: "ไม่อนุมัติ", tone: "danger" },
+    cancelled: { label: "ยกเลิก", tone: "neutral" },
+  },
   pos_sale: {
     completed: { label: "สำเร็จ", tone: "success" },
     paid: { label: "ชำระแล้ว", tone: "success" },
@@ -140,6 +156,10 @@ export function hrefOf(d: HubDocument): string | null {
       return `/inventory/counts/${d.id}`;
     case "welfare":
       return "/inventory/welfare";
+    case "payroll_run":
+      return `/hr/payroll/${d.id}`;
+    case "leave_request":
+      return "/hr/leave?tab=approve";
     case "transaction":
       return "/accounting/transactions";
     default:
@@ -198,6 +218,8 @@ export const CREATE_MENU: { category: DocCategory; items: CreateItem[] }[] = [
   {
     category: "hr",
     items: [
+      { label: "รอบเงินเดือน", href: "/hr?tab=payroll", permission: "hr:manage", icon: Users },
+      { label: "ใบลา", href: "/hr/leave", permission: ["leave:request", "leave:approve", "hr:manage"], icon: CalendarCheck },
       {
         label: "ใบเบิกสวัสดิการพนักงาน",
         href: "/inventory/welfare",
@@ -218,4 +240,5 @@ export const RELATED: Partial<Record<DocCategory, { label: string; href: string;
     { label: "ภ.พ.30 / ภ.ง.ด. / รายงานภาษีซื้อ-ขาย", href: "/accounting/tax", permission: "accounting:read" },
     { label: "รายงานการเงิน", href: "/accounting/reports", permission: "accounting:read" },
   ],
+  hr: [{ label: "ภ.ง.ด.1 / ประกันสังคม / ภ.ง.ด.1ก", href: "/hr?tab=reports", permission: "hr:manage" }],
 };

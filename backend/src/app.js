@@ -110,6 +110,7 @@ function createApp() {
   app.use('/api/public/r', require('./modules/public/receipt.routes').router);
   app.use('/api/public/payments', require('./modules/public/payments.routes').router);
   app.use('/api/documents', require('./modules/documents-hub/hub.routes').router);
+  app.use('/api/hr', require('./modules/hr').router);
   app.use('/api/pos', require('./modules/pos/pos.routes').router);
   app.use('/api/customers', require('./modules/customers/customers.routes').router);
   app.use('/api/accounting', require('./modules/accounting').router);
