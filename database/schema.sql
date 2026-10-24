@@ -576,6 +576,7 @@ CREATE TABLE sales_orders (
   shift_id         BIGINT UNSIGNED NULL,
   order_no         VARCHAR(40) NOT NULL,
   receipt_token    CHAR(22) NULL COMMENT 'public receipt link id',
+  client_ref       CHAR(36) NULL COMMENT 'till-made id of a bill sold offline (idempotent sync)',
   channel          ENUM('pos','shopee','tiktok','facebook','instagram','line','website','other') NOT NULL DEFAULT 'pos',
   external_order_id VARCHAR(100) NULL,
   status           ENUM('pending','paid','packed','shipped','completed','cancelled','refunded') NOT NULL DEFAULT 'pending',
@@ -599,6 +600,7 @@ CREATE TABLE sales_orders (
   updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_order_no (org_id, order_no),
   UNIQUE KEY uq_order_receipt_token (receipt_token),
+  UNIQUE KEY uq_order_client_ref (org_id, client_ref),
   KEY idx_so_time (org_id, ordered_at),
   KEY idx_so_channel (org_id, channel, ordered_at),
   CONSTRAINT fk_so_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
@@ -1479,6 +1481,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales');
 
 SET FOREIGN_KEY_CHECKS = 1;

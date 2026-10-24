@@ -27,6 +27,7 @@ import {
   TicketPercent,
   Trash2,
   UserRound,
+  WifiOff,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,6 +35,7 @@ import { api, ApiError } from "@/lib/api";
 import type { CartQuote, CatalogItem, DiscountCheck, DiscountCode, HeldBill, PaymentMethod, PosMember, PosOrder, PosSettings, Shift, ShiftReport } from "@/lib/types";
 import { cn, formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
+import { useOnline } from "@/lib/reachability";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, Skeleton } from "@/components/ui/primitives";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
@@ -49,6 +51,8 @@ import { LineDialog } from "./line-dialog";
 import { ApprovalCancelled, ManagerPinHost, withApproval } from "./manager-approval";
 import { OpenPriceDialog } from "./open-price-dialog";
 import { GatewayDialog } from "./gateway-settings";
+import { enqueueBill, offlineLookup, saveCatalog, syncBills, useOfflineBills, type OfflineBill } from "./offline";
+import { OfflineBillsDialog } from "./offline-dialog";
 import { PosGuide } from "./pos-guide";
 import { openDrawer, PrinterDialog, printOnUsb, printReceipt, usePrinterSettings } from "./printer";
 import { receiptDoc, shiftReportDoc } from "./receipt-doc";
@@ -79,6 +83,7 @@ type Modal =
   | "practice"
   | "printer"
   | "gateway"
+  | "offline"
   | null;
 
 const GUIDE_KEY = "pos.guide.done";
@@ -100,7 +105,13 @@ const PRACTICE_SHIFT: Shift = {
 type Filter = number | "all" | "fav";
 
 export function PosView() {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
+  // Offline: cash bills are sold at plain list prices (no promotions, discounts, codes, points) and
+  // sent when the connection is back; the server charges the same, so the till and the books agree.
+  const online = useOnline();
+  const offline = !online;
+  const allBills = useOfflineBills();
+  const myBills = allBills.filter((b) => b.userId === user?.id);
   const qc = useQueryClient();
   const shift = useQuery({ queryKey: SHIFT_KEY, queryFn: () => api.get<Shift | null>("/pos/shift") });
   const settings = useQuery({ queryKey: POS_SETTINGS_KEY, queryFn: () => api.get<PosSettings>("/pos/settings"), staleTime: 5 * 60_000 });
@@ -171,6 +182,21 @@ export function PosView() {
     placeholderData: keepPreviousData,
   });
 
+  // A copy of the product list kept on this device so scanning continues when the internet drops
+  useQuery({
+    queryKey: ["offline-catalog"],
+    queryFn: async () => {
+      const items = await api.get<CatalogItem[]>("/pos/catalog/offline");
+      await saveCatalog(items);
+      return items.length;
+    },
+    enabled: !!shift.data && online,
+    staleTime: 10 * 60_000,
+    refetchInterval: 10 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
   // Promotions are priced by the server (same code as checkout); lines keep the quote for their key
   // while it matches their quantity, so totals don't flicker while the next quote loads.
   const quoteItems = cart.map((l) => ({ productId: l.item.id, unitId: l.unitId, quantity: l.quantity }));
@@ -183,6 +209,8 @@ export function PosView() {
     refetchInterval: 60_000, // time-window deals start and end while a bill is open
   });
   const priced = useMemo<CartLine[]>(() => {
+    // offline: plain list price, exactly what the server will record when the bill is sent
+    if (offline) return cart.map((l) => ({ ...l, discount: 0, promo: undefined, item: { ...l.item, markdown: null } }));
     const q = cart.length ? quote.data : undefined;
     if (!q) return cart;
     return cart.map((l) => {
@@ -190,19 +218,19 @@ export function PosView() {
       const ql = i >= 0 ? q.lines[i] : null;
       return ql ? { ...l, promo: { discount: ql.promoDiscount, markdown: ql.markdownKept, name: ql.promotionName } } : l;
     });
-  }, [cart, quote.data]);
-  const suggestions = cart.length ? (quote.data?.suggestions ?? []) : [];
+  }, [cart, quote.data, offline]);
+  const suggestions = cart.length && !offline ? (quote.data?.suggestions ?? []) : [];
 
   const pointValue = settings.data?.pointValue ?? 0;
-  const discountNum = Math.max(Number(discount) || 0, 0);
+  const discountNum = offline ? 0 : Math.max(Number(discount) || 0, 0);
   const lines = useMemo(() => totalsOf(priced, 0, 0, tax), [priced, tax]);
   // A code applies to the subtotal after line discounts, never more than what is left after the bill discount
   const codeIssue = code ? codeProblem(code, lines.subtotal, member?.id ?? null) : null;
-  const codeOff = code && !codeIssue ? Math.min(codeAmount(code, lines.subtotal), Math.max(r2(lines.subtotal - discountNum), 0)) : 0;
+  const codeOff = !offline && code && !codeIssue ? Math.min(codeAmount(code, lines.subtotal), Math.max(r2(lines.subtotal - discountNum), 0)) : 0;
   const billOff = r2(discountNum + codeOff);
   const base = useMemo(() => totalsOf(priced, billOff, 0, tax), [priced, billOff, tax]);
   const maxPoints = member && pointValue > 0 ? Math.min(member.points, Math.floor(base.total / pointValue)) : 0;
-  const points = Math.min(pointsUse, maxPoints);
+  const points = offline ? 0 : Math.min(pointsUse, maxPoints);
   const totals = useMemo(() => totalsOf(priced, billOff, r2(points * pointValue), tax), [priced, billOff, points, pointValue, tax]);
   const needsAge = cart.some((l) => l.item.ageRestricted);
   const selectedLine = cart.find((l) => l.key === selected) ?? null;
@@ -324,6 +352,21 @@ export function PosView() {
       setSearch("");
       setPendingQty(null);
     } catch (err) {
+      // no connection: look the code up in the product list saved on this device
+      if (err instanceof ApiError && (err.status === 0 || (err.status >= 502 && err.status <= 504))) {
+        const local = await offlineLookup(code);
+        if (local) {
+          add(local, null, pendingQty ?? 1);
+          setSearch("");
+          setPendingQty(null);
+        } else {
+          beep("error");
+          setScanMiss(code);
+          setSearch("");
+          setPendingQty(null);
+        }
+        return;
+      }
       if (!(err instanceof ApiError && err.status === 404)) {
         beep("error");
         toast.error(err instanceof Error ? err.message : "ค้นหาไม่สำเร็จ");
@@ -431,6 +474,90 @@ export function PosView() {
     post({ type: "pay", total: totals.total, qr: null, method: m });
   };
 
+  /** Cash bill while the connection is down: queued on this device and sent later; a temporary receipt prints now. */
+  const payOffline = async (p: PaymentResult) => {
+    const cashGiven = r2(p.payments.reduce((sum, t) => (t.method === "cash" ? sum + t.amount : sum), 0));
+    if (!user || p.payments.some((t) => t.method !== "cash") || cashGiven + 1e-9 < totals.total) {
+      toast.error("ออฟไลน์รับได้เฉพาะเงินสด และต้องรับครบยอด");
+      return;
+    }
+    const clientRef = crypto.randomUUID();
+    const soldAt = new Date().toISOString();
+    const change = r2(cashGiven - totals.total);
+    const orderNo = `OFF-${clientRef.slice(0, 6).toUpperCase()}`;
+    const bill: OfflineBill = {
+      clientRef,
+      userId: user.id,
+      userName: user.fullName,
+      soldAt,
+      items: cart.map((l) => ({
+        productId: l.item.id,
+        unitId: l.unitId,
+        quantity: l.quantity,
+        ...(l.item.openPrice ? { unitPrice: l.item.price, name: l.item.name } : {}),
+      })),
+      payments: [{ method: "cash", amount: cashGiven }],
+      ageConfirmed: needsAge ? p.ageConfirmed : undefined,
+      expectedTotal: totals.total,
+      summary: { orderNo, total: totals.total, units: totals.units },
+      status: "queued",
+    };
+    try {
+      await enqueueBill(bill);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "บันทึกบิลออฟไลน์ไม่สำเร็จ", { duration: 12000 });
+    }
+    const order: PosOrder = {
+      id: 0,
+      offline: true,
+      orderNo,
+      channel: "pos",
+      status: "completed",
+      shiftId: s.id,
+      branchName: s.branchName,
+      branchNo: null,
+      cashierName: user.fullName,
+      customerName: null,
+      customerId: null,
+      pointsEarned: 0,
+      pointsUsed: 0,
+      customerPoints: null,
+      subtotal: totals.subtotal,
+      discount: 0,
+      vatAmount: totals.vat,
+      total: totals.total,
+      orderedAt: soldAt,
+      change,
+      items: priced.map((l, i) => ({
+        id: i,
+        productId: l.item.id,
+        name: l.item.name,
+        unitName: l.unitId ? unitName(l) : null,
+        quantity: l.quantity,
+        returnedQty: 0,
+        unitPrice: unitPrice(l),
+        discount: 0,
+        promoDiscount: 0,
+        promotionName: null,
+        lineTotal: lineTotal(l),
+      })),
+      payments: [{ method: "cash", amount: cashGiven - change, reference: null, paidAt: soldAt }],
+      codeDiscount: 0,
+      promoDiscount: 0,
+      discountCode: null,
+      refundedAmount: 0,
+      returns: [],
+    };
+    beep("done");
+    post({ type: "done", total: order.total, change, pointsEarned: 0 });
+    clearBill();
+    setReceipt(order);
+    setModal("receipt");
+    if (printer?.kind && printer.autoPrint) {
+      printOnUsb(receiptDoc(order, settings.data, tax), { openDrawer: true }).catch(() => undefined);
+    } else void openDrawer();
+  };
+
   const pay = async (p: PaymentResult) => {
     if (training) {
       // practice sale: same screens, nothing sent to the server
@@ -441,6 +568,7 @@ export function PosView() {
       setModal("practice");
       return;
     }
+    if (offline) return void (await payOffline(p));
     setPaying(true);
     try {
       const body = {
@@ -506,6 +634,30 @@ export function PosView() {
       toast.error(err instanceof Error ? err.message : "โหลดรายงานไม่สำเร็จ");
     }
   };
+
+  /* ------------------------------------------------------------- offline bills sync */
+  const refreshAfterSync = () => {
+    for (const k of ["pos", "dashboard", "inventory", "products"]) void qc.invalidateQueries({ queryKey: [k] });
+  };
+  const syncNow = useEffectEvent(async () => {
+    if (!user || training) return;
+    const r = await syncBills(user.id);
+    if (r.sent) {
+      toast.success(`ส่งบิลออฟไลน์ ${r.sent} ใบเข้าระบบแล้ว`);
+      refreshAfterSync();
+    }
+    for (const c of r.changed) {
+      toast.warning(`บิลออฟไลน์ที่ขาย ${formatMoney(c.charged)} ระบบบันทึก ${formatMoney(c.recorded)} (ราคาเปลี่ยนระหว่างออฟไลน์) — ตรวจสอบกับผู้จัดการ`, { duration: 20000 });
+    }
+    if (r.failed) toast.error(`ระบบไม่รับบิลออฟไลน์ ${r.failed} ใบ — แตะแถบเตือนเพื่อดูเหตุผล`, { duration: 15000 });
+  });
+  const hasShift = !!shift.data;
+  useEffect(() => {
+    if (!online || !hasShift) return;
+    void syncNow();
+    const t = setInterval(() => void syncNow(), 30_000);
+    return () => clearInterval(t);
+  }, [online, hasShift]);
 
   /* ------------------------------------------------------------------ keyboard */
   const onKey = useEffectEvent((e: KeyboardEvent) => {
@@ -612,6 +764,30 @@ export function PosView() {
           </Button>
         )}
       </div>
+      {offline && (
+        <div role="status" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border-2 border-warning bg-warning/10 px-4 py-2.5 text-sm font-medium">
+          <WifiOff className="size-5 shrink-0 text-warning" />
+          <span className="min-w-0 flex-1">ออฟไลน์ — ขายเงินสดได้ ราคาเต็ม (ไม่มีโปรโมชั่น ส่วนลด สมาชิก) บิลส่งเข้าระบบเองเมื่อเน็ตกลับ</span>
+          {myBills.length > 0 && (
+            <button type="button" onClick={() => setModal("offline")} className="min-h-10 rounded-lg bg-warning px-3 text-white">
+              รอส่ง {myBills.length} ใบ
+            </button>
+          )}
+        </div>
+      )}
+      {!offline && allBills.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setModal("offline")}
+          className={cn(
+            "mb-3 flex min-h-11 w-full items-center gap-2 rounded-xl border px-4 py-2 text-left text-sm font-medium",
+            allBills.some((b) => b.status === "failed") ? "border-danger bg-danger/10 text-danger" : "border-warning bg-warning/10",
+          )}
+        >
+          <WifiOff className="size-4 shrink-0" />
+          {allBills.some((b) => b.status === "failed") ? "มีบิลออฟไลน์ที่ระบบไม่รับ — แตะเพื่อดู" : `กำลังส่งบิลออฟไลน์ ${allBills.length} ใบ — แตะเพื่อดู`}
+        </button>
+      )}
       {training && (
         <div role="status" className="mb-3 flex items-center gap-2 rounded-xl border-2 border-warning bg-warning/10 px-4 py-2.5 text-sm font-medium">
           <GraduationCap className="size-5 shrink-0 text-warning" />
@@ -928,6 +1104,7 @@ export function PosView() {
             ageConfirmedByCustomer={ageByCustomer}
             suggestions={suggestions}
             onAddSuggestion={(item, qty) => add(item, null, qty)}
+            offline={offline}
             onGatewayPaid={(amount) => post({ type: "paid", total: amount })}
             onQr={(qr, method, amount, image) => {
               const acc = settings.data?.bankAccount;
@@ -975,6 +1152,7 @@ export function PosView() {
         {modal === "held" && <HeldDialog onRecall={(b) => void recall(b)} />}
         {modal === "keys" && <ShortcutsDialog />}
         {modal === "printer" && <PrinterDialog />}
+        {modal === "offline" && <OfflineBillsDialog onSynced={refreshAfterSync} />}
         {modal === "openprice" && <OpenPriceDialog key={openItem?.id ?? 0} item={openItem} onAdd={addOpen} />}
         {modal === "practice" && practice && (
           <DialogContent title="ฝึกขายสำเร็จ" description="ของจริงจะขึ้นใบเสร็จตรงนี้ — บิลนี้ไม่ถูกบันทึก" className="max-w-sm">

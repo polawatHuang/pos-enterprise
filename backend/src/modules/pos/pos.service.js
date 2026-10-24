@@ -308,12 +308,40 @@ async function checkout(user, input) {
   const shift = await currentShift(user.id);
   if (!shift) throw conflict('กรุณาเปิดกะก่อนขาย');
   if (input.payments?.some((p) => p.intentId && p.method !== 'promptpay')) throw badRequest('รายการชำระอัตโนมัติใช้ได้กับ PromptPay เท่านั้น');
+  // A bill the till sold while offline and is now sending. Prices are the plain list prices the till
+  // showed (no promotions, near-expiry markdowns, codes or points), the goods have already left the
+  // shelf (stock may go negative), and sending it twice never makes two sales.
+  const offline = Boolean(input.clientRef);
+  let soldAt = null;
+  if (offline) {
+    if (input.discountCode || input.pointsUsed || input.customerId || input.payments?.some((p) => p.method !== 'cash' || p.intentId)) {
+      throw badRequest('บิลออฟไลน์รับเฉพาะเงินสด ไม่มีโค้ดส่วนลด สมาชิก หรือแต้ม');
+    }
+    soldAt = input.soldAt ? new Date(input.soldAt) : new Date();
+    if (Number.isNaN(soldAt.getTime()) || soldAt.getTime() > Date.now() + 5 * 60_000 || soldAt.getTime() < Date.now() - 3 * 86_400_000) {
+      throw badRequest('เวลาขายของบิลออฟไลน์ไม่ถูกต้อง (ส่งได้ภายใน 3 วัน)');
+    }
+    const dup = await db.one('SELECT id, total FROM sales_orders WHERE org_id = :orgId AND client_ref = :ref', { orgId: user.orgId, ref: input.clientRef });
+    if (dup) return { orderId: dup.id, total: Number(dup.total), change: 0, duplicate: true };
+  }
   const settings = await getSettings(user.orgId);
   const tax = await getTaxSettings(user.orgId);
   const canOverride = user.permissions.includes('pos:manage');
   const now = localTime();
-  const promos = await promotions.activePromotions(user.orgId, shift.branch_id);
+  const promos = offline ? [] : await promotions.activePromotions(user.orgId, shift.branch_id);
 
+  try {
+    return await runCheckout();
+  } catch (err) {
+    // two sends of the same offline bill at once: the second finds the first
+    if (offline && err.code === 'ER_DUP_ENTRY' && /client_ref/.test(err.message ?? '')) {
+      const dup = await db.one('SELECT id, total FROM sales_orders WHERE org_id = :orgId AND client_ref = :ref', { orgId: user.orgId, ref: input.clientRef });
+      if (dup) return { orderId: dup.id, total: Number(dup.total), change: 0, duplicate: true };
+    }
+    throw err;
+  }
+
+  function runCheckout() {
   return db.tx(async (conn) => {
     const warehouseId = await warehouseForBranch(conn, user.orgId, shift.branch_id);
 
@@ -354,8 +382,8 @@ async function checkout(user, input) {
       const unitPrice = item.unitPrice ?? listPrice;
       const gross = unitPrice * item.quantity;
       // Expiry-tracked items leave first-expiry-first-out; near-expiry lots carry their markdown
-      const lotAllocations = openPrice ? [] : await consumeFefo(conn, { warehouseId, productId: p.id, qty: r2(item.quantity * factor), forSale: true });
-      const markdown = r2(lotAllocations.reduce((s, a) => s + (a.qty * (unitPrice / factor) * a.markdownPct) / 100, 0));
+      const lotAllocations = openPrice ? [] : await consumeFefo(conn, { warehouseId, productId: p.id, qty: r2(item.quantity * factor), forSale: !offline });
+      const markdown = offline ? 0 : r2(lotAllocations.reduce((s, a) => s + (a.qty * (unitPrice / factor) * a.markdownPct) / 100, 0));
       lines.push({
         productId: p.id,
         categoryId: p.category_id == null ? null : Number(p.category_id),
@@ -432,11 +460,11 @@ async function checkout(user, input) {
 
     const tmpNo = `TMP-${user.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const [ins] = await conn.query(
-      `INSERT INTO sales_orders (org_id, branch_id, customer_id, shift_id, order_no, receipt_token, channel, status, subtotal, discount,
+      `INSERT INTO sales_orders (org_id, branch_id, customer_id, shift_id, order_no, receipt_token, client_ref, channel, status, subtotal, discount,
                                  shipping_fee, vat_amount, total, cost_total, platform_fee, points_earned, points_used,
                                  discount_code_id, code_discount, promo_discount, ordered_at, created_by)
-       VALUES (:orgId, :branchId, :customerId, :shiftId, :tmpNo, :receiptToken, 'pos', 'completed', :subtotal, :discount,
-               0, :vat, :total, :cost, 0, :pointsEarned, :pointsUsed, :codeId, :codeDiscount, :promoDiscount, UTC_TIMESTAMP(), :userId)`,
+       VALUES (:orgId, :branchId, :customerId, :shiftId, :tmpNo, :receiptToken, :clientRef, 'pos', 'completed', :subtotal, :discount,
+               0, :vat, :total, :cost, 0, :pointsEarned, :pointsUsed, :codeId, :codeDiscount, :promoDiscount, IFNULL(:orderedAt, UTC_TIMESTAMP()), :userId)`,
       {
         orgId: user.orgId,
         branchId: shift.branch_id,
@@ -444,6 +472,8 @@ async function checkout(user, input) {
         shiftId: shift.id,
         tmpNo,
         receiptToken: crypto.randomBytes(16).toString('base64url'),
+        clientRef: input.clientRef ?? null,
+        orderedAt: soldAt ? soldAt.toISOString().slice(0, 19).replace('T', ' ') : null,
         ...totals,
         pointsEarned,
         pointsUsed,
@@ -476,6 +506,8 @@ async function checkout(user, input) {
         refType: 'sales_order',
         refId: orderId,
         userId: user.id,
+        allowNegative: offline,
+        note: offline ? 'ขายตอนออฟไลน์' : null,
       });
     }
     for (const p of payRows) {
@@ -509,7 +541,7 @@ async function checkout(user, input) {
     // Same transaction as the sale: the books can never disagree with the till.
     await postJournal(conn, {
       orgId: user.orgId,
-      date: localDate(),
+      date: localDate(soldAt ?? new Date()),
       description: `ขายหน้าร้าน ${orderNo}`,
       refType: 'sales_order',
       refId: orderId,
@@ -518,6 +550,7 @@ async function checkout(user, input) {
     });
     return { orderId, orderNo, ...totals, change, pointsEarned, pointsUsed, codeDiscount, promoDiscount, warehouseId };
   });
+  }
 }
 
 /* ------------------------------------------------------------------ orders */
