@@ -31,7 +31,8 @@ export function GatewayQr({
   const [committed, setCommitted] = useState(amount);
   const [nonce, setNonce] = useState(0);
   const create = useQuery({
-    queryKey: ["pos", "intent-new", committed, nonce],
+    // not under "pos": a finished sale invalidates ["pos"] and that must not create a second QR
+    queryKey: ["gateway-intent-new", committed, nonce],
     queryFn: () => api.post<PaymentIntent>("/pos/payment-intents", { amount: committed }),
     staleTime: Infinity,
     gcTime: 0,
@@ -41,7 +42,7 @@ export function GatewayQr({
   });
   const made = create.data;
   const status = useQuery({
-    queryKey: ["pos", "intent", made?.id],
+    queryKey: ["gateway-intent", made?.id],
     queryFn: () => api.get<PaymentIntent>(`/pos/payment-intents/${made!.id}`),
     enabled: !!made,
     refetchInterval: (q) => (q.state.data && q.state.data.status !== "pending" ? false : 2000),

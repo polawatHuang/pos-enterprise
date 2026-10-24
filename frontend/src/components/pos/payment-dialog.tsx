@@ -296,10 +296,12 @@ export function PaymentDialog({
               />
               <p className="text-[11px] text-muted-foreground">ใส่น้อยกว่ายอดเพื่อแบ่งจ่าย ส่วนที่เหลือรับวิธีอื่น</p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="ref">เลขอ้างอิง (ไม่บังคับ)</Label>
-              <Input id="ref" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="เลขอนุมัติ / 4 หลักท้ายบัตร / เลขสลิป" />
-            </div>
+            {!useGateway && (
+              <div className="space-y-2">
+                <Label htmlFor="ref">เลขอ้างอิง (ไม่บังคับ)</Label>
+                <Input id="ref" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="เลขอนุมัติ / 4 หลักท้ายบัตร / เลขสลิป" />
+              </div>
+            )}
           </div>
           {useGateway && !ageOk && (
             <p className="rounded-xl border border-warning bg-warning-soft p-3 text-sm text-warning">ยืนยันอายุลูกค้าก่อน (ติ๊กด้านบน) จึงจะแสดง QR</p>
@@ -317,7 +319,7 @@ export function PaymentDialog({
           )}
           {method === "promptpay" && !useGateway && <PromptPayQr amount={amountNum} enabled={!!settings?.promptpayEnabled} onPayload={(p) => onQr(p, "promptpay", amountNum)} />}
           {method === "transfer" && settings?.bankAccount && <BankCard account={settings.bankAccount} />}
-          {(method === "promptpay" || method === "transfer") && (
+          {(method === "promptpay" || method === "transfer") && !useGateway && (
             <div className="rounded-xl border border-border p-3">
               <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-muted px-3 py-2.5 text-sm font-medium hover:bg-accent">
                 {checking ? <Loader2 className="size-4 animate-spin" /> : <ScanLine className="size-4" />}
