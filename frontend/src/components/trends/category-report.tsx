@@ -30,7 +30,8 @@ export function CategoryReportView() {
   const params = useSearchParams();
   const [period, setPeriod] = useState(params.get("period") ?? "");
   const [level, setLevel] = useState<Level>((params.get("level") as Level | null) ?? "1");
-  const [parentId, setParentId] = useState<string | null>(params.get("parent"));
+  // undefined = let the server open at the chosen category; null = top level; id = that category's children
+  const [parentId, setParentId] = useState<string | null | undefined>(params.get("parent") ?? (params.get("level") ? null : undefined));
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<CategorySort>("revenue");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
@@ -42,6 +43,7 @@ export function CategoryReportView() {
     period: period || undefined,
     level: parentId ? undefined : level,
     parentId: parentId ?? undefined,
+    auto: parentId === undefined ? "1" : undefined,
     q: q || undefined,
     sort,
     dir,
@@ -55,6 +57,8 @@ export function CategoryReportView() {
   });
   const d = report.data;
   const shownPeriod = d?.period ?? null;
+  const shownParent = d?.parentId ?? null;
+  const scope = d?.summary?.scope ?? null;
 
   const onSort = (k: CategorySort) => {
     if (k === sort) setDir(dir === "desc" ? "asc" : "desc");
@@ -122,23 +126,36 @@ export function CategoryReportView() {
             </p>
           )}
           <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {scope ? (
+              <SummaryCard
+                label={`ยอดขาย ${scope.name} 30 วัน · รอบ${periodLabel(scope.period)}`}
+                value={baht(scope.revenue)}
+                href={`/trends/categories/${scope.id}?period=${scope.period}`}
+                foot={
+                  <>
+                    <Growth value={scope.growth} /> จาก 30 วันก่อน{scope.path ? ` · ${scope.path}` : ""}
+                  </>
+                }
+              />
+            ) : (
+              <SummaryCard
+                label={`ยอดขาย TikTok Shop ไทย 30 วัน · รอบ${periodLabel(d.period)}`}
+                value={baht(d.summary?.revenue)}
+                foot={
+                  <>
+                    <Growth value={d.summary?.growth} /> จากเดือนก่อน · {d.summary?.categories} หมวดหลัก
+                  </>
+                }
+              />
+            )}
             <SummaryCard
-              label={`ยอดขาย TikTok Shop ไทย 30 วัน · รอบ${periodLabel(d.period)}`}
-              value={baht(d.summary?.revenue)}
-              foot={
-                <>
-                  <Growth value={d.summary?.growth} /> จากเดือนก่อน · {d.summary?.categories} หมวดหลัก
-                </>
-              }
-            />
-            <SummaryCard
-              label="หมวดหลักที่โตเร็วที่สุด"
+              label={scope ? "หมวดย่อยที่โตเร็วที่สุด" : "หมวดหลักที่โตเร็วที่สุด"}
               value={d.summary?.fastest?.name ?? "—"}
               href={d.summary?.fastest ? `/trends/categories/${d.summary.fastest.id}?period=${d.period}` : undefined}
               foot={d.summary?.fastest ? <Growth value={d.summary.fastest.growth} /> : "—"}
             />
             <SummaryCard
-              label="หมวดน่าเข้าที่สุด (โต + ไม่กระจุก)"
+              label={scope ? "หมวดย่อยน่าเข้าที่สุด (โต + ไม่กระจุก)" : "หมวดน่าเข้าที่สุด (โต + ไม่กระจุก)"}
               value={d.summary?.opportunity?.name ?? "ยังไม่มีหมวดที่ผ่านเกณฑ์"}
               href={d.summary?.opportunity ? `/trends/categories/${d.summary.opportunity.id}?period=${d.period}` : undefined}
               foot={
@@ -162,7 +179,7 @@ export function CategoryReportView() {
           <Card>
             <div className="flex flex-col gap-3 border-b border-border p-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
-                {parentId ? (
+                {shownParent ? (
                   <nav aria-label="ตำแหน่งหมวด" className="flex flex-wrap items-center gap-1 text-sm">
                     <button type="button" className="min-h-9 font-medium text-primary hover:underline" onClick={() => setParentId(null)}>
                       ทุกหมวดหลัก
