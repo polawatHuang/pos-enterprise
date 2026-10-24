@@ -350,6 +350,40 @@ async function writeLines(conn, orgId, poId, lines) {
   await conn.query('UPDATE purchase_orders SET subtotal = :t, total = :t WHERE id = :poId', { t: r2(total), poId });
 }
 
+/** A purchase order (draft, or sent when `b.send`) with its lines; used by the PO form and approved purchase requests. */
+async function createPurchaseOrder(conn, user, b) {
+  const orgId = user.orgId;
+  await getWarehouse(conn, orgId, b.warehouseId);
+  let lead = 2;
+  if (b.supplierId) {
+    const [[s]] = await conn.query('SELECT lead_time_days FROM suppliers WHERE id = :id AND org_id = :orgId', { id: b.supplierId, orgId });
+    if (!s) throw badRequest('ไม่พบผู้ขาย');
+    lead = Number(s.lead_time_days);
+  }
+  const today = localDate();
+  const expected = b.expectedDate ?? localDate(new Date(Date.now() + lead * 86_400_000));
+  const [ins] = await conn.query(
+    `INSERT INTO purchase_orders (org_id, supplier_id, warehouse_id, po_no, status, source, order_date, expected_date, note, sent_at, created_by)
+     VALUES (:orgId, :supplierId, :warehouseId, :tmp, :status, :source, :today, :expected, :note, IF(:send = 1, UTC_TIMESTAMP(), NULL), :userId)`,
+    {
+      orgId,
+      supplierId: b.supplierId ?? null,
+      warehouseId: b.warehouseId,
+      tmp: `TMP-${Date.now()}-${user.id}`,
+      status: b.send ? 'ordered' : 'draft',
+      source: b.source ?? 'manual',
+      today,
+      expected,
+      note: b.note ?? null,
+      send: b.send ? 1 : 0,
+      userId: user.id,
+    },
+  );
+  await conn.query('UPDATE purchase_orders SET po_no = :no WHERE id = :id', { no: `PO${String(ins.insertId).padStart(6, '0')}`, id: ins.insertId });
+  await writeLines(conn, orgId, ins.insertId, b.items);
+  return ins.insertId;
+}
+
 router.post(
   '/orders',
   requirePermission('purchasing:write'),
@@ -367,37 +401,7 @@ router.post(
   async (req, res) => {
     const b = req.valid.body;
     const orgId = req.user.orgId;
-    const id = await db.tx(async (conn) => {
-      await getWarehouse(conn, orgId, b.warehouseId);
-      let lead = 2;
-      if (b.supplierId) {
-        const [[s]] = await conn.query('SELECT lead_time_days FROM suppliers WHERE id = :id AND org_id = :orgId', { id: b.supplierId, orgId });
-        if (!s) throw badRequest('ไม่พบผู้ขาย');
-        lead = Number(s.lead_time_days);
-      }
-      const today = localDate();
-      const expected = b.expectedDate ?? localDate(new Date(Date.now() + lead * 86_400_000));
-      const [ins] = await conn.query(
-        `INSERT INTO purchase_orders (org_id, supplier_id, warehouse_id, po_no, status, source, order_date, expected_date, note, sent_at, created_by)
-         VALUES (:orgId, :supplierId, :warehouseId, :tmp, :status, :source, :today, :expected, :note, IF(:send = 1, UTC_TIMESTAMP(), NULL), :userId)`,
-        {
-          orgId,
-          supplierId: b.supplierId ?? null,
-          warehouseId: b.warehouseId,
-          tmp: `TMP-${Date.now()}-${req.user.id}`,
-          status: b.send ? 'ordered' : 'draft',
-          source: b.source,
-          today,
-          expected,
-          note: b.note ?? null,
-          send: b.send ? 1 : 0,
-          userId: req.user.id,
-        },
-      );
-      await conn.query('UPDATE purchase_orders SET po_no = :no WHERE id = :id', { no: `PO${String(ins.insertId).padStart(6, '0')}`, id: ins.insertId });
-      await writeLines(conn, orgId, ins.insertId, b.items);
-      return ins.insertId;
-    });
+    const id = await db.tx((conn) => createPurchaseOrder(conn, req.user, b));
     audit(req, 'po.create', 'purchase_order', id, { items: b.items.length, source: b.source, sent: b.send });
     const po = await loadPo(orgId, id);
     res.status(201).json({ data: mapPo(po, await poItems(id)) });
@@ -757,4 +761,4 @@ router.post('/transfers/:id/cancel', requirePermission('purchasing:write'), vali
   res.json({ data: { ok: true } });
 });
 
-module.exports = { router };
+module.exports = { router, createPurchaseOrder };

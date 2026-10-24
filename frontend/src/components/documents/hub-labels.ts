@@ -24,16 +24,31 @@ export const CATEGORY: Record<DocCategory, { label: string; hint: string; icon: 
     icon: ShoppingBag,
     types: ["quotation", "invoice", "tax_invoice", "tax_invoice_receipt", "receipt", "credit_note", "debit_note", "billing_note", "pos_sale", "pos_return"],
   },
-  purchase: { label: "ซื้อ", hint: "ใบสั่งซื้อ ใบรับสินค้า", icon: Truck, types: ["purchase_order", "goods_receipt"] },
+  purchase: {
+    label: "ซื้อ",
+    hint: "ใบขอซื้อ ใบสั่งซื้อ ใบรับสินค้า ตั้งหนี้/ใบลดหนี้ผู้ขาย",
+    icon: Truck,
+    types: ["purchase_request", "purchase_order", "goods_receipt", "supplier_bill", "supplier_credit"],
+  },
   stock: { label: "สต๊อก", hint: "ใบโอน ใบตรวจนับ ใบปรับสต๊อก ใบตัดของเสีย", icon: Warehouse, types: ["stock_transfer", "stock_count", "adjustment", "waste"] },
-  finance: { label: "การเงินและภาษี", hint: "รายรับ-รายจ่าย หนังสือรับรองหัก ณ ที่จ่าย", icon: Landmark, types: ["income", "expense", "wht_certificate"] },
+  finance: {
+    label: "การเงินและภาษี",
+    hint: "ใบสำคัญจ่าย เงินสดย่อย รายรับ-รายจ่าย 50 ทวิ ใบรับรองแทนใบเสร็จ",
+    icon: Landmark,
+    types: ["payment_voucher", "petty_cash_topup", "income", "expense", "wht_certificate", "substitute_receipt"],
+  },
   hr: { label: "บุคคล", hint: "ใบเบิกสวัสดิการพนักงาน", icon: HeartHandshake, types: ["welfare"] },
 };
 export const CATEGORY_ORDER: DocCategory[] = ["sales", "purchase", "stock", "finance", "hr"];
 
 const TYPE_LABEL: Record<string, string> = {
   ...DOC_TYPE_LABEL,
+  purchase_request: "ใบขอซื้อ",
   purchase_order: "ใบสั่งซื้อ",
+  supplier_bill: "ตั้งหนี้ผู้ขาย",
+  supplier_credit: "ใบลดหนี้จากผู้ขาย",
+  payment_voucher: "ใบสำคัญจ่าย",
+  petty_cash_topup: "เติมเงินสดย่อย",
   goods_receipt: "ใบรับสินค้า",
   adjustment: "ใบปรับสต๊อก",
   waste: "ใบตัดของเสีย",
@@ -56,6 +71,18 @@ const STATUS: Partial<Record<HubDocument["source"], Record<string, { label: stri
     received: { label: "รับครบ", tone: "success" },
     cancelled: { label: "ยกเลิก", tone: "danger" },
   },
+  purchase_request: {
+    pending: { label: "รออนุมัติ", tone: "warning" },
+    approved: { label: "อนุมัติแล้ว", tone: "success" },
+    rejected: { label: "ไม่อนุมัติ", tone: "danger" },
+    cancelled: { label: "ยกเลิก", tone: "neutral" },
+  },
+  supplier_bill: {
+    unpaid: { label: "ค้างจ่าย", tone: "warning" },
+    paid: { label: "จ่ายแล้ว", tone: "success" },
+    void: { label: "ยกเลิก", tone: "danger" },
+  },
+  payment_voucher: { posted: { label: "จ่ายแล้ว", tone: "success" }, void: { label: "ยกเลิก", tone: "danger" } },
   stock_transfer: {
     in_transit: { label: "ระหว่างทาง", tone: "warning" },
     received: { label: "รับแล้ว", tone: "success" },
@@ -97,6 +124,14 @@ export function hrefOf(d: HubDocument): string | null {
       return `/accounting/documents/${d.id}`;
     case "purchase_order":
       return `/purchasing/orders/${d.id}`;
+    case "purchase_request":
+      return "/purchasing?tab=requests";
+    case "supplier_bill":
+      return "/accounting/payables?tab=bills";
+    case "payment_voucher":
+      return `/accounting/payables/vouchers/${d.id}`;
+    case "petty_cash_topup":
+      return "/accounting/petty-cash";
     case "stock_document":
       return `/inventory/documents/${d.id}`;
     case "stock_transfer":
@@ -135,8 +170,10 @@ export const CREATE_MENU: { category: DocCategory; items: CreateItem[] }[] = [
   {
     category: "purchase",
     items: [
+      { label: "ใบขอซื้อ", href: "/purchasing?tab=requests", permission: ["inventory:read", "inventory:write", "purchasing:write"], icon: ClipboardList },
       { label: "ใบสั่งซื้อ", href: "/purchasing", permission: "purchasing:write", icon: Truck },
       { label: "ใบรับสินค้า (ไม่มีใบสั่งซื้อ)", href: "/inventory?action=receive", permission: "inventory:write", icon: PackageCheck },
+      { label: "ตั้งหนี้ / ใบลดหนี้จากผู้ขาย", href: "/accounting/payables?new=bill", permission: "accounting:write", icon: Receipt },
     ],
   },
   {
@@ -151,7 +188,10 @@ export const CREATE_MENU: { category: DocCategory; items: CreateItem[] }[] = [
   {
     category: "finance",
     items: [
+      { label: "ใบสำคัญจ่าย (จ่ายเงินผู้ขาย)", href: "/accounting/payables", permission: "accounting:write", icon: Banknote },
+      { label: "เติมเงินสดย่อย", href: "/accounting/petty-cash", permission: "accounting:write", icon: Banknote },
       { label: "บันทึกรายรับ / รายจ่าย", href: "/accounting/transactions", permission: "accounting:write", icon: Banknote },
+      { label: "ใบรับรองแทนใบเสร็จ (จากรายจ่าย)", href: "/accounting/transactions", permission: "accounting:write", icon: Landmark },
       { label: "หนังสือรับรองหัก ณ ที่จ่าย (จากรายจ่าย)", href: "/accounting/transactions", permission: "accounting:write", icon: Landmark },
     ],
   },
@@ -172,7 +212,9 @@ export const CREATE_MENU: { category: DocCategory; items: CreateItem[] }[] = [
 export const RELATED: Partial<Record<DocCategory, { label: string; href: string; permission: string }[]>> = {
   sales: [{ label: "ใบแจ้งหนี้ค้างรับชำระ", href: "/documents?category=sales&status=issued", permission: "accounting:read" }],
   stock: [{ label: "รายงานสินค้าและวัตถุดิบ (ม.87(3))", href: "/accounting/reports?tab=stock", permission: "accounting:read" }],
+  purchase: [{ label: "ยอดค้างจ่ายผู้ขาย", href: "/accounting/payables", permission: "accounting:read" }],
   finance: [
+    { label: "เงินสดย่อย", href: "/accounting/petty-cash", permission: "accounting:read" },
     { label: "ภ.พ.30 / ภ.ง.ด. / รายงานภาษีซื้อ-ขาย", href: "/accounting/tax", permission: "accounting:read" },
     { label: "รายงานการเงิน", href: "/accounting/reports", permission: "accounting:read" },
   ],

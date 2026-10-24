@@ -49,6 +49,10 @@ function rangeOf(p: Period, custom: { from: string; to: string }): { from?: stri
 const SOURCE_CATEGORIES: Record<string, DocCategory[]> = {
   documents: ["sales", "finance"],
   purchase_orders: ["purchase"],
+  purchase_requests: ["purchase"],
+  supplier_bills: ["purchase"],
+  payment_vouchers: ["finance"],
+  petty_cash: ["finance"],
   stock_documents: ["purchase", "stock"],
   stock_transfers: ["stock"],
   stock_counts: ["stock"],

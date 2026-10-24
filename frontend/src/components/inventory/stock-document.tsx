@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Printer } from "lucide-react";
+import { ArrowLeft, Printer, Receipt } from "lucide-react";
 import { api } from "@/lib/api";
 import type { StockDocument } from "@/lib/types";
 import { formatDateTime, formatThaiDate } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { useAuth } from "@/components/auth/auth-provider";
 import { Skeleton } from "@/components/ui/primitives";
 
 const TITLE: Record<StockDocument["docType"], string> = { goods_receipt: "ใบรับสินค้า", adjustment: "ใบปรับปรุงสต๊อก", waste: "ใบตัดของเสีย" };
@@ -15,6 +16,7 @@ const qty = (v: number) => v.toLocaleString("th-TH", { maximumFractionDigits: 3 
 
 /** ใบรับสินค้า (GR) / ใบปรับสต๊อก (AJ) / ใบตัดของเสีย (WS): view and print on A4. */
 export function StockDocumentView({ id }: { id: number }) {
+  const canBill = useAuth().can("accounting:write");
   const doc = useQuery({ queryKey: ["inventory", "document", id], queryFn: () => api.get<StockDocument>(`/inventory/documents/${id}`) });
   if (doc.isPending) return <Skeleton className="h-[70vh] w-full rounded-xl" />;
   if (doc.isError) return <p className="py-16 text-center text-muted-foreground">{doc.error.message}</p>;
@@ -31,9 +33,19 @@ export function StockDocumentView({ id }: { id: number }) {
             {TITLE[d.docType]} {d.docNo}
           </h1>
         </div>
-        <Button variant="outline" onClick={() => window.print()}>
-          <Printer /> พิมพ์ / PDF
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {d.docType === "goods_receipt" && canBill && (
+            <Link
+              href={`/accounting/payables?new=bill&stockDocumentId=${d.id}${d.supplierId ? `&supplierId=${d.supplierId}` : ""}${d.purchaseOrderId ? `&purchaseOrderId=${d.purchaseOrderId}` : ""}&amount=${d.totalCost}`}
+              className={buttonVariants({ variant: "outline" })}
+            >
+              <Receipt /> บันทึกตั้งหนี้
+            </Link>
+          )}
+          <Button variant="outline" onClick={() => window.print()}>
+            <Printer /> พิมพ์ / PDF
+          </Button>
+        </div>
       </div>
       <div className="overflow-x-auto rounded-xl bg-muted/50 p-2 sm:p-6 print:bg-transparent print:p-0">
         <article className="print-a4 relative mx-auto w-full max-w-[210mm] bg-white p-8 text-[13px] leading-relaxed text-neutral-900 shadow-sm ring-1 ring-black/5 max-sm:p-5 sm:p-12">

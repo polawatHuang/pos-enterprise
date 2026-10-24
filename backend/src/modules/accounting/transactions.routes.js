@@ -83,7 +83,7 @@ const txnBody = z
       .optional()
       .or(z.literal('').transform(() => null)),
     counterpartyType: z.enum(['individual', 'company']).nullable().optional(),
-    paymentMethod: z.enum(['cash', 'transfer', 'card', 'promptpay', 'cheque']).default('transfer'),
+    paymentMethod: z.enum(['cash', 'transfer', 'card', 'promptpay', 'cheque', 'petty_cash']).default('transfer'),
     branchId: z.number().int().positive().nullable().optional(),
     aiExtracted: z.boolean().default(false),
   })
@@ -118,6 +118,7 @@ function mapTxn(r) {
     status: r.status,
     aiExtracted: Boolean(r.ai_extracted),
     whtCertificateId: r.wht_certificate_id ?? null,
+    substituteReceiptId: r.substitute_receipt_id ?? null,
     createdBy: r.created_by_name ?? null,
     createdAt: r.created_at,
   };
@@ -125,7 +126,8 @@ function mapTxn(r) {
 
 const SELECT_TXN = `
   SELECT t.*, DATE_FORMAT(t.txn_date, '%Y-%m-%d') AS txn_date_str, u.full_name AS created_by_name,
-         (SELECT d.id FROM documents d WHERE d.transaction_id = t.id AND d.doc_type = 'wht_certificate' AND d.status <> 'void' LIMIT 1) AS wht_certificate_id
+         (SELECT d.id FROM documents d WHERE d.transaction_id = t.id AND d.doc_type = 'wht_certificate' AND d.status <> 'void' LIMIT 1) AS wht_certificate_id,
+         (SELECT d.id FROM documents d WHERE d.transaction_id = t.id AND d.doc_type = 'substitute_receipt' AND d.status <> 'void' LIMIT 1) AS substitute_receipt_id
     FROM transactions t LEFT JOIN users u ON u.id = t.created_by`;
 
 /**
@@ -185,7 +187,8 @@ router.get(
       ${f.includeVoid === 'true' ? '' : "AND e.status = 'posted'"}`;
     const rows = await db.query(
       `SELECT e.*, DATE_FORMAT(e.txn_date, '%Y-%m-%d') AS txn_date_str, u.full_name AS created_by_name,
-              CASE WHEN e.source = 'txn' THEN (SELECT d.id FROM documents d WHERE d.transaction_id = e.id AND d.doc_type = 'wht_certificate' AND d.status <> 'void' LIMIT 1) END AS wht_certificate_id
+              CASE WHEN e.source = 'txn' THEN (SELECT d.id FROM documents d WHERE d.transaction_id = e.id AND d.doc_type = 'wht_certificate' AND d.status <> 'void' LIMIT 1) END AS wht_certificate_id,
+              CASE WHEN e.source = 'txn' THEN (SELECT d.id FROM documents d WHERE d.transaction_id = e.id AND d.doc_type = 'substitute_receipt' AND d.status <> 'void' LIMIT 1) END AS substitute_receipt_id
          FROM ${ENTRIES} LEFT JOIN users u ON u.id = e.created_by
         WHERE ${where} ORDER BY e.txn_date DESC, e.created_at DESC, e.id DESC LIMIT :limit OFFSET :offset`,
       params,
@@ -274,10 +277,10 @@ router.post(
       if (!t) throw notFound('ไม่พบรายการ');
       if (t.status === 'void') throw conflict('รายการนี้ถูกยกเลิกแล้ว');
       const [[cert]] = await conn.query(
-        "SELECT doc_no FROM documents WHERE transaction_id = :id AND doc_type = 'wht_certificate' AND status <> 'void' LIMIT 1",
+        "SELECT doc_no FROM documents WHERE transaction_id = :id AND doc_type IN ('wht_certificate','substitute_receipt') AND status <> 'void' LIMIT 1",
         { id },
       );
-      if (cert) throw badRequest(`ยกเลิกหนังสือรับรอง ${cert.doc_no} ก่อน`);
+      if (cert) throw badRequest(`ยกเลิกเอกสาร ${cert.doc_no} ที่ออกจากรายการนี้ก่อน`);
       await conn.query("UPDATE transactions SET status = 'void' WHERE id = :id", { id });
       await reverseJournalsFor(conn, {
         orgId: req.user.orgId,

@@ -137,7 +137,7 @@ router.get(
   requirePermission('accounting:read'),
   validate({
     query: z.object({
-      docType: z.enum([...SALES_TYPES, 'wht_certificate', 'billing_note']).optional(),
+      docType: z.enum([...SALES_TYPES, 'wht_certificate', 'billing_note', 'substitute_receipt']).optional(),
       status: z.enum(['draft', 'issued', 'paid', 'void', 'unpaid']).optional(),
       q: z.string().trim().max(100).optional(),
       page: z.coerce.number().int().min(1).default(1),
@@ -212,7 +212,13 @@ router.get('/:id', requirePermission('accounting:read'), validate({ params: idPa
     { orgId: req.user.orgId },
   );
   let source = null;
-  if (d.transaction_id) {
+  if (d.payment_voucher_id) {
+    source = await db.one(
+      `SELECT wht_rate, wht_income_type, payee_type AS counterparty_type, DATE_FORMAT(pay_date, '%Y-%m-%d') AS txn_date, wht_base AS amount, wht_amount
+         FROM payment_vouchers WHERE id = :id`,
+      { id: d.payment_voucher_id },
+    );
+  } else if (d.transaction_id) {
     source = await db.one(
       `SELECT wht_rate, wht_income_type, counterparty_type, DATE_FORMAT(txn_date, '%Y-%m-%d') AS txn_date, amount, wht_amount
          FROM transactions WHERE id = :id`,
@@ -684,6 +690,47 @@ router.post(
       return ins.insertId;
     });
     audit(req, 'document.wht_certificate', 'document', id);
+    const { d, items } = await loadDocument(orgId, id);
+    res.status(201).json({ data: mapDocument(d, items) });
+  },
+);
+
+/**
+ * ใบรับรองแทนใบเสร็จรับเงิน: for an expense paid to someone who gives no receipt (a market stall, a
+ * day labourer). Only for expenses without VAT; it records nothing new in the books (the expense is).
+ */
+router.post(
+  '/substitute-receipt',
+  requirePermission('accounting:write'),
+  validate({ body: z.object({ transactionId: z.number().int().positive() }) }),
+  async (req, res) => {
+    const { orgId, id: userId } = req.user;
+    const id = await db.tx(async (conn) => {
+      const [[t]] = await conn.query(
+        "SELECT *, DATE_FORMAT(txn_date, '%Y-%m-%d') AS d FROM transactions WHERE id = :id AND org_id = :orgId FOR UPDATE",
+        { id: req.valid.body.transactionId, orgId },
+      );
+      if (!t || t.status !== 'posted') throw notFound('ไม่พบรายการ');
+      if (t.type !== 'expense') throw badRequest('ใช้ได้กับรายจ่ายเท่านั้น');
+      if (Number(t.vat_amount) > 0) throw badRequest('รายจ่ายที่มีภาษีมูลค่าเพิ่มต้องใช้ใบกำกับภาษีของผู้ขาย ไม่ใช้ใบรับรองแทนใบเสร็จ');
+      const [[existing]] = await conn.query("SELECT id FROM documents WHERE transaction_id = :id AND doc_type = 'substitute_receipt' AND status <> 'void'", {
+        id: t.id,
+      });
+      if (existing) return existing.id;
+      const docNo = await nextNumber(conn, orgId, 'substitute_receipt', t.d);
+      const [ins] = await conn.query(
+        `INSERT INTO documents (org_id, doc_type, doc_no, doc_date, party_name, party_tax_id, subtotal, total, status, transaction_id, note, created_by)
+         VALUES (:orgId, 'substitute_receipt', :docNo, :d, :name, :taxId, :amount, :amount, 'issued', :tid, :note, :userId)`,
+        { orgId, docNo, d: t.d, name: t.counterparty, taxId: t.counterparty_tax_id, amount: t.amount, tid: t.id, note: t.category, userId },
+      );
+      await conn.query(
+        `INSERT INTO document_items (document_id, description, quantity, unit_price, discount, vat_type, line_total)
+         VALUES (:doc, :desc, 1, :amount, 0, 'exempt', :amount)`,
+        { doc: ins.insertId, desc: (t.description || t.category).slice(0, 500), amount: t.amount },
+      );
+      return ins.insertId;
+    });
+    audit(req, 'document.substitute_receipt', 'document', id);
     const { d, items } = await loadDocument(orgId, id);
     res.status(201).json({ data: mapDocument(d, items) });
   },

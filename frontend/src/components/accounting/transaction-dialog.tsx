@@ -233,6 +233,7 @@ export function TransactionDialog({ prefill, onDone }: { prefill?: TxnPrefill; o
               <option value="card">บัตร</option>
               <option value="promptpay">PromptPay</option>
               <option value="cheque">เช็ค</option>
+              <option value="petty_cash">เงินสดย่อย</option>
             </NativeSelect>
           </div>
           <div className="space-y-2">

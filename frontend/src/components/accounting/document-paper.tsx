@@ -14,6 +14,7 @@ export function DocumentPaper({ doc }: { doc: AccDocument }) {
   const { tax } = useTaxSettings();
   if (doc.docType === "wht_certificate") return <WhtCertificate doc={doc} />;
   if (doc.docType === "billing_note") return <BillingNote doc={doc} />;
+  if (doc.docType === "substitute_receipt") return <SubstituteReceipt doc={doc} />;
   const org = doc.org;
   const isTax = ["tax_invoice", "tax_invoice_receipt", "credit_note", "debit_note"].includes(doc.docType);
   return (
@@ -317,6 +318,60 @@ function BillingNote({ doc }: { doc: AccDocument }) {
       <footer className="mt-16 grid grid-cols-2 gap-10 text-center text-xs">
         <Signature label="ผู้รับวางบิล" />
         <Signature label="ผู้วางบิล" />
+      </footer>
+    </article>
+  );
+}
+
+/** ใบรับรองแทนใบเสร็จรับเงิน: the payer certifies an expense the payee could not give a receipt for. */
+function SubstituteReceipt({ doc }: { doc: AccDocument }) {
+  const org = doc.org;
+  return (
+    <article className="print-a4 relative mx-auto w-full max-w-[210mm] bg-white p-8 text-[13px] leading-relaxed text-neutral-900 shadow-sm ring-1 ring-black/5 max-sm:p-5 sm:p-12">
+      {doc.status === "void" && <Stamp text="ยกเลิก" />}
+      <p className="text-center text-lg font-bold">ใบรับรองแทนใบเสร็จรับเงิน</p>
+      <div className="mt-2 flex justify-between text-sm">
+        <span>{org?.legalName || org?.name}</span>
+        <span>เลขที่ {doc.docNo}</span>
+      </div>
+      <div className="-mx-5 mt-6 overflow-x-auto px-5 sm:mx-0 sm:px-0">
+        <table className="w-full min-w-[540px] border-collapse text-[12.5px] sm:min-w-0">
+          <thead>
+            <tr className="border-y border-neutral-400 bg-neutral-100 text-left">
+              <th className="w-32 px-2 py-2 font-semibold">วัน เดือน ปี</th>
+              <th className="px-2 py-2 font-semibold">รายละเอียดรายจ่าย</th>
+              <th className="px-2 py-2 font-semibold">ผู้รับเงิน</th>
+              <th className="w-32 px-2 py-2 text-right font-semibold">จำนวนเงิน</th>
+            </tr>
+          </thead>
+          <tbody>
+            {doc.items.map((it, i) => (
+              <tr key={it.id ?? i} className="border-b border-neutral-200 align-top">
+                <td className="px-2 py-2">{formatThaiDate(doc.docDate)}</td>
+                <td className="px-2 py-2">
+                  {it.description}
+                  {doc.note && <span className="block text-xs text-neutral-500">{doc.note}</span>}
+                </td>
+                <td className="px-2 py-2">{doc.partyName ?? "-"}</td>
+                <td className="px-2 py-2 text-right">{n2(it.lineTotal ?? 0)}</td>
+              </tr>
+            ))}
+            <tr className="font-bold">
+              <td className="px-2 py-2" colSpan={3}>
+                รวมทั้งสิ้น ({doc.amountText})
+              </td>
+              <td className="px-2 py-2 text-right">{n2(doc.total)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-6">
+        ข้าพเจ้า ........................................................ (ผู้เบิกจ่าย) ตำแหน่ง ..................................... ขอรับรองว่า
+        รายจ่ายข้างต้นนี้ไม่อาจเรียกเก็บใบเสร็จรับเงินจากผู้รับได้ และข้าพเจ้าได้จ่ายไปในงานของ {org?.legalName || org?.name} โดยแท้
+      </p>
+      <footer className="mt-16 grid grid-cols-2 gap-10 text-center text-xs">
+        <Signature label="ผู้เบิกจ่าย" />
+        <Signature label="ผู้อนุมัติ" />
       </footer>
     </article>
   );

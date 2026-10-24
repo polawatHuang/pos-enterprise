@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, ChevronRight, FileCheck2, Loader2, Plus, Search, ShoppingBag, Sparkles } from "lucide-react";
+import { Ban, ChevronRight, FileCheck2, FileSignature, Loader2, Plus, Search, ShoppingBag, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiFetch, ApiError } from "@/lib/api";
 import type { ReceiptExtraction, Transaction, TxnType } from "@/lib/types";
@@ -92,6 +92,17 @@ export function TransactionsView() {
       router.push(`/accounting/documents/${doc.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "ออกหนังสือรับรองไม่สำเร็จ");
+    }
+  };
+
+  const substitute = async (t: Transaction) => {
+    if (t.substituteReceiptId) return router.push(`/accounting/documents/${t.substituteReceiptId}`);
+    try {
+      const doc = await api.post<{ id: number }>("/accounting/documents/substitute-receipt", { transactionId: t.id });
+      void qc.invalidateQueries({ queryKey: ["accounting"] });
+      router.push(`/accounting/documents/${doc.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "ออกใบรับรองแทนใบเสร็จไม่สำเร็จ");
     }
   };
 
@@ -254,6 +265,16 @@ export function TransactionsView() {
                             aria-label="หนังสือรับรองการหักภาษี ณ ที่จ่าย"
                           >
                             <FileCheck2 className="size-4" />
+                          </button>
+                        )}
+                        {t.source === "txn" && t.type === "expense" && t.status === "posted" && !t.vatAmount && (writable || t.substituteReceiptId) && (
+                          <button
+                            onClick={() => void substitute(t)}
+                            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-primary"
+                            title={t.substituteReceiptId ? "ดูใบรับรองแทนใบเสร็จ" : "ออกใบรับรองแทนใบเสร็จ (ผู้รับเงินไม่มีใบเสร็จ)"}
+                            aria-label="ใบรับรองแทนใบเสร็จรับเงิน"
+                          >
+                            <FileSignature className="size-4" />
                           </button>
                         )}
                         {t.source === "sale" ? (

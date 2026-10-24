@@ -30,7 +30,7 @@ const SOURCES = [
     key: 'documents',
     can: (u) => has(u, 'accounting:read'),
     sql: `SELECT 'document' AS source, d.id, d.doc_type AS type,
-                 CASE WHEN d.doc_type = 'wht_certificate' THEN 'finance' ELSE 'sales' END AS category,
+                 CASE WHEN d.doc_type IN ('wht_certificate','substitute_receipt') THEN 'finance' ELSE 'sales' END AS category,
                  d.doc_no, d.doc_date, d.party_name AS party,
                  CASE WHEN d.doc_type = 'wht_certificate' THEN d.wht_amount ELSE d.total END AS amount, d.status, d.created_at AS sort_at
             FROM documents d WHERE d.org_id = :orgId AND d.doc_type NOT IN ('purchase_order','expense_voucher')`,
@@ -47,6 +47,49 @@ const SOURCES = [
     day: 'po.order_date',
     no: 'po.po_no',
     party: 's.name',
+  },
+  {
+    key: 'purchase_requests',
+    can: (u) => has(u, 'inventory:read', 'inventory:write', 'purchasing:write'),
+    sql: `SELECT 'purchase_request' AS source, r.id, 'purchase_request' AS type, 'purchase' AS category, r.pr_no AS doc_no,
+                 ${localDay('r.requested_at')} AS doc_date, COALESCE(s.name, w.name) AS party,
+                 (SELECT SUM(i.quantity * COALESCE(i.est_unit_cost, p.cost)) FROM purchase_request_items i JOIN products p ON p.id = i.product_id
+                   WHERE i.request_id = r.id) AS amount, r.status, r.requested_at AS sort_at
+            FROM purchase_requests r JOIN warehouses w ON w.id = r.warehouse_id LEFT JOIN suppliers s ON s.id = r.supplier_id
+           WHERE r.org_id = :orgId`,
+    day: localDay('r.requested_at'),
+    no: 'r.pr_no',
+    party: 'COALESCE(s.name, w.name)',
+  },
+  {
+    key: 'supplier_bills',
+    can: (u) => has(u, 'accounting:read'),
+    sql: `SELECT 'supplier_bill' AS source, b.id, IF(b.kind = 'credit_note', 'supplier_credit', 'supplier_bill') AS type, 'purchase' AS category,
+                 b.bill_no AS doc_no, b.bill_date AS doc_date, s.name AS party, b.total AS amount, b.status, b.created_at AS sort_at
+            FROM supplier_bills b JOIN suppliers s ON s.id = b.supplier_id WHERE b.org_id = :orgId`,
+    day: 'b.bill_date',
+    no: "CONCAT(b.bill_no, ' ', COALESCE(b.supplier_doc_no, ''))",
+    party: 's.name',
+  },
+  {
+    key: 'payment_vouchers',
+    can: (u) => has(u, 'accounting:read'),
+    sql: `SELECT 'payment_voucher' AS source, v.id, 'payment_voucher' AS type, 'finance' AS category, v.pv_no AS doc_no, v.pay_date AS doc_date,
+                 s.name AS party, v.net_paid AS amount, v.status, v.created_at AS sort_at
+            FROM payment_vouchers v JOIN suppliers s ON s.id = v.supplier_id WHERE v.org_id = :orgId`,
+    day: 'v.pay_date',
+    no: 'v.pv_no',
+    party: 's.name',
+  },
+  {
+    key: 'petty_cash',
+    can: (u) => has(u, 'accounting:read'),
+    sql: `SELECT 'petty_cash_topup' AS source, t.id, 'petty_cash_topup' AS type, 'finance' AS category, t.topup_no AS doc_no, t.topup_date AS doc_date,
+                 'เติมเงินสดย่อย' AS party, t.amount, t.status, t.created_at AS sort_at
+            FROM petty_cash_topups t WHERE t.org_id = :orgId`,
+    day: 't.topup_date',
+    no: 't.topup_no',
+    party: "'เงินสดย่อย'",
   },
   {
     key: 'stock_documents',

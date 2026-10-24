@@ -7,6 +7,7 @@ const r2 = (n) => Math.round(Number(n) * 100) / 100;
 /** Chart-of-accounts codes used by automatic postings (seeded Thai SME chart). */
 const ACC = {
   CASH: '1100',
+  PETTY_CASH: '1105',
   BANK: '1110',
   AR: '1200',
   INVENTORY: '1300',
@@ -24,8 +25,8 @@ const ACC = {
   OTHER_EXPENSE: '5900',
 };
 
-/** Cash in hand vs. every electronic method (PromptPay, card, transfer, platform payout). */
-const paymentAccount = (method) => (method === 'cash' ? ACC.CASH : ACC.BANK);
+/** Cash in hand, the petty-cash box, or the bank for every electronic method (PromptPay, card, transfer, payout). */
+const paymentAccount = (method) => (method === 'cash' ? ACC.CASH : method === 'petty_cash' ? ACC.PETTY_CASH : ACC.BANK);
 
 /** Document number prefixes (Thai convention: one running sequence per type and month). */
 const PREFIX = {
@@ -37,6 +38,12 @@ const PREFIX = {
   credit_note: 'CN',
   debit_note: 'DN',
   billing_note: 'BN',
+  substitute_receipt: 'SR',
+  supplier_bill: 'AP',
+  supplier_credit: 'DR',
+  payment_voucher: 'PV',
+  purchase_request: 'PR',
+  petty_cash_topup: 'PC',
   stock_gr: 'GR',
   stock_aj: 'AJ',
   stock_ws: 'WS',

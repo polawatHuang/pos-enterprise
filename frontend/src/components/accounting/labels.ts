@@ -9,6 +9,7 @@ export const DOC_TYPE_LABEL: Record<DocType, string> = {
   credit_note: "ใบลดหนี้",
   debit_note: "ใบเพิ่มหนี้",
   billing_note: "ใบวางบิล",
+  substitute_receipt: "ใบรับรองแทนใบเสร็จรับเงิน",
   wht_certificate: "หนังสือรับรองการหักภาษี ณ ที่จ่าย",
 };
 
@@ -28,6 +29,7 @@ export const PAYMENT_LABEL: Record<string, string> = {
   card: "บัตร",
   promptpay: "PromptPay",
   cheque: "เช็ค",
+  petty_cash: "เงินสดย่อย",
   platform: "แพลตฟอร์ม",
 };
 
