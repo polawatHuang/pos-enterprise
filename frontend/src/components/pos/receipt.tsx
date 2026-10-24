@@ -1,9 +1,9 @@
 "use client";
 
-import QRCode from "qrcode";
 import type { PosOrder, PosSettings } from "@/lib/types";
 import { useTaxSettings } from "@/lib/tax";
 import { cn } from "@/lib/utils";
+import { QrSvg } from "./qr";
 import { METHOD_LABEL, receiptDoc, type ReceiptBlock } from "./receipt-doc";
 
 export { METHOD_LABEL };
@@ -42,14 +42,9 @@ export function ReceiptBlocks({ blocks }: { blocks: ReceiptBlock[] }) {
 }
 
 function QrBlock({ data, caption }: { data: string; caption?: string }) {
-  const { size, data: bits } = QRCode.create(data, { errorCorrectionLevel: "M" }).modules;
-  let path = "";
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (bits[y * size + x]) path += `M${x} ${y}h1v1h-1z`;
   return (
     <div className="my-2 flex flex-col items-center gap-1">
-      <svg viewBox={`0 0 ${size} ${size}`} className="size-32" shapeRendering="crispEdges" aria-label="QR">
-        <path d={path} fill="#000" />
-      </svg>
+      <QrSvg data={data} className="size-32" />
       {caption && <p className="text-center text-[11px]">{caption}</p>}
     </div>
   );

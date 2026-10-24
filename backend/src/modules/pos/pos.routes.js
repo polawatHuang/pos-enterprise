@@ -14,6 +14,7 @@ const discounts = require('./discounts');
 const returns = require('./returns');
 const approvals = require('./approvals');
 const taxInvoices = require('./tax-invoice');
+const paymentIntents = require('./payment-intents');
 const promotions = require('./promotions');
 const { paymentFor, promptpayIdSchema, bankAccountSchema } = require('./payment-target');
 const { SLIP_SCHEMA, SLIP_SYSTEM } = require('./slip');
@@ -252,6 +253,8 @@ router.get('/settings', async (req, res) => {
       promptpayId: pay.promptpayId,
       bankAccount: pay.bankAccount,
       promptpayEnabled: isValidPromptPayId(pay.promptpayId),
+      // PromptPay that closes the bill by itself (a payment provider is connected and switched on)
+      paymentGateway: await paymentIntents.tillView(req.user.orgId),
       paymentBranch: pay.branch,
       // the shop-wide accounts edited in POS settings
       defaults: {
@@ -564,6 +567,52 @@ router.post(
   },
 );
 
+/* ----------------------------------------------- automatic PromptPay (provider) */
+
+router.get('/payment-gateway', requirePermission('pos:manage'), async (req, res) => {
+  res.json({ data: await paymentIntents.adminView(req.user.orgId) });
+});
+
+router.put(
+  '/payment-gateway',
+  requirePermission('pos:manage'),
+  validate({
+    body: z.object({
+      provider: z.string().trim().min(1).max(30),
+      enabled: z.boolean(),
+      credentials: z.record(z.string(), z.string().trim().max(200)).optional(),
+    }),
+  }),
+  async (req, res) => {
+    const view = await paymentIntents.saveAdmin(req.user.orgId, req.valid.body);
+    // the keys themselves never reach the audit log
+    audit(req, 'pos.payment_gateway', 'settings', 'pos', { provider: req.valid.body.provider, enabled: req.valid.body.enabled, keysChanged: Boolean(req.valid.body.credentials) });
+    res.json({ data: view });
+  },
+);
+
+router.post('/payment-gateway/test', requirePermission('pos:manage'), async (req, res) => {
+  res.json({ data: await paymentIntents.testConnection(req.user.orgId) });
+});
+
+router.post(
+  '/payment-intents',
+  validate({ body: z.object({ amount: z.coerce.number().positive().max(99_999_999) }) }),
+  async (req, res) => {
+    const shift = await service.currentShift(req.user.id);
+    if (!shift) throw conflict('กรุณาเปิดกะก่อนขาย');
+    res.status(201).json({ data: await paymentIntents.createIntent(req.user, shift, req.valid.body.amount) });
+  },
+);
+
+router.get('/payment-intents/:id', validate({ params: z.object({ id: z.coerce.number().int().positive() }) }), async (req, res) => {
+  res.json({ data: await paymentIntents.getIntent(req.user.orgId, req.valid.params.id) });
+});
+
+router.post('/payment-intents/:id/cancel', validate({ params: z.object({ id: z.coerce.number().int().positive() }) }), async (req, res) => {
+  res.json({ data: await paymentIntents.cancelIntent(req.user.orgId, req.valid.params.id) });
+});
+
 /* ------------------------------------------------------- manager approval */
 
 /** A manager types their PIN on this till; the cashier gets a 5-minute ticket for one kind of action. */
@@ -616,6 +665,8 @@ router.post(
             amount: money,
             reference: z.string().trim().max(100).optional(),
             slipRef: z.string().trim().min(4).max(64).optional(),
+            /** a PromptPay QR the payment provider has already confirmed (see /pos/payment-intents) */
+            intentId: z.number().int().positive().optional(),
           }),
         )
         .max(6)

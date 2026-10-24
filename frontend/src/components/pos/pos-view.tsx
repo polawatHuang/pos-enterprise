@@ -48,6 +48,7 @@ import { HELD_KEY, HeldDialog } from "./held-dialog";
 import { LineDialog } from "./line-dialog";
 import { ApprovalCancelled, ManagerPinHost, withApproval } from "./manager-approval";
 import { OpenPriceDialog } from "./open-price-dialog";
+import { GatewayDialog } from "./gateway-settings";
 import { PosGuide } from "./pos-guide";
 import { openDrawer, PrinterDialog, printOnUsb, printReceipt, usePrinterSettings } from "./printer";
 import { receiptDoc, shiftReportDoc } from "./receipt-doc";
@@ -77,6 +78,7 @@ type Modal =
   | "openprice"
   | "practice"
   | "printer"
+  | "gateway"
   | null;
 
 const GUIDE_KEY = "pos.guide.done";
@@ -926,12 +928,14 @@ export function PosView() {
             ageConfirmedByCustomer={ageByCustomer}
             suggestions={suggestions}
             onAddSuggestion={(item, qty) => add(item, null, qty)}
-            onQr={(qr, method, amount) => {
+            onGatewayPaid={(amount) => post({ type: "paid", total: amount })}
+            onQr={(qr, method, amount, image) => {
               const acc = settings.data?.bankAccount;
               post({
                 type: "pay",
                 total: amount,
                 qr,
+                qrImage: image ?? null,
                 method: METHOD_NAME[method] ?? method,
                 bank: method === "transfer" && acc ? { bank: acc.bank, number: acc.display ?? acc.number, name: acc.name } : null,
               });
@@ -957,7 +961,8 @@ export function PosView() {
           />
         )}
         {modal === "codes" && <DiscountCodesDialog canManage={can("pos:manage")} />}
-        {modal === "settings" && settings.data && <PosSettingsDialog settings={settings.data} onDone={closeModal} />}
+        {modal === "settings" && settings.data && <PosSettingsDialog settings={settings.data} onDone={closeModal} onGateway={() => setModal("gateway")} />}
+        {modal === "gateway" && <GatewayDialog onDone={closeModal} />}
         {modal === "member" && (
           <MemberDialog
             onPick={(m) => {

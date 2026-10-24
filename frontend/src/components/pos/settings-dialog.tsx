@@ -13,7 +13,7 @@ import { DialogContent } from "@/components/ui/overlays";
 
 export const POS_SETTINGS_KEY = ["pos", "settings"] as const;
 
-export function PosSettingsDialog({ settings, onDone }: { settings: PosSettings; onDone: () => void }) {
+export function PosSettingsDialog({ settings, onDone, onGateway }: { settings: PosSettings; onDone: () => void; onGateway?: () => void }) {
   const qc = useQueryClient();
   // POS settings edit the shop-wide accounts; a branch may override them in Settings › Branches
   const [promptpayId, setPromptpayId] = useState(settings.defaults?.promptpayId ?? settings.promptpayId);
@@ -89,6 +89,21 @@ export function PosSettingsDialog({ settings, onDone }: { settings: PosSettings;
           </div>
           <p className="text-xs text-muted-foreground sm:col-span-2">แสดงตอนลูกค้าเลือกโอนเงิน บนจอลูกค้า และท้ายใบเสนอราคา/ใบแจ้งหนี้ · AI ใช้ตรวจชื่อผู้รับในสลิป</p>
         </fieldset>
+        {onGateway && (
+          <button
+            type="button"
+            onClick={onGateway}
+            className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 text-left text-sm hover:bg-accent"
+          >
+            <span>
+              <b className="font-medium">รับชำระ PromptPay อัตโนมัติ</b>
+              <span className="block text-xs text-muted-foreground">
+                {settings.paymentGateway?.enabled ? "เปิดใช้อยู่ — บิลปิดเองเมื่อเงินเข้า" : "ยังไม่เปิด — เชื่อมผู้ให้บริการชำระเงินให้บิลปิดเอง"}
+              </span>
+            </span>
+            <span className="text-primary">ตั้งค่า</span>
+          </button>
+        )}
         <div className="space-y-2">
           <Label htmlFor="max">ส่วนลดสูงสุดที่แคชเชียร์ให้ได้เอง (%)</Label>
           <Input id="max" inputMode="decimal" value={maxDiscountPct} onChange={(e) => setMaxDiscountPct(e.target.value)} />

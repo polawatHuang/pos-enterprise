@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
 import { r2, suggestTenders } from "./cart";
+import { GatewayQr } from "./gateway-qr";
 import { Upsell } from "./upsell";
 import { isUnreadable, readFileNow, UNREADABLE_HELP } from "@/lib/files";
 
@@ -30,6 +31,8 @@ export interface Tender {
   amount: number;
   reference?: string;
   slipRef?: string;
+  /** a PromptPay QR the payment provider confirmed (see GatewayQr) */
+  intentId?: number;
 }
 
 export interface PaymentResult {
@@ -55,6 +58,7 @@ export function PaymentDialog({
   suggestions = [],
   onAddSuggestion,
   onQr,
+  onGatewayPaid,
   onConfirm,
 }: {
   total: number;
@@ -66,7 +70,9 @@ export function PaymentDialog({
   /** up-sell hints from the cart quote; adding is offered until a partial payment is taken */
   suggestions?: PromoSuggestion[];
   onAddSuggestion?: (item: CatalogItem, qty: number) => void;
-  onQr: (payload: string | null, method: PaymentMethod, amount: number) => void;
+  onQr: (payload: string | null, method: PaymentMethod, amount: number, image?: string | null) => void;
+  /** the provider confirmed the money (customer display shows "paid") */
+  onGatewayPaid?: (amount: number) => void;
   onConfirm: (p: PaymentResult) => void;
 }) {
   const [method, setMethod] = useState<PaymentMethod>(initialMethod);
@@ -79,6 +85,8 @@ export function PaymentDialog({
   const [ageChecked, setAgeChecked] = useState(false);
   // a QR or transfer ends the sale only once the cashier has seen the money arrive (or the AI passed the slip)
   const [seenPaid, setSeenPaid] = useState(false);
+  // PromptPay confirmed by the provider unless the cashier falls back to the plain QR
+  const [manualQr, setManualQr] = useState(false);
   const receivedRef = useRef<HTMLInputElement>(null);
   /** Quick-tender taps keep focus in the amount box so Enter completes the sale. */
   const tap = (fn: () => void) => {
@@ -92,6 +100,7 @@ export function PaymentDialog({
   const change = r2(cashNum - remaining);
   const ageOk = !needsAge || ageChecked || ageConfirmedByCustomer;
   const amountNum = amount === "" ? remaining : Number(amount) || 0;
+  const useGateway = method === "promptpay" && !!settings?.paymentGateway?.enabled && !manualQr;
   const needsSeen = (method === "promptpay" || method === "transfer") && !slip?.ok;
 
   const pick = (m: PaymentMethod) => {
@@ -100,6 +109,7 @@ export function PaymentDialog({
     setReference("");
     setSlip(null);
     setSeenPaid(false);
+    setManualQr(false);
     if (m !== "promptpay") onQr(null, m, remaining);
   };
 
@@ -115,13 +125,17 @@ export function PaymentDialog({
 
   /** Adds an electronic tender; when it settles the bill the sale completes right away. */
   const addTender = () => {
-    if (amountNum <= 0 || (needsSeen && !seenPaid)) return;
+    if (amountNum <= 0 || (needsSeen && !seenPaid) || useGateway) return;
     if (amountNum > remaining + 0.001) {
       toast.error("ยอดเกินที่ต้องชำระ");
       return;
     }
-    const t: Tender = { method, amount: r2(amountNum), reference: reference || undefined, slipRef: slip?.ok ? (slip.transRef ?? undefined) : undefined };
-    if (Math.abs(amountNum - remaining) < 0.001) {
+    acceptTender({ method, amount: r2(amountNum), reference: reference || undefined, slipRef: slip?.ok ? (slip.transRef ?? undefined) : undefined });
+  };
+
+  /** A confirmed electronic tender: it settles the bill (the sale completes) or is kept for a split. */
+  const acceptTender = (t: Tender) => {
+    if (Math.abs(t.amount - remaining) < 0.001) {
       finish([t]);
       return;
     }
@@ -287,7 +301,21 @@ export function PaymentDialog({
               <Input id="ref" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="เลขอนุมัติ / 4 หลักท้ายบัตร / เลขสลิป" />
             </div>
           </div>
-          {method === "promptpay" && <PromptPayQr amount={amountNum} enabled={!!settings?.promptpayEnabled} onPayload={(p) => onQr(p, "promptpay", amountNum)} />}
+          {useGateway && !ageOk && (
+            <p className="rounded-xl border border-warning bg-warning-soft p-3 text-sm text-warning">ยืนยันอายุลูกค้าก่อน (ติ๊กด้านบน) จึงจะแสดง QR</p>
+          )}
+          {useGateway && ageOk && (
+            <GatewayQr
+              amount={amountNum}
+              onShow={(payload, image, amt) => onQr(payload, "promptpay", amt, image)}
+              onPaid={(i) => {
+                onGatewayPaid?.(i.amount);
+                acceptTender({ method: "promptpay", amount: i.amount, intentId: i.id });
+              }}
+              onManual={() => setManualQr(true)}
+            />
+          )}
+          {method === "promptpay" && !useGateway && <PromptPayQr amount={amountNum} enabled={!!settings?.promptpayEnabled} onPayload={(p) => onQr(p, "promptpay", amountNum)} />}
           {method === "transfer" && settings?.bankAccount && <BankCard account={settings.bankAccount} />}
           {(method === "promptpay" || method === "transfer") && (
             <div className="rounded-xl border border-border p-3">
@@ -299,7 +327,7 @@ export function PaymentDialog({
               {slip && <SlipResult slip={slip} />}
             </div>
           )}
-          {needsSeen && amountNum > 0 && (
+          {needsSeen && !useGateway && amountNum > 0 && (
             <label className={cn("flex cursor-pointer items-center gap-3 rounded-xl border-2 p-3 text-sm", seenPaid ? "border-success bg-success-soft" : "border-warning")}>
               <input type="checkbox" className="size-6 shrink-0 accent-[var(--success)]" checked={seenPaid} onChange={(e) => setSeenPaid(e.target.checked)} />
               <span>
@@ -307,7 +335,7 @@ export function PaymentDialog({
               </span>
             </label>
           )}
-          <Button type="submit" size="lg" className="h-12 text-base" disabled={busy || amountNum <= 0 || !ageOk || (slip !== null && !slip.ok) || (needsSeen && !seenPaid)}>
+          <Button type="submit" size="lg" className={cn("h-12 text-base", useGateway && "hidden")} disabled={busy || amountNum <= 0 || !ageOk || (slip !== null && !slip.ok) || (needsSeen && !seenPaid)}>
             {busy && <Loader2 className="animate-spin" />}
             {Math.abs(amountNum - remaining) < 0.001 ? `ได้รับ${METHOD_NAME[method]}แล้ว · จบการขาย` : `เพิ่ม${METHOD_NAME[method]} ${formatMoney(amountNum)}`}
           </Button>
