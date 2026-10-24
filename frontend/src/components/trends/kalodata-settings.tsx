@@ -52,6 +52,11 @@ export function KalodataSettingsDialog() {
       if (patch.enabled !== undefined) toast.success(patch.enabled ? "เปิดดึงข้อมูลอัตโนมัติแล้ว" : "ปิดดึงข้อมูลอัตโนมัติแล้ว");
       if (patch.categoryId || patch.scope === "all") toast.success(patch.scope === "all" ? "ดึงทั้งตลาด" : "เลือกหมวดแล้ว");
     } catch (err) {
+      // an older backend rejects the category fields outright (400, unknown keys)
+      if (err instanceof ApiError && err.status === 400 && ("scope" in patch || "categoryId" in patch)) {
+        toast.error(`บันทึกหมวดไม่สำเร็จ: ${err.message} — ถ้าเพิ่งอัปเดต ให้ pull โค้ดล่าสุดแล้วกด Restart App ของ backend บน Plesk`);
+        return;
+      }
       toast.error(
         err instanceof ApiError && err.code === "INTEGRATION_NOT_CONFIGURED"
           ? "ยังไม่ได้ใส่คีย์ Kalodata — ไปที่หน้าการเชื่อมต่อ API"
@@ -326,7 +331,16 @@ function CategoryPicker({
                 <span className="text-xs text-muted-foreground">~30 เครดิต/รอบ</span>
               </button>
             </li>
-            {options.isPending ? (
+            {options.isError ? (
+              <li className="p-3 text-sm text-danger">
+                โหลดรายชื่อหมวดไม่สำเร็จ: {options.error.message}
+                {options.error instanceof ApiError && options.error.status === 404 && (
+                  <span className="block text-xs text-muted-foreground">
+                    เซิร์ฟเวอร์ (backend) ยังเป็นเวอร์ชันเก่า — pull โค้ดล่าสุดแล้วกด Restart App บน Plesk
+                  </span>
+                )}
+              </li>
+            ) : options.isPending ? (
               <li className="p-3">
                 <Skeleton className="h-16" />
               </li>
