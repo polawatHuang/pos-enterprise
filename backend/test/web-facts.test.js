@@ -153,6 +153,52 @@ describe('AI web facts', () => {
     assert.equal(checklist.find((c) => c.key === 'flashSale').status, 'pass');
   });
 
+  const searched = (narration) => ({
+    model: 'MiniMax-M3',
+    stop_reason: 'end_turn',
+    content: [
+      { type: 'server_tool_use', id: 's2', name: 'web_search', input: { query: 'PDRN serum' } },
+      { type: 'web_search_tool_result', tool_use_id: 's2', content: [{ type: 'web_search_result', url: U1, title: 'หน้าสินค้า' }] },
+      { type: 'text', text: narration },
+    ],
+  });
+  const submitted = (facts, summary) => ({
+    model: 'MiniMax-M3',
+    stop_reason: 'tool_use',
+    content: [{ type: 'tool_use', id: 'f1', name: 'submit_facts', input: { facts, ...(summary ? { summary } : {}) } }],
+  });
+
+  test('a turn that ends without submit_facts: asked again with the tool forced, notes never shown', async () => {
+    await db.query('UPDATE trending_products SET shop_rating = NULL WHERE id = :id', { id: trendId });
+    calls = [];
+    script = [searched('Let me try to access the TikTok Shop product page directly'), submitted([{ field: 'shopRating', value: 4.6, sourceUrl: U1 }], 'เจอคะแนนร้านบนหน้าสินค้า')];
+    await admin.post(`/api/scraping/trends/${trendId}/web-facts`);
+    await drain();
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[1].toolChoice, { type: 'tool', name: 'submit_facts' });
+    assert.equal(calls[1].messages.at(-1).role, 'user');
+    const w = await webFacts();
+    assert.equal(w.status, 'done', JSON.stringify(w));
+    assert.deepEqual(w.facts.map((f) => [f.field, f.value]), [['shopRating', 4.6]]);
+    assert.equal(w.summary, 'เจอคะแนนร้านบนหน้าสินค้า');
+    assert.equal(w.searches, 1);
+    assert.equal(w.sources, 1);
+  });
+
+  test('forced submit refused: facts extracted from the notes; nothing found → a Thai system summary', async () => {
+    calls = [];
+    script = [searched('Shop rating 4.9 on the product page'), new Error('400 tool_choice not supported'), submitted([])];
+    await admin.post(`/api/scraping/trends/${trendId}/web-facts`);
+    await drain();
+    assert.equal(calls.length, 3);
+    assert.match(calls[2].messages[0].content[0].text, /Shop rating 4\.9/);
+    assert.match(calls[2].messages[0].content[0].text, new RegExp(U1.replace(/[.?/]/g, '\\$&')));
+    const w = await webFacts();
+    assert.equal(w.status, 'done', JSON.stringify(w));
+    assert.equal(w.facts.length, 0);
+    assert.match(w.summary, /^ค้นเว็บ 1 ครั้ง พบ 1 หน้า/);
+  });
+
   test('provider without web search: a failed state with a Thai reason', async () => {
     script = [Object.assign(new Error('400 tool type web_search_20250305 not supported'), { status: 400 })];
     await admin.post(`/api/scraping/trends/${trendId}/web-facts`);
@@ -212,6 +258,7 @@ describe('AI analysis prompt', () => {
     assert.match(text, /ข้อมูลที่ค้นจากเว็บ/);
     assert.match(text, /tiktok\.com/);
     assert.match(text, /คะแนนคัดเลือก/);
+    assert.doesNotMatch(text, /null/);
     assert.equal(res.body.data.analysis.model, 'MiniMax-M3');
     assert.equal(res.body.data.analysis.provider, 'minimax');
   });

@@ -782,6 +782,18 @@ const ANALYSIS_SCHEMA = {
   },
 };
 
+/** Drop null / empty values (nested objects too) so the prompt only states what is known. */
+function compact(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const plain = v != null && Object.getPrototypeOf(v) === Object.prototype;
+    const val = plain ? compact(v) : v;
+    if (val == null || val === '' || (Array.isArray(val) && !val.length) || (plain && !Object.keys(val).length)) continue;
+    out[k] = val;
+  }
+  return out;
+}
+
 const ANALYSIS_SYSTEM = `คุณเป็นนักวิเคราะห์สินค้าและนักการตลาดออนไลน์ในไทย (TikTok/Shopee)
 ประเมินสินค้าเทรนด์ว่าร้านควรนำมาขายหรือทำคลิปรีวิว affiliate หรือไม่ จากข้อมูลที่ให้เท่านั้น
 - อย่าแต่งตัวเลขที่ไม่มีในข้อมูล ถ้าข้อมูลไม่พอให้บอกในคำตัดสิน
@@ -796,6 +808,7 @@ const ANALYSIS_SYSTEM = `คุณเป็นนักวิเคราะห�
   ถอดสิ่งที่คลิปขายดีทำซ้ำกัน (ไม่ลอกบทพูด), ช่องทางขายหลัก (วิดีโอ/ไลฟ์) บอกว่าควรทำคอนเทนต์แบบไหน
 - ข้อมูลที่ "ค้นจากเว็บ" มี URL ที่มาและอาจมาจากแพลตฟอร์มอื่น ให้ใช้ประกอบอย่างระวัง
 - ระบุความเสี่ยงด้านกฎหมายโฆษณาไทย (เครื่องสำอาง อาหารเสริม เครื่องมือแพทย์ ต้องระวังคำเคลม) อย่างตรงไปตรงมา
+- ข้อที่ไม่มีในข้อมูลสินค้า = ยังไม่รู้ ให้บอกว่าควรตรวจอะไรเพิ่ม ห้ามเขียนว่า null และห้ามถือว่าเป็น 0
 - เขียนภาษาไทย กระชับ`;
 
 const firstText = (o) =>
@@ -900,7 +913,8 @@ router.post(
     if (req.valid.body.channelProfileId && !profile) throw notFound('ไม่พบโปรไฟล์ช่อง');
     const notes = parseJson(t.phase_notes);
     const checklist = parseJson(t.checklist) ?? [];
-    const facts = {
+    // unknown values are left out: the model reads a literal null as a fact ("อันดับเป็น null")
+    const facts = compact({
       สินค้า: t.title,
       แพลตฟอร์ม: t.platform,
       ร้านที่ขาย: t.shop_name,
@@ -918,7 +932,7 @@ router.post(
       'ยอดขายเทียบยอดสูงสุดของหมวด (%)': n(t.phase_ratio),
       เช็กลิสต์: Object.fromEntries(checklist.map((c) => [c.label, STATUS_TH[c.status] ?? c.status])),
       ...(await analysisExtras(t)),
-    };
+    });
     const channel = profile
       ? `\n\nโปรไฟล์ช่อง "${profile.name}"${profile.on_camera ? '' : ' (ไม่ออกหน้ากล้อง)'}:\n${profile.persona}` +
         (parseJson(profile.interests)?.length ? `\nความสนใจ: ${parseJson(profile.interests).join(', ')}` : '') +

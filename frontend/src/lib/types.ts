@@ -1289,6 +1289,7 @@ export interface WebFacts {
   dropped?: { field: string | null; value: unknown; reason: string }[];
   summary?: string | null;
   searches?: number;
+  sources?: number;
   provider?: string;
   model?: string | null;
   error?: string;
