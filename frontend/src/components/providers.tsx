@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { toast, Toaster } from "sonner";
+import { isReachable } from "@/lib/reachability";
 import { ApiError, isTransient, retryTransient } from "@/lib/api";
 
 let browserQueryClient: QueryClient | undefined;
@@ -17,6 +18,8 @@ function makeQueryClient() {
         if (query.meta?.silent) return;
         const upstream = err instanceof ApiError && err.code === "UPSTREAM";
         if (typeof window === "undefined" || !(isTransient(err) || upstream)) return;
+        // offline at the till: it shows its own banner and keeps selling; one more red toast only alarms
+        if (!upstream && window.location.pathname.startsWith("/pos") && (!navigator.onLine || !isReachable())) return;
         toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ", {
           id: "server-unreachable",
           description: err instanceof Error ? err.message : "โหลดข้อมูลบางส่วนไม่ได้",
@@ -31,6 +34,8 @@ function makeQueryClient() {
         refetchOnWindowFocus: true,
         refetchOnReconnect: true,
         retry: retryTransient,
+        // run once even when the browser says it is offline: the till answers from its offline copies
+        networkMode: "offlineFirst",
       },
     },
   });

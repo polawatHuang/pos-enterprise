@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
+import { isNetworkDown, withOfflineCopy } from "@/lib/offline-cache";
+import { registerPosWorker } from "@/lib/service-worker";
 import type { CartQuote, CatalogItem, DiscountCheck, DiscountCode, HeldBill, PaymentMethod, PosMember, PosOrder, PosSettings, Shift, ShiftReport } from "@/lib/types";
 import { cn, formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
@@ -51,7 +53,7 @@ import { LineDialog } from "./line-dialog";
 import { ApprovalCancelled, ManagerPinHost, withApproval } from "./manager-approval";
 import { OpenPriceDialog } from "./open-price-dialog";
 import { GatewayDialog } from "./gateway-settings";
-import { enqueueBill, offlineLookup, saveCatalog, syncBills, useOfflineBills, type OfflineBill } from "./offline";
+import { enqueueBill, offlineCatalog, offlineLookup, saveCatalog, syncBills, useOfflineBills, type OfflineBill } from "./offline";
 import { OfflineBillsDialog } from "./offline-dialog";
 import { PosGuide } from "./pos-guide";
 import { openDrawer, PrinterDialog, printOnUsb, printReceipt, usePrinterSettings } from "./printer";
@@ -113,8 +115,13 @@ export function PosView() {
   const allBills = useOfflineBills();
   const myBills = allBills.filter((b) => b.userId === user?.id);
   const qc = useQueryClient();
-  const shift = useQuery({ queryKey: SHIFT_KEY, queryFn: () => api.get<Shift | null>("/pos/shift") });
-  const settings = useQuery({ queryKey: POS_SETTINGS_KEY, queryFn: () => api.get<PosSettings>("/pos/settings"), staleTime: 5 * 60_000 });
+  // the shift and settings are kept on this device so a reload with no internet still opens the till
+  const shift = useQuery({ queryKey: SHIFT_KEY, queryFn: () => withOfflineCopy(`shift.${user?.id}`, () => api.get<Shift | null>("/pos/shift")) });
+  const settings = useQuery({
+    queryKey: POS_SETTINGS_KEY,
+    queryFn: () => withOfflineCopy("pos-settings", () => api.get<PosSettings>("/pos/settings")),
+    staleTime: 5 * 60_000,
+  });
   const held = useQuery({ queryKey: HELD_KEY, queryFn: () => api.get<HeldBill[]>("/pos/held"), enabled: !!shift.data });
   const categories = useCategories();
   const favorites = useFavorites();
@@ -153,6 +160,8 @@ export function PosView() {
       /* storage blocked: the card comes back next visit */
     }
   };
+  // this device can open the till again with no internet (production builds only)
+  useEffect(() => registerPosWorker(), []);
   useEffect(() => {
     if (!scanMiss) return;
     const t = setTimeout(() => setScanMiss(null), 4000);
@@ -172,12 +181,17 @@ export function PosView() {
 
   const catalog = useQuery({
     queryKey: ["pos", "catalog", search, filter, filter === "fav" ? favorites.join(",") : ""],
-    queryFn: () =>
-      filter === "fav"
-        ? favorites.length
-          ? api.get<CatalogItem[]>("/pos/catalog", { ids: favorites.join(","), limit: 60 })
-          : Promise.resolve([])
-        : api.get<CatalogItem[]>("/pos/catalog", { q: search, categoryId: filter === "all" ? undefined : filter, limit: 60 }),
+    queryFn: async () => {
+      const categoryId = filter === "all" || filter === "fav" ? undefined : filter;
+      try {
+        if (filter === "fav") return favorites.length ? await api.get<CatalogItem[]>("/pos/catalog", { ids: favorites.join(","), limit: 60 }) : [];
+        return await api.get<CatalogItem[]>("/pos/catalog", { q: search, categoryId, limit: 60 });
+      } catch (err) {
+        // no server: the same grid from the product list saved on this device
+        if (!isNetworkDown(err)) throw err;
+        return offlineCatalog({ q: search, categoryId, ids: filter === "fav" ? favorites : undefined, limit: 60 });
+      }
+    },
     enabled: !!shift.data,
     placeholderData: keepPreviousData,
   });

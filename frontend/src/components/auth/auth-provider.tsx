@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, retryTransient } from "@/lib/api";
+import { forgetAll, withOfflineCopy } from "@/lib/offline-cache";
 import type { User } from "@/lib/types";
 
 interface AuthContextValue {
@@ -22,7 +23,8 @@ export const ME_QUERY_KEY = ["auth", "me"] as const;
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ME_QUERY_KEY,
-    queryFn: () => api.get<{ user: User }>("/auth/me").then((d) => d.user),
+    // the last signed-in user is kept so the till opens while the internet is down
+    queryFn: () => withOfflineCopy("me", () => api.get<{ user: User }>("/auth/me").then((d) => d.user)),
     staleTime: 5 * 60 * 1000,
     retry: retryTransient,
   });
@@ -32,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const can = useCallback((p: string) => Boolean(user?.permissions.includes(p)), [user]);
 
   const logout = useCallback(async () => {
+    forgetAll();
     try {
       await api.post("/auth/logout");
     } finally {
