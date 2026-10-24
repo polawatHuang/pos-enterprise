@@ -12,6 +12,7 @@ const { applyMovement, getWarehouse, getProductForUpdate, updateAverageCost } = 
 const { localDate } = require('../../utils/dates');
 const { suggestions } = require('./suggest');
 const { receiveLot, consumeFefo, restoreLots, addLot, parseAlloc } = require('../inventory/lots');
+const { openStockDocument, closeStockDocument } = require('../inventory/stock-documents');
 
 /**
  * Ordering, receiving and branch transfers.
@@ -316,9 +317,18 @@ router.get(
   },
 );
 
+/** Goods receipts (GR) made against a PO, one per delivery. */
+async function poReceipts(poId) {
+  const rows = await db.query(
+    "SELECT id, doc_no, DATE_FORMAT(doc_date, '%Y-%m-%d') AS day, total_cost FROM stock_documents WHERE purchase_order_id = :poId ORDER BY id",
+    { poId },
+  );
+  return rows.map((r) => ({ id: r.id, docNo: r.doc_no, docDate: r.day, totalCost: Number(r.total_cost) }));
+}
+
 router.get('/orders/:id', requirePermission('inventory:read'), validate({ params: idParam }), async (req, res) => {
   const po = await loadPo(req.user.orgId, req.valid.params.id);
-  res.json({ data: mapPo(po, await poItems(po.id)) });
+  res.json({ data: { ...mapPo(po, await poItems(po.id)), receipts: await poReceipts(po.id) } });
 });
 
 const poLine = z.object({ productId: z.number().int().positive(), quantity: qty, unitCost: z.coerce.number().min(0).max(99_999_999).optional() });
@@ -474,6 +484,8 @@ router.post(
       const po = await loadPo(orgId, req.valid.params.id, conn);
       if (po.status !== 'ordered' && po.status !== 'partial') throw conflict(po.status === 'draft' ? 'ต้องส่งใบสั่งซื้อก่อนรับของ' : 'ใบสั่งซื้อนี้ปิดแล้ว');
       const [lines] = await conn.query('SELECT * FROM purchase_order_items WHERE po_id = :id FOR UPDATE', { id: po.id });
+      // one goods receipt (GR) per delivery; made only if something actually arrives
+      let doc = null;
       let received = 0;
       for (const item of b.items) {
         if (!item.quantity) continue;
@@ -485,6 +497,15 @@ router.post(
         }
         const cost = item.unitCost ?? Number(line.unit_cost);
         const product = await getProductForUpdate(conn, orgId, item.productId);
+        doc ??= await openStockDocument(conn, {
+          orgId,
+          type: 'goods_receipt',
+          warehouseId: po.warehouse_id,
+          supplierId: po.supplier_id,
+          purchaseOrderId: po.id,
+          note: b.note ?? null,
+          userId: req.user.id,
+        });
         await applyMovement(conn, {
           orgId,
           warehouseId: po.warehouse_id,
@@ -494,6 +515,7 @@ router.post(
           unitCost: cost,
           refType: 'purchase_order',
           refId: po.id,
+          stockDocumentId: doc.id,
           note: `รับของ ${po.po_no}${b.note ? `: ${b.note}` : ''}`.slice(0, 255),
           userId: req.user.id,
         });
@@ -512,17 +534,18 @@ router.post(
         received += 1;
       }
       if (!received && !b.close) throw badRequest('ยังไม่ได้ใส่จำนวนที่รับ');
+      if (doc) await closeStockDocument(conn, doc.id);
       const complete = lines.every((l) => Number(l.received_qty) + 1e-9 >= Number(l.quantity));
       const status = complete || b.close ? 'received' : 'partial';
       await conn.query(`UPDATE purchase_orders SET status = :status, received_at = IF(:status = 'received', UTC_TIMESTAMP(), received_at) WHERE id = :id`, {
         status,
         id: po.id,
       });
-      return { id: po.id, status, received };
+      return { id: po.id, status, received, document: doc };
     });
-    audit(req, 'po.receive', 'purchase_order', result.id, result);
+    audit(req, 'po.receive', 'purchase_order', result.id, { ...result, document: result.document?.docNo ?? null });
     const po = await loadPo(orgId, result.id);
-    res.json({ data: mapPo(po, await poItems(po.id)) });
+    res.json({ data: { ...mapPo(po, await poItems(po.id)), receipts: await poReceipts(po.id), receipt: result.document } });
   },
 );
 

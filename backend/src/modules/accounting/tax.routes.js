@@ -26,7 +26,7 @@ const monthRange = ({ year, month }) => {
 /**
  * ภ.พ.30 (monthly VAT return) draft.
  * Output VAT: every completed sale (POS + marketplace orders) + issued tax invoices not tied to an order
- * + other income recorded with VAT, minus credit notes. Input VAT: posted expenses backed by a full tax invoice.
+ * (and debit notes) + other income recorded with VAT, minus credit notes. Input VAT: posted expenses backed by a full tax invoice.
  */
 async function pp30(orgId, p) {
   const { from, next } = monthRange(p);
@@ -42,7 +42,7 @@ async function pp30(orgId, p) {
     db.one(
       `SELECT COALESCE(SUM(total - vat_amount), 0) AS base, COALESCE(SUM(vat_amount), 0) AS vat, COUNT(*) AS n
          FROM documents
-        WHERE org_id = :orgId AND doc_type IN ('tax_invoice','tax_invoice_receipt') AND status IN ('issued','paid')
+        WHERE org_id = :orgId AND doc_type IN ('tax_invoice','tax_invoice_receipt','debit_note') AND status IN ('issued','paid')
           AND order_id IS NULL AND doc_date >= :from AND doc_date < :next`,
       params,
     ),

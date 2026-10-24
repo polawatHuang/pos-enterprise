@@ -7,11 +7,13 @@ export const DOC_TYPE_LABEL: Record<DocType, string> = {
   receipt: "ใบเสร็จรับเงิน",
   tax_invoice_receipt: "ใบกำกับภาษี/ใบเสร็จรับเงิน",
   credit_note: "ใบลดหนี้",
+  debit_note: "ใบเพิ่มหนี้",
+  billing_note: "ใบวางบิล",
   wht_certificate: "หนังสือรับรองการหักภาษี ณ ที่จ่าย",
 };
 
 /** Types that can be created from the documents page (WHT certificates come from expenses). */
-export const CREATABLE_DOC_TYPES: DocType[] = ["quotation", "invoice", "tax_invoice", "tax_invoice_receipt", "receipt", "credit_note"];
+export const CREATABLE_DOC_TYPES: DocType[] = ["quotation", "invoice", "tax_invoice", "tax_invoice_receipt", "receipt", "credit_note", "debit_note", "billing_note"];
 
 export const DOC_STATUS: Record<string, { label: string; tone: "neutral" | "primary" | "success" | "danger" | "warning" }> = {
   draft: { label: "ฉบับร่าง", tone: "neutral" },

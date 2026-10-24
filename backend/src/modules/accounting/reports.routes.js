@@ -8,6 +8,7 @@ const { validate } = require('../../core/http');
 const { requirePermission } = require('../../core/auth');
 const { r2 } = require('./ledger.service');
 const { money, sendCsv } = require('./csv');
+const { stockLedger } = require('./stock-ledger');
 
 const router = express.Router();
 router.use(requirePermission('accounting:read'));
@@ -317,6 +318,29 @@ router.get('/journal.csv', validate({ query: range }), async (req, res) => {
 /* --------------------------------------------------------------- overview */
 
 /** Overview numbers for the accounting landing page (business-timezone month). */
+/* ------------------------------------------- รายงานสินค้าและวัตถุดิบ (ม.87(3)) */
+
+const stockLedgerQuery = z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'เดือนต้องเป็น YYYY-MM'),
+  warehouseId: z.coerce.number().int().positive(),
+  productId: z.coerce.number().int().positive().optional(),
+});
+
+router.get('/stock-ledger', validate({ query: stockLedgerQuery }), async (req, res) => {
+  res.json({ data: await stockLedger(req.user.orgId, req.valid.query) });
+});
+
+router.get('/stock-ledger.csv', validate({ query: stockLedgerQuery }), async (req, res) => {
+  const d = await stockLedger(req.user.orgId, req.valid.query);
+  const rows = [['รหัสสินค้า', 'ชื่อสินค้า', 'หน่วย', 'วันที่', 'เอกสารอ้างอิง', 'รายการ', 'รับ', 'จ่าย', 'คงเหลือ', 'ต้นทุนต่อหน่วย']];
+  for (const p of d.products) {
+    rows.push([p.sku, p.name, p.unit, `${d.month}-01`, '', 'ยอดยกมา', '', '', p.opening, '']);
+    for (const l of p.lines) rows.push([p.sku, p.name, p.unit, l.date, l.docNo, l.description, l.qtyIn || '', l.qtyOut || '', l.balance, money(l.unitCost)]);
+    rows.push([p.sku, p.name, p.unit, '', '', 'รวม / ยอดยกไป', p.totalIn, p.totalOut, p.closing, '']);
+  }
+  sendCsv(res, `stock-ledger-${d.month}-wh${d.warehouse.id}.csv`, rows);
+});
+
 router.get('/overview', async (req, res) => {
   const TZ = env.APP_TZ_OFFSET;
   const params = { orgId: req.user.orgId };

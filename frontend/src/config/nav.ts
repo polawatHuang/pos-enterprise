@@ -53,6 +53,9 @@ export interface NavGroup {
   items: NavItem[];
 }
 
+/** The documents hub (ศูนย์เอกสาร) opens for anyone who reads one kind of document; the server lists only what each may read. */
+export const DOCUMENTS_READ = ["accounting:read", "inventory:read", "inventory:count", "inventory:write", "inventory:approve", "pos:manage", "settings:manage"];
+
 /** Customers (CRM) open for anyone who sells, chats with customers or does the books. */
 export const CUSTOMERS_READ = ["pos:sell", "inbox:read", "accounting:read"];
 /** Who may add or edit a customer. */
@@ -82,7 +85,10 @@ export function hasPermission(permissions: readonly string[], required: string |
 export const navGroups: NavGroup[] = [
   {
     label: "ภาพรวม",
-    items: [{ href: "/dashboard", label: "ภาพรวมร้าน", icon: LayoutDashboard, permission: "dashboard:view", phase: 1 }],
+    items: [
+      { href: "/dashboard", label: "ภาพรวมร้าน", icon: LayoutDashboard, permission: "dashboard:view", phase: 1 },
+      { href: "/documents", label: "ศูนย์เอกสาร", icon: FileText, permission: DOCUMENTS_READ, phase: 1 },
+    ],
   },
   {
     label: "ขายและสต๊อก",
@@ -104,7 +110,6 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: "/accounting", label: "ภาพรวมบัญชี", icon: Calculator, permission: "accounting:read", phase: 1 },
       { href: "/accounting/transactions", label: "รายรับ-รายจ่าย", icon: Wallet, permission: "accounting:read", phase: 1 },
-      { href: "/accounting/documents", label: "เอกสาร", icon: FileText, permission: "accounting:read", phase: 1 },
       { href: "/accounting/tax", label: "ภาษี", icon: Landmark, permission: "accounting:read", phase: 1 },
       { href: "/accounting/reports", label: "รายงานการเงิน", icon: BarChart3, permission: "accounting:read", phase: 1 },
     ],

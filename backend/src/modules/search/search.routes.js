@@ -105,6 +105,8 @@ const GROUPS = [
         receipt: 'ใบเสร็จ',
         tax_invoice_receipt: 'ใบกำกับ/ใบเสร็จ',
         credit_note: 'ใบลดหนี้',
+        debit_note: 'ใบเพิ่มหนี้',
+        billing_note: 'ใบวางบิล',
         wht_certificate: '50 ทวิ',
       };
       return rows.map((r) => ({

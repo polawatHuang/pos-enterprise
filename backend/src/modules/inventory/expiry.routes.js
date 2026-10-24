@@ -12,6 +12,7 @@ const { postJournal, ACC } = require('../accounting/ledger.service');
 const { localDate } = require('../../utils/dates');
 const { LOCAL_TODAY } = require('./analytics');
 const { ymd } = require('./lots');
+const { openStockDocument, closeStockDocument } = require('./stock-documents');
 
 /**
  * Near-expiry board (7-Eleven fresh-food routine): see what expires soon, mark it down at the till
@@ -111,6 +112,14 @@ router.post(
       const qty = b.qty ?? Number(lot.quantity);
       if (qty > Number(lot.quantity) + 1e-9) throw badRequest(`ล็อตนี้เหลือ ${Number(lot.quantity)}`);
       const label = WASTE_REASONS[b.reason];
+      const doc = await openStockDocument(conn, {
+        orgId,
+        type: 'waste',
+        warehouseId: lot.warehouse_id,
+        reason: label,
+        note: b.note ?? null,
+        userId: req.user.id,
+      });
       await applyMovement(conn, {
         orgId,
         warehouseId: lot.warehouse_id,
@@ -120,11 +129,13 @@ router.post(
         unitCost: Number(lot.cost),
         refType: `waste:${b.reason}`,
         refId: lot.id,
+        stockDocumentId: doc.id,
         note: `ของเสีย: ${label}${b.note ? ` · ${b.note}` : ''}`.slice(0, 255),
         userId: req.user.id,
         allowNegative: true,
       });
       await conn.query('UPDATE stock_lots SET quantity = GREATEST(quantity - :qty, 0) WHERE id = :id', { qty, id: lot.id });
+      await closeStockDocument(conn, doc.id);
       const value = r2(qty * Number(lot.cost));
       await postJournal(conn, {
         orgId,
@@ -138,7 +149,7 @@ router.post(
           { account: ACC.INVENTORY, credit: value },
         ],
       });
-      return { lotId: lot.id, qty, value, reason: b.reason };
+      return { lotId: lot.id, qty, value, reason: b.reason, document: doc };
     });
     audit(req, 'lot.waste', 'stock_lot', result.lotId, result);
     res.json({ data: result });

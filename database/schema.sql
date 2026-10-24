@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -379,9 +379,11 @@ CREATE TABLE stock_movements (
   unit_cost     DECIMAL(14,2) NULL,
   ref_type      VARCHAR(50) NULL,
   ref_id        BIGINT UNSIGNED NULL,
+  stock_document_id BIGINT UNSIGNED NULL COMMENT 'GR / AJ / WS this movement belongs to',
   note          VARCHAR(255) NULL,
   created_by    BIGINT UNSIGNED NULL,
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_sm_stock_doc (stock_document_id),
   KEY idx_sm_product_time (product_id, created_at),
   CONSTRAINT fk_sm_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
   CONSTRAINT fk_sm_wh FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
@@ -498,6 +500,29 @@ CREATE TABLE purchase_order_items (
   unit_cost     DECIMAL(14,2) NOT NULL,
   CONSTRAINT fk_poi_po FOREIGN KEY (po_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
   CONSTRAINT fk_poi_product FOREIGN KEY (product_id) REFERENCES products(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE stock_documents (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id            BIGINT UNSIGNED NOT NULL,
+  doc_type          ENUM('goods_receipt','adjustment','waste') NOT NULL,
+  doc_no            VARCHAR(40) NOT NULL,
+  doc_date          DATE NOT NULL,
+  warehouse_id      BIGINT UNSIGNED NOT NULL,
+  supplier_id       BIGINT UNSIGNED NULL,
+  purchase_order_id BIGINT UNSIGNED NULL,
+  reference         VARCHAR(100) NULL COMMENT 'supplier delivery note / invoice no.',
+  reason            VARCHAR(100) NULL,
+  note              VARCHAR(255) NULL,
+  total_cost        DECIMAL(14,2) NOT NULL DEFAULT 0,
+  created_by        BIGINT UNSIGNED NULL,
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_stock_doc_no (org_id, doc_type, doc_no),
+  KEY idx_stock_doc_date (org_id, doc_date),
+  CONSTRAINT fk_sdoc_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sdoc_wh FOREIGN KEY (warehouse_id) REFERENCES warehouses(id),
+  CONSTRAINT fk_sdoc_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_sdoc_po FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE stock_transfers (
@@ -946,7 +971,7 @@ CREATE TABLE transactions (
 CREATE TABLE documents (
   id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   org_id        BIGINT UNSIGNED NOT NULL,
-  doc_type      ENUM('quotation','invoice','tax_invoice','receipt','tax_invoice_receipt','credit_note','debit_note','wht_certificate','purchase_order','expense_voucher') NOT NULL,
+  doc_type      ENUM('quotation','invoice','tax_invoice','receipt','tax_invoice_receipt','credit_note','debit_note','wht_certificate','purchase_order','expense_voucher','billing_note') NOT NULL,
   doc_no        VARCHAR(40) NOT NULL,
   doc_date      DATE NOT NULL,
   due_date      DATE NULL,
@@ -1009,6 +1034,17 @@ CREATE TABLE document_items (
   vat_type     ENUM('vat7','exempt','zero') NOT NULL DEFAULT 'vat7',
   line_total   DECIMAL(14,2) NOT NULL,
   CONSTRAINT fk_di_doc FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE billing_note_items (
+  billing_note_id BIGINT UNSIGNED NOT NULL,
+  document_id     BIGINT UNSIGNED NOT NULL,
+  amount          DECIMAL(14,2) NOT NULL COMMENT 'signed: credit notes are negative',
+  settled         TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'paid by this billing note (undone if it is voided)',
+  PRIMARY KEY (billing_note_id, document_id),
+  KEY idx_bni_doc (document_id),
+  CONSTRAINT fk_bni_note FOREIGN KEY (billing_note_id) REFERENCES documents(id) ON DELETE CASCADE,
+  CONSTRAINT fk_bni_doc FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE tax_reports (
@@ -1481,6 +1517,6 @@ CREATE TABLE document_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub');
 
 SET FOREIGN_KEY_CHECKS = 1;

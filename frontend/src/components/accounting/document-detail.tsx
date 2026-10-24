@@ -17,7 +17,7 @@ import { DocumentPaper } from "./document-paper";
 import { DocumentEditor } from "./document-editor";
 import { DOC_STATUS, DOC_TYPE_LABEL, PAYMENT_LABEL } from "./labels";
 
-type Action = "issue" | "pay" | "void" | null;
+type Action = "issue" | "pay" | "settle" | "void" | null;
 
 export function DocumentDetail({ id }: { id: number }) {
   const { can } = useAuth();
@@ -51,8 +51,8 @@ export function DocumentDetail({ id }: { id: number }) {
     <>
       <div className="mb-4 flex flex-col gap-3 print:hidden lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <Link href="/accounting/documents" className="inline-flex min-h-10 items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-4" /> เอกสารทั้งหมด
+          <Link href="/documents" className="inline-flex min-h-10 items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="size-4" /> ศูนย์เอกสาร
           </Link>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight">
@@ -81,9 +81,14 @@ export function DocumentDetail({ id }: { id: number }) {
               </Button>
             </>
           )}
-          {writable && d.status === "issued" && (d.docType === "invoice" || d.docType === "tax_invoice") && (
+          {writable && d.status === "issued" && ["invoice", "tax_invoice", "debit_note"].includes(d.docType) && (
             <Button onClick={() => setAction("pay")}>
               <Banknote /> บันทึกรับชำระ
+            </Button>
+          )}
+          {writable && d.status === "issued" && d.docType === "billing_note" && (
+            <Button onClick={() => setAction("settle")}>
+              <Banknote /> รับชำระทั้งใบวางบิล
             </Button>
           )}
           {writable && d.docType === "quotation" && d.status === "issued" && (
@@ -92,9 +97,14 @@ export function DocumentDetail({ id }: { id: number }) {
             </Button>
           )}
           {writable && ["tax_invoice", "tax_invoice_receipt"].includes(d.docType) && ["issued", "paid"].includes(d.status) && (
-            <Button variant="outline" onClick={() => void convert("credit_note")}>
-              <Copy /> ออกใบลดหนี้
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => void convert("credit_note")}>
+                <Copy /> ออกใบลดหนี้
+              </Button>
+              <Button variant="outline" onClick={() => void convert("debit_note")}>
+                <Copy /> ออกใบเพิ่มหนี้
+              </Button>
+            </>
           )}
           {writable && d.status !== "void" && (
             <Button variant="ghost" className="text-danger" onClick={() => setAction("void")}>
@@ -116,7 +126,7 @@ export function DocumentDetail({ id }: { id: number }) {
             onDone={(deleted) => {
               setAction(null);
               refresh();
-              if (deleted) router.push("/accounting/documents");
+              if (deleted) router.push("/documents");
             }}
           />
         )}
@@ -126,7 +136,7 @@ export function DocumentDetail({ id }: { id: number }) {
 }
 
 function ActionDialog({ doc, action, onDone }: { doc: AccDocument; action: Exclude<Action, null>; onDone: (deleted?: boolean) => void }) {
-  const needsMethod = action === "pay" || (action === "issue" && ["receipt", "tax_invoice_receipt"].includes(doc.docType));
+  const needsMethod = action === "pay" || action === "settle" || (action === "issue" && ["receipt", "tax_invoice_receipt"].includes(doc.docType));
   const [method, setMethod] = useState("transfer");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -137,6 +147,9 @@ function ActionDialog({ doc, action, onDone }: { doc: AccDocument; action: Exclu
       if (action === "issue") {
         const r = await api.post<AccDocument>(`/accounting/documents/${doc.id}/issue`, needsMethod ? { paymentMethod: method } : {});
         toast.success(`ออกเอกสารเลขที่ ${r.docNo} แล้ว`);
+      } else if (action === "settle") {
+        await api.post(`/accounting/documents/${doc.id}/settle`, { paymentMethod: method });
+        toast.success(`รับชำระตามใบวางบิล ${doc.docNo} และลงบัญชีแล้ว`);
       } else if (action === "pay") {
         await api.post(`/accounting/documents/${doc.id}/pay`, { paymentMethod: method });
         toast.success("บันทึกรับชำระและลงบัญชีแล้ว");
@@ -152,13 +165,26 @@ function ActionDialog({ doc, action, onDone }: { doc: AccDocument; action: Exclu
     }
   };
 
-  const title = action === "issue" ? "ออกเอกสาร" : action === "pay" ? "บันทึกรับชำระ" : doc.isDraft ? "ลบฉบับร่าง" : "ยกเลิกเอกสาร";
+  const title =
+    action === "issue"
+      ? "ออกเอกสาร"
+      : action === "settle"
+        ? `รับชำระตามใบวางบิล ${doc.docNo}`
+        : action === "pay"
+          ? "บันทึกรับชำระ"
+          : doc.isDraft
+            ? "ลบฉบับร่าง"
+            : "ยกเลิกเอกสาร";
   const description =
     action === "issue"
       ? "ระบบจะออกเลขที่ต่อเนื่องและลงบัญชีทันที หลังจากนี้แก้ไขเอกสารไม่ได้ (ต้องยกเลิกแล้วออกใหม่)"
-      : action === "void" && !doc.isDraft
-        ? "เลขที่เอกสารจะถูกเก็บไว้พร้อมสถานะยกเลิก และระบบจะกลับรายการบัญชีให้"
-        : undefined;
+      : action === "settle"
+        ? "ทุกเอกสารในใบวางบิลที่ยังค้างจะถูกบันทึกว่าชำระแล้ว และลงบัญชียอดสุทธิครั้งเดียว"
+        : action === "void" && !doc.isDraft
+          ? doc.docType === "billing_note"
+            ? "ใบแจ้งหนี้ในใบวางบิลไม่ถูกยกเลิก — ถ้ารับชำระไปแล้ว ระบบจะกลับรายการรับชำระให้"
+            : "เลขที่เอกสารจะถูกเก็บไว้พร้อมสถานะยกเลิก และระบบจะกลับรายการบัญชีให้"
+          : undefined;
 
   return (
     <DialogContent title={title} description={description}>

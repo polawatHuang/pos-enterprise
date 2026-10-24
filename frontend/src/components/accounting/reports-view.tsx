@@ -1,18 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { api, apiFetch } from "@/lib/api";
-import type { BalanceSheet, BalanceSheetLine, BalanceSheetSection, JournalEntry, Paged, Pnl, PnlLine, TrialBalance } from "@/lib/types";
+import type { BalanceSheet, BalanceSheetLine, BalanceSheetSection, JournalEntry, Paged, Pnl, PnlLine, StockLedger, TrialBalance, Warehouse } from "@/lib/types";
 import { cn, formatMoney, formatThaiDate, monthRange, todayStr } from "@/lib/utils";
-import { Badge, Card, CardContent, CardHeader, CardTitle, Input, Pagination, Segmented, Skeleton, TabBar } from "@/components/ui/primitives";
+import { Badge, Card, CardContent, CardHeader, CardTitle, Input, NativeSelect, Pagination, Segmented, Skeleton, TabBar } from "@/components/ui/primitives";
 import { PageHeader } from "@/components/layout/page";
 import { EmptyState, ErrorNote } from "@/components/dashboard/widgets";
 import { PrintHeading, ReportActions } from "./report-actions";
 
 type Preset = "this" | "last" | "quarter" | "year";
-type Tab = "pnl" | "bs" | "tb" | "journal";
+type Tab = "pnl" | "bs" | "tb" | "journal" | "stock";
 
 function presetRange(p: Preset) {
   if (p === "this") return monthRange(0);
@@ -31,7 +32,9 @@ function previousMonthEnd(date: string) {
 }
 
 export function ReportsView() {
-  const [tab, setTab] = useState<Tab>("pnl");
+  // the documents hub links straight to a tab: /accounting/reports?tab=stock
+  const initial = useSearchParams().get("tab") as Tab | null;
+  const [tab, setTab] = useState<Tab>(initial && ["pnl", "bs", "tb", "journal", "stock"].includes(initial) ? initial : "pnl");
   return (
     <>
       <PageHeader title="รายงานการเงิน" description="สร้างจากบัญชีแยกประเภท (ลงบัญชีคู่อัตโนมัติจาก POS เอกสาร และรายรับ-รายจ่าย)" />
@@ -44,11 +47,22 @@ export function ReportsView() {
             { value: "bs", label: "งบแสดงฐานะการเงิน" },
             { value: "tb", label: "งบทดลอง" },
             { value: "journal", label: "สมุดรายวัน" },
+            { value: "stock", label: "รายงานสินค้าและวัตถุดิบ" },
           ]}
         />
       </div>
       <div className="mt-4">
-        {tab === "pnl" ? <PnlPanel /> : tab === "bs" ? <BalanceSheetPanel /> : tab === "tb" ? <TrialBalancePanel /> : <JournalPanel />}
+        {tab === "pnl" ? (
+          <PnlPanel />
+        ) : tab === "bs" ? (
+          <BalanceSheetPanel />
+        ) : tab === "tb" ? (
+          <TrialBalancePanel />
+        ) : tab === "stock" ? (
+          <StockLedgerPanel />
+        ) : (
+          <JournalPanel />
+        )}
       </div>
     </>
   );
@@ -542,6 +556,117 @@ function JournalPanel() {
           </div>
         </>
       )}
+    </Card>
+  );
+}
+
+/* ------------------------------------------- รายงานสินค้าและวัตถุดิบ (ม.87(3)) */
+
+const qtyFmt = (v: number) => (v ? v.toLocaleString("th-TH", { maximumFractionDigits: 3 }) : "");
+
+/** Required of VAT-registered shops that sell goods: receipts, issues and balance per product, per place of business. */
+function StockLedgerPanel() {
+  const [month, setMonth] = useState(todayStr().slice(0, 7));
+  const [warehouseId, setWarehouseId] = useState("");
+  const warehouses = useQuery({ queryKey: ["inventory", "warehouses"], queryFn: () => api.get<Warehouse[]>("/inventory/warehouses") });
+  const wh = warehouseId || String(warehouses.data?.[0]?.id ?? "");
+  const query = { month, warehouseId: wh };
+  const q = useQuery({
+    queryKey: ["accounting", "stock-ledger", query],
+    queryFn: () => api.get<StockLedger>("/accounting/reports/stock-ledger", query),
+    enabled: !!wh && /^\d{4}-\d{2}$/.test(month),
+    placeholderData: keepPreviousData,
+  });
+  const d = q.data;
+  const [y, m] = month.split("-").map(Number);
+  const monthLabel = new Date(y, (m || 1) - 1, 1).toLocaleDateString("th-TH", { month: "long", year: "numeric" });
+  return (
+    <Card className="print-report">
+      <CardHeader className="flex-col gap-3 sm:flex-row print:hidden">
+        <div>
+          <CardTitle>รายงานสินค้าและวัตถุดิบ</CardTitle>
+          <p className="mt-1 text-xs text-muted-foreground">ตามมาตรา 87(3) แห่งประมวลรัษฎากร · แยกตามสถานประกอบการ (คลัง) · ขายหน้าร้านรวมเป็นยอดต่อวัน</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input type="month" aria-label="เดือน" className="h-9 w-40" value={month} onChange={(e) => setMonth(e.target.value)} />
+          <NativeSelect aria-label="คลัง" className="h-9" value={wh} onChange={(e) => setWarehouseId(e.target.value)}>
+            {(warehouses.data ?? []).map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </NativeSelect>
+          <ReportActions csvPath="/accounting/reports/stock-ledger.csv" query={query} filename={`stock-ledger-${month}.csv`} disabled={!d} />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <PrintHeading
+          title="รายงานสินค้าและวัตถุดิบ"
+          subtitle={`เดือน ${monthLabel} · ${d?.warehouse.name ?? ""}${d?.warehouse.branchName ? ` (${d.warehouse.branchName})` : ""}`}
+        />
+        {q.isPending ? (
+          <Skeleton className="h-64 w-full" />
+        ) : q.isError ? (
+          <ErrorNote onRetry={() => q.refetch()} error={q.error} />
+        ) : !d?.products.length ? (
+          <EmptyState text="ไม่มีการเคลื่อนไหวของสินค้าในเดือนนี้" />
+        ) : (
+          <div className="space-y-6">
+            {d.products.map((p) => (
+              <section key={p.productId} className="break-inside-avoid">
+                <h3 className="mb-1 text-sm font-semibold">
+                  {p.name}{" "}
+                  <span className="font-normal text-muted-foreground">
+                    ({p.sku} · หน่วย: {p.unit})
+                  </span>
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                        <th className="px-2 py-1.5 font-medium">วันที่</th>
+                        <th className="px-2 py-1.5 font-medium">เอกสารอ้างอิง</th>
+                        <th className="px-2 py-1.5 font-medium">รายการ</th>
+                        <th className="px-2 py-1.5 text-right font-medium">รับ</th>
+                        <th className="px-2 py-1.5 text-right font-medium">จ่าย</th>
+                        <th className="px-2 py-1.5 text-right font-medium">คงเหลือ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="tabular-nums">
+                      <tr className="border-b border-border text-muted-foreground">
+                        <td className="px-2 py-1.5">{formatThaiDate(`${month}-01`)}</td>
+                        <td className="px-2 py-1.5" />
+                        <td className="px-2 py-1.5">ยอดยกมา</td>
+                        <td className="px-2 py-1.5" />
+                        <td className="px-2 py-1.5" />
+                        <td className="px-2 py-1.5 text-right">{p.opening.toLocaleString("th-TH")}</td>
+                      </tr>
+                      {p.lines.map((l, i) => (
+                        <tr key={i} className="border-b border-border">
+                          <td className="whitespace-nowrap px-2 py-1.5">{formatThaiDate(l.date)}</td>
+                          <td className="px-2 py-1.5">{l.docNo}</td>
+                          <td className="px-2 py-1.5">{l.description}</td>
+                          <td className="px-2 py-1.5 text-right text-success">{qtyFmt(l.qtyIn)}</td>
+                          <td className="px-2 py-1.5 text-right text-danger">{qtyFmt(l.qtyOut)}</td>
+                          <td className="px-2 py-1.5 text-right">{l.balance.toLocaleString("th-TH")}</td>
+                        </tr>
+                      ))}
+                      <tr className="font-semibold">
+                        <td className="px-2 py-1.5" colSpan={3}>
+                          รวม / ยอดยกไป
+                        </td>
+                        <td className="px-2 py-1.5 text-right">{qtyFmt(p.totalIn) || "0"}</td>
+                        <td className="px-2 py-1.5 text-right">{qtyFmt(p.totalOut) || "0"}</td>
+                        <td className="px-2 py-1.5 text-right">{p.closing.toLocaleString("th-TH")}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </CardContent>
     </Card>
   );
 }

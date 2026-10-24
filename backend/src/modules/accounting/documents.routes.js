@@ -14,11 +14,20 @@ const { getTaxSettings, lineRate } = require('../org/tax');
 
 const router = express.Router();
 
-const SALES_TYPES = ['quotation', 'invoice', 'tax_invoice', 'receipt', 'tax_invoice_receipt', 'credit_note'];
+const SALES_TYPES = ['quotation', 'invoice', 'tax_invoice', 'receipt', 'tax_invoice_receipt', 'credit_note', 'debit_note'];
 /** Issued as a sale on credit -> receivable until paid. */
-const CREDIT_TYPES = ['invoice', 'tax_invoice'];
+const CREDIT_TYPES = ['invoice', 'tax_invoice', 'debit_note'];
+/** Credit / debit notes adjust a tax invoice that was issued (Revenue Code s.86/9, 86/10). */
+const ADJUSTS_TAX_INVOICE = ['credit_note', 'debit_note'];
+/** What a billing note (ใบวางบิล) can collect: unpaid credit sales, less their credit notes. */
+const BILLABLE = ['invoice', 'tax_invoice', 'debit_note', 'credit_note'];
 /** Issued and paid at once (cash sale). */
 const PAID_ON_ISSUE = ['receipt', 'tax_invoice_receipt'];
+
+const BILLABLE_SQL = `d.org_id = :orgId AND d.doc_type IN (:types) AND d.status = 'issued'
+  AND NOT EXISTS (SELECT 1 FROM billing_note_items bi JOIN documents bn ON bn.id = bi.billing_note_id
+                   WHERE bi.document_id = d.id AND bn.status = 'issued')`;
+const signed = (d) => (d.doc_type === 'credit_note' ? -Number(d.total) : Number(d.total));
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 const money = z.coerce.number().min(0).max(999_999_999);
@@ -128,7 +137,7 @@ router.get(
   requirePermission('accounting:read'),
   validate({
     query: z.object({
-      docType: z.enum([...SALES_TYPES, 'wht_certificate']).optional(),
+      docType: z.enum([...SALES_TYPES, 'wht_certificate', 'billing_note']).optional(),
       status: z.enum(['draft', 'issued', 'paid', 'void', 'unpaid']).optional(),
       q: z.string().trim().max(100).optional(),
       page: z.coerce.number().int().min(1).default(1),
@@ -146,7 +155,7 @@ router.get(
       offset: (f.page - 1) * f.pageSize,
     };
     const statusSql =
-      f.status === 'unpaid' ? "AND d.status = 'issued' AND d.doc_type IN ('invoice','tax_invoice')" : 'AND (:status IS NULL OR d.status = :status)';
+      f.status === 'unpaid' ? "AND d.status = 'issued' AND d.doc_type IN ('invoice','tax_invoice','debit_note')" : 'AND (:status IS NULL OR d.status = :status)';
     const where = `d.org_id = :orgId AND (:docType IS NULL OR d.doc_type = :docType) ${statusSql}
       AND (:q IS NULL OR d.doc_no LIKE :q OR d.party_name LIKE :q)`;
     const rows = await db.query(
@@ -164,6 +173,34 @@ async function bankAccountFor(orgId) {
   const { bankAccount } = await getSettings(orgId);
   return bankAccount?.number ? { ...bankAccount, display: formatAccountNo(bankAccount.number) } : null;
 }
+
+/** Unpaid documents of one customer (by customer record, or by name when there is none). */
+router.get(
+  '/billable',
+  requirePermission('accounting:read'),
+  validate({ query: z.object({ customerId: z.coerce.number().int().positive().optional(), partyName: z.string().trim().max(191).optional() }) }),
+  async (req, res) => {
+    const { customerId, partyName } = req.valid.query;
+    if (!customerId && !partyName) {
+      // who can be billed: one row per customer with something unpaid
+      const rows = await db.query(
+        `SELECT d.customer_id, d.party_name, COUNT(*) AS n, SUM(CASE WHEN d.doc_type = 'credit_note' THEN -d.total ELSE d.total END) AS amount
+           FROM documents d WHERE ${BILLABLE_SQL} GROUP BY d.customer_id, d.party_name
+          HAVING SUM(d.doc_type <> 'credit_note') > 0 ORDER BY d.party_name`,
+        { orgId: req.user.orgId, types: BILLABLE },
+      );
+      return res.json({ data: rows.map((r) => ({ customerId: r.customer_id, partyName: r.party_name, count: Number(r.n), amount: Number(r.amount) })) });
+    }
+    const rows = await db.query(
+      `SELECT d.*, DATE_FORMAT(d.doc_date, '%Y-%m-%d') AS doc_date_str, DATE_FORMAT(d.due_date, '%Y-%m-%d') AS due_date_str
+         FROM documents d
+        WHERE ${BILLABLE_SQL} AND ${customerId ? 'd.customer_id = :customerId' : 'd.customer_id IS NULL AND d.party_name = :partyName'}
+        ORDER BY d.doc_date, d.id`,
+      { orgId: req.user.orgId, types: BILLABLE, customerId: customerId ?? null, partyName: partyName ?? null },
+    );
+    res.json({ data: rows.map((r) => ({ ...mapDocument(r, []), signedAmount: signed(r) })) });
+  },
+);
 
 /** Everything a printable A4 document needs: org header, branch, party, lines, amount in words. */
 router.get('/:id', requirePermission('accounting:read'), validate({ params: idParam }), async (req, res) => {
@@ -196,6 +233,7 @@ router.get('/:id', requirePermission('accounting:read'), validate({ params: idPa
         branchNo: org.branch_no ?? '00000',
         bankAccount: await bankAccountFor(req.user.orgId),
       },
+      billedDocuments: d.doc_type === 'billing_note' ? await billedDocuments(d.id) : undefined,
       whtSource: source && {
         rate: source.wht_rate == null ? null : Number(source.wht_rate),
         incomeType: source.wht_income_type,
@@ -210,6 +248,17 @@ router.get('/:id', requirePermission('accounting:read'), validate({ params: idPa
 
 /* ---------------------------------------------------------------- create */
 
+/** A credit/debit note must point at a tax invoice of this shop that was actually issued. */
+async function assertAdjustsTaxInvoice(conn, orgId, docType, refDocId) {
+  if (!ADJUSTS_TAX_INVOICE.includes(docType)) return;
+  const label = docType === 'credit_note' ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้';
+  if (!refDocId) throw badRequest(`${label}ต้องอ้างอิงใบกำกับภาษีเดิม`);
+  const [[ref]] = await conn.query('SELECT doc_type, status FROM documents WHERE id = :id AND org_id = :orgId', { id: refDocId, orgId });
+  if (!ref) throw badRequest('ไม่พบใบกำกับภาษีที่อ้างอิง');
+  if (!['tax_invoice', 'tax_invoice_receipt'].includes(ref.doc_type)) throw badRequest(`${label}ต้องอ้างอิงใบกำกับภาษี`);
+  if (!['issued', 'paid'].includes(ref.status)) throw badRequest(`ใบกำกับภาษีที่อ้างอิงต้องออกแล้วและไม่ถูกยกเลิก`);
+}
+
 async function insertDocument(conn, user, b, totals, extra = {}) {
   let party = { name: b.partyName ?? null, taxId: b.partyTaxId ?? null, address: b.partyAddress ?? null };
   if (b.customerId) {
@@ -220,9 +269,10 @@ async function insertDocument(conn, user, b, totals, extra = {}) {
     if (!c) throw notFound('ไม่พบลูกค้า');
     party = { name: party.name || c.name, taxId: party.taxId || c.tax_id, address: party.address || c.address };
   }
-  if (['tax_invoice', 'tax_invoice_receipt'].includes(b.docType) && !party.name) {
+  if (['tax_invoice', 'tax_invoice_receipt', ...ADJUSTS_TAX_INVOICE].includes(b.docType) && !party.name) {
     throw badRequest('ใบกำกับภาษีต้องระบุชื่อผู้ซื้อ');
   }
+  await assertAdjustsTaxInvoice(conn, user.orgId, b.docType, b.refDocId ?? extra.refDocId ?? null);
   const [ins] = await conn.query(
     `INSERT INTO documents (org_id, doc_type, doc_no, doc_date, due_date, customer_id, party_name, party_tax_id, party_address,
                             subtotal, discount, vat_amount, total, status, ref_doc_id, note, created_by)
@@ -261,7 +311,6 @@ async function insertDocument(conn, user, b, totals, extra = {}) {
 
 router.post('/', requirePermission('accounting:write'), validate({ body: docBody }), async (req, res) => {
   const b = req.valid.body;
-  if (b.docType === 'credit_note' && !b.refDocId) throw badRequest('ใบลดหนี้ต้องอ้างอิงใบกำกับภาษีเดิม');
   const totals = computeDocTotals(b.items, b.discount, await getTaxSettings(req.user.orgId));
   const id = await db.tx((conn) => insertDocument(conn, req.user, b, totals));
   audit(req, 'document.create', 'document', id, { docType: b.docType, total: totals.total });
@@ -277,6 +326,7 @@ router.patch('/:id', requirePermission('accounting:write'), validate({ params: i
     const [[d]] = await conn.query('SELECT status FROM documents WHERE id = :id AND org_id = :orgId FOR UPDATE', { id, orgId: req.user.orgId });
     if (!d) throw notFound('ไม่พบเอกสาร');
     if (d.status !== 'draft') throw conflict('แก้ไขได้เฉพาะฉบับร่าง เอกสารที่ออกแล้วต้องยกเลิกและออกใหม่');
+    await assertAdjustsTaxInvoice(conn, req.user.orgId, b.docType, b.refDocId ?? null);
     await conn.query('DELETE FROM document_items WHERE document_id = :id', { id });
     await conn.query(
       `UPDATE documents SET doc_type = :docType, doc_date = :docDate, due_date = :dueDate, customer_id = :customerId,
@@ -329,6 +379,8 @@ router.post(
       );
       if (!d) throw notFound('ไม่พบเอกสาร');
       if (d.status !== 'draft') throw conflict('เอกสารนี้ออกไปแล้ว');
+      // the tax invoice may have been voided since the draft was made
+      await assertAdjustsTaxInvoice(conn, orgId, d.doc_type, d.ref_doc_id);
       const method = req.valid.body.paymentMethod;
       if (PAID_ON_ISSUE.includes(d.doc_type) && !method) throw badRequest('ใบเสร็จต้องระบุวิธีรับชำระ');
 
@@ -387,7 +439,8 @@ router.post(
     await db.tx(async (conn) => {
       const [[d]] = await conn.query('SELECT * FROM documents WHERE id = :id AND org_id = :orgId FOR UPDATE', { id, orgId });
       if (!d) throw notFound('ไม่พบเอกสาร');
-      if (!CREDIT_TYPES.includes(d.doc_type)) throw badRequest('รับชำระได้เฉพาะใบแจ้งหนี้/ใบกำกับภาษี');
+      if (d.doc_type === 'billing_note') throw badRequest('ใบวางบิลรับชำระที่ปุ่มรับชำระของใบวางบิล');
+      if (!CREDIT_TYPES.includes(d.doc_type)) throw badRequest('รับชำระได้เฉพาะใบแจ้งหนี้/ใบกำกับภาษี/ใบเพิ่มหนี้');
       if (d.status !== 'issued') throw conflict(d.status === 'paid' ? 'รับชำระไปแล้ว' : 'ต้องออกเอกสารก่อนรับชำระ');
       await conn.query("UPDATE documents SET status = 'paid', paid_at = UTC_TIMESTAMP(), payment_method = :m WHERE id = :id", { m: b.paymentMethod, id });
       await postJournal(conn, {
@@ -430,6 +483,14 @@ router.post(
         reason: `\n[ยกเลิก] ${req.valid.body.reason}`,
       });
       await reverseJournalsFor(conn, { orgId, refType: 'document', refId: id, reason: `ยกเลิก ${d.doc_no}`, userId });
+      if (d.doc_type === 'billing_note' && d.status === 'paid') {
+        // the payment is reversed above, so what it settled is unpaid again
+        await conn.query(
+          `UPDATE documents SET status = 'issued', paid_at = NULL, payment_method = NULL
+            WHERE status = 'paid' AND id IN (SELECT document_id FROM billing_note_items WHERE billing_note_id = :id AND settled = 1)`,
+          { id },
+        );
+      }
     });
     audit(req, 'document.void', 'document', id, { reason: req.valid.body.reason });
     res.json({ data: { ok: true } });
@@ -440,7 +501,7 @@ router.post(
 router.post(
   '/:id/convert',
   requirePermission('accounting:write'),
-  validate({ params: idParam, body: z.object({ docType: z.enum(['invoice', 'tax_invoice', 'tax_invoice_receipt', 'receipt', 'credit_note']) }) }),
+  validate({ params: idParam, body: z.object({ docType: z.enum(['invoice', 'tax_invoice', 'tax_invoice_receipt', 'receipt', 'credit_note', 'debit_note']) }) }),
   async (req, res) => {
     const { d, items } = await loadDocument(req.user.orgId, req.valid.params.id);
     if (d.status === 'void' || d.status === 'draft') throw badRequest('แปลงได้เฉพาะเอกสารที่ออกแล้ว');
@@ -466,6 +527,131 @@ router.post(
     const id = await db.tx((conn) => insertDocument(conn, req.user, b, totals));
     const out = await loadDocument(req.user.orgId, id);
     res.status(201).json({ data: mapDocument(out.d, out.items) });
+  },
+);
+
+/* ------------------------------------------------------------ billing note */
+
+/**
+ * A billing note (ใบวางบิล) collects a customer's unpaid invoices, tax invoices and debit notes, less
+ * their credit notes, into one request for payment. It is only a letter: issuing it posts nothing.
+ * Paying it settles everything inside with one journal for the net amount.
+ */
+
+router.post(
+  '/billing-note',
+  requirePermission('accounting:write'),
+  validate({
+    body: z.object({
+      docDate: z.iso.date(),
+      dueDate: z.iso.date().nullable().optional(),
+      documentIds: z.array(z.number().int().positive()).min(1, 'เลือกเอกสารอย่างน้อย 1 ใบ').max(100),
+      note: z.string().trim().max(2000).nullable().optional(),
+    }),
+  }),
+  async (req, res) => {
+    const b = req.valid.body;
+    const { orgId, id: userId } = req.user;
+    const ids = [...new Set(b.documentIds)];
+    const id = await db.tx(async (conn) => {
+      const [docs] = await conn.query(`SELECT d.* FROM documents d WHERE ${BILLABLE_SQL} AND d.id IN (:ids) FOR UPDATE`, { orgId, types: BILLABLE, ids });
+      if (docs.length !== ids.length) throw badRequest('มีเอกสารที่ชำระแล้ว ถูกยกเลิก หรืออยู่ในใบวางบิลอื่นแล้ว');
+      const key = (d) => (d.customer_id ? `c${d.customer_id}` : `n${d.party_name ?? ''}`);
+      if (new Set(docs.map(key)).size > 1) throw badRequest('ใบวางบิลหนึ่งใบรวมได้เฉพาะเอกสารของลูกค้ารายเดียวกัน');
+      if (!docs.some((d) => d.doc_type !== 'credit_note')) throw badRequest('ต้องมีใบแจ้งหนี้อย่างน้อย 1 ใบ');
+      const total = r2(docs.reduce((sum, d) => sum + signed(d), 0));
+      if (total <= 0) throw badRequest('ยอดวางบิลต้องมากกว่า 0');
+      const first = docs.find((d) => d.doc_type !== 'credit_note');
+      const docNo = await nextNumber(conn, orgId, 'billing_note', b.docDate);
+      const [ins] = await conn.query(
+        `INSERT INTO documents (org_id, doc_type, doc_no, doc_date, due_date, customer_id, party_name, party_tax_id, party_address,
+                                subtotal, discount, vat_amount, total, status, note, created_by)
+         VALUES (:orgId, 'billing_note', :docNo, :docDate, :dueDate, :customerId, :partyName, :partyTaxId, :partyAddress,
+                 :total, 0, 0, :total, 'issued', :note, :userId)`,
+        {
+          orgId,
+          docNo,
+          docDate: b.docDate,
+          dueDate: b.dueDate ?? null,
+          customerId: first.customer_id,
+          partyName: first.party_name,
+          partyTaxId: first.party_tax_id,
+          partyAddress: first.party_address,
+          total,
+          note: b.note ?? null,
+          userId,
+        },
+      );
+      for (const d of docs) {
+        await conn.query('INSERT INTO billing_note_items (billing_note_id, document_id, amount) VALUES (:bn, :doc, :amount)', {
+          bn: ins.insertId,
+          doc: d.id,
+          amount: signed(d),
+        });
+      }
+      return ins.insertId;
+    });
+    audit(req, 'document.billing_note', 'document', id, { documents: ids.length });
+    const { d, items } = await loadDocument(orgId, id);
+    res.status(201).json({ data: { ...mapDocument(d, items), billedDocuments: await billedDocuments(id) } });
+  },
+);
+
+async function billedDocuments(billingNoteId) {
+  const rows = await db.query(
+    `SELECT d.id, d.doc_type, d.doc_no, d.status, bi.amount, DATE_FORMAT(d.doc_date, '%Y-%m-%d') AS doc_date, DATE_FORMAT(d.due_date, '%Y-%m-%d') AS due_date
+       FROM billing_note_items bi JOIN documents d ON d.id = bi.document_id
+      WHERE bi.billing_note_id = :id ORDER BY d.doc_date, d.id`,
+    { id: billingNoteId },
+  );
+  return rows.map((r) => ({ id: r.id, docType: r.doc_type, docNo: r.doc_no, status: r.status, docDate: r.doc_date, dueDate: r.due_date, amount: Number(r.amount) }));
+}
+
+/** The customer paid the billing note: settle what is still open inside it with one journal. */
+router.post(
+  '/:id/settle',
+  requirePermission('accounting:write'),
+  validate({
+    params: idParam,
+    body: z.object({ paymentMethod: z.enum(['cash', 'transfer', 'card', 'promptpay', 'cheque']), paidDate: z.iso.date().optional() }),
+  }),
+  async (req, res) => {
+    const { id } = req.valid.params;
+    const { orgId, id: userId } = req.user;
+    const b = req.valid.body;
+    await db.tx(async (conn) => {
+      const [[bn]] = await conn.query('SELECT * FROM documents WHERE id = :id AND org_id = :orgId FOR UPDATE', { id, orgId });
+      if (!bn || bn.doc_type !== 'billing_note') throw notFound('ไม่พบใบวางบิล');
+      if (bn.status !== 'issued') throw conflict(bn.status === 'paid' ? 'รับชำระไปแล้ว' : 'ใบวางบิลนี้ถูกยกเลิกแล้ว');
+      const [open] = await conn.query(
+        `SELECT d.id, d.doc_type, d.total FROM billing_note_items bi JOIN documents d ON d.id = bi.document_id
+          WHERE bi.billing_note_id = :id AND d.status = 'issued' FOR UPDATE`,
+        { id },
+      );
+      const net = r2(open.reduce((sum, d) => sum + signed(d), 0));
+      if (net < 0) throw conflict('ยอดค้างในใบวางบิลติดลบ (ใบแจ้งหนี้ถูกชำระแยกไปแล้ว) — ยกเลิกใบวางบิลนี้แล้วออกใหม่');
+      if (open.length) {
+        const ids = open.map((d) => d.id);
+        await conn.query("UPDATE documents SET status = 'paid', paid_at = UTC_TIMESTAMP(), payment_method = :m WHERE id IN (:ids)", { m: b.paymentMethod, ids });
+        await conn.query('UPDATE billing_note_items SET settled = 1 WHERE billing_note_id = :id AND document_id IN (:ids)', { id, ids });
+      }
+      await conn.query("UPDATE documents SET status = 'paid', paid_at = UTC_TIMESTAMP(), payment_method = :m WHERE id = :id", { m: b.paymentMethod, id });
+      await postJournal(conn, {
+        orgId,
+        date: b.paidDate ?? localDate(),
+        description: `รับชำระตามใบวางบิล ${bn.doc_no} ${bn.party_name ?? ''}`.trim(),
+        refType: 'document',
+        refId: id,
+        userId,
+        lines: [
+          { account: paymentAccount(b.paymentMethod), debit: net },
+          { account: ACC.AR, credit: net },
+        ],
+      });
+    });
+    audit(req, 'document.settle', 'document', id, { method: b.paymentMethod });
+    const { d, items } = await loadDocument(orgId, id);
+    res.json({ data: { ...mapDocument(d, items), billedDocuments: await billedDocuments(id) } });
   },
 );
 

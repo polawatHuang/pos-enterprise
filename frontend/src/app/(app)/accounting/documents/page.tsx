@@ -1,13 +1,6 @@
-import type { Metadata } from "next";
-import { RequirePermission } from "@/components/layout/page";
-import { DocumentsView } from "@/components/accounting/documents-view";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "เอกสาร" };
-
+/** The documents list grew into the documents hub (ศูนย์เอกสาร); old links land on its sales tab. */
 export default function DocumentsPage() {
-  return (
-    <RequirePermission permission="accounting:read">
-      <DocumentsView />
-    </RequirePermission>
-  );
+  redirect("/documents?category=sales");
 }
