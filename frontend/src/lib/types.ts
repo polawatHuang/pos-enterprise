@@ -1341,7 +1341,6 @@ export interface KaloRun {
 }
 
 export interface KaloSettings extends KaloStatus {
-  balance: number | { error: string } | null;
   runs: KaloRun[];
 }
 

@@ -46,7 +46,7 @@ const adapter = defineAdapter(
     COST,
 
     /** POST an endpoint; returns `data`. Errors carry Kalodata's message in Thai context. */
-    async call(path, body = {}, { market = true } = {}) {
+    async call(path, body = {}, { market = true, timeoutMs = 30_000 } = {}) {
       const { KALODATA_API_KEY, KALODATA_API_BASE } = adapter.requireConfig();
       await throttle();
       let res;
@@ -55,7 +55,7 @@ const adapter = defineAdapter(
           method: 'POST',
           headers: { 'secret-key': KALODATA_API_KEY, 'content-type': 'application/json;charset=UTF-8' },
           body: JSON.stringify(market ? { ...MARKET, ...body } : body),
-          signal: AbortSignal.timeout(30_000),
+          signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (err) {
         throw new AppError(502, 'KALODATA_UNREACHABLE', `เชื่อมต่อ Kalodata ไม่ได้: ${err.message}`);
@@ -71,7 +71,7 @@ const adapter = defineAdapter(
       return json.data;
     },
 
-    balance: () => adapter.call('/credit/balance', {}, { market: false }),
+    balance: ({ timeoutMs } = {}) => adapter.call('/credit/balance', {}, { market: false, timeoutMs }),
     categoryRank: (body) => adapter.call('/tiktok/category/rank', { page_size: 100, page_number: 1, ...body }),
     categoryDetail: (categoryId, dateRange) => adapter.call('/tiktok/category/detail', { category_id: String(categoryId), date_range: dateRange }),
     productRank: (body) => adapter.call('/tiktok/product/rank', { page_size: 100, page_number: 1, need_image: 1, need_extra: true, ...body }),

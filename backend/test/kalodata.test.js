@@ -94,6 +94,12 @@ describe('selection score (30 points)', () => {
 });
 
 describe('monthly pull', () => {
+  test('credits are asked separately from the settings', async () => {
+    const res = await admin.get('/api/scraping/kalodata/balance');
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.data, { balance: 315, error: null });
+  });
+
   test('off by default; the schedule does nothing until switched on', async () => {
     const res = await admin.get('/api/scraping/kalodata/settings');
     assert.equal(res.status, 200, JSON.stringify(res.body));

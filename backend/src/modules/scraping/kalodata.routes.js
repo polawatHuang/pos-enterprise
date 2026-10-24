@@ -66,16 +66,17 @@ async function status(orgId) {
 }
 
 router.get('/kalodata/settings', requirePermission('scraping:read'), async (req, res) => {
-  const st = await status(req.user.orgId);
-  let balance = null;
-  if (st.configured && req.query.balance === '1') {
-    try {
-      balance = n((await kalodata.balance())?.totalRemain);
-    } catch (err) {
-      balance = { error: err.message };
-    }
+  res.json({ data: { ...(await status(req.user.orgId)), runs: await lastRuns(req.user.orgId) } });
+});
+
+/** Credits left, asked separately so the settings dialog opens at once even when Kalodata is slow. */
+router.get('/kalodata/balance', requirePermission('scraping:read'), async (req, res) => {
+  if (!kalodata.isConfigured()) return res.json({ data: { balance: null, error: null } });
+  try {
+    res.json({ data: { balance: n((await kalodata.balance({ timeoutMs: 10_000 }))?.totalRemain), error: null } });
+  } catch (err) {
+    res.json({ data: { balance: null, error: err.message } });
   }
-  res.json({ data: { ...st, balance, runs: await lastRuns(req.user.orgId) } });
 });
 
 router.put(
