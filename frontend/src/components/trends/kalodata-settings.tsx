@@ -33,8 +33,14 @@ export function KalodataSettingsDialog() {
   const canRun = can("scraping:run");
   const q = useQuery({
     queryKey: ["trends", "kalodata", "settings"],
-    queryFn: () => api.get<KaloSettings>("/scraping/kalodata/settings", { balance: "1" }),
+    queryFn: () => api.get<KaloSettings>("/scraping/kalodata/settings"),
     refetchInterval: (query) => (query.state.data?.running ? 5_000 : false),
+  });
+  const credits = useQuery({
+    queryKey: ["trends", "kalodata", "balance"],
+    queryFn: () => api.get<{ balance: number | null; error: string | null }>("/scraping/kalodata/balance"),
+    enabled: Boolean(q.data?.configured),
+    staleTime: 60_000,
   });
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -78,15 +84,22 @@ export function KalodataSettingsDialog() {
   };
 
   const s = q.data;
-  const balance = typeof s?.balance === "number" ? s.balance : null;
-  const balanceError = s?.balance && typeof s.balance === "object" ? s.balance.error : null;
+  const balance = credits.data?.balance ?? null;
+  const balanceError = credits.data?.error ?? (credits.isError ? credits.error.message : null);
   return (
     <DialogContent
       title="ข้อมูลตลาดจาก Kalodata"
       description="อันดับหมวดหมู่และสินค้าขายดีของ TikTok Shop ไทย ดึงอัตโนมัติเดือนละครั้งหลังจบเดือน"
       className="max-w-xl"
     >
-      {!s ? (
+      {q.isError ? (
+        <div className="space-y-3 rounded-lg bg-danger-soft p-4 text-sm text-danger">
+          <p>โหลดการตั้งค่าไม่สำเร็จ: {q.error.message}</p>
+          <Button size="sm" variant="outline" onClick={() => void q.refetch()}>
+            <RefreshCw /> ลองใหม่
+          </Button>
+        </div>
+      ) : !s ? (
         <Skeleton className="h-60" />
       ) : (
         <div className="space-y-4">
@@ -145,7 +158,13 @@ export function KalodataSettingsDialog() {
               <p className="text-xs text-muted-foreground">เครดิตคงเหลือ</p>
               <p className="flex items-center gap-1 text-lg font-semibold tabular-nums">
                 <Coins className="size-4 text-warning" />
-                {balance != null ? formatNumber(balance) : "—"}
+                {credits.isFetching && balance == null ? (
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                ) : balance != null ? (
+                  formatNumber(balance)
+                ) : (
+                  "—"
+                )}
               </p>
               {balanceError && <p className="text-xs text-danger">{balanceError}</p>}
             </div>
