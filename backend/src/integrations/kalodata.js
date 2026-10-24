@@ -60,9 +60,22 @@ const adapter = defineAdapter(
       } catch (err) {
         throw new AppError(502, 'KALODATA_UNREACHABLE', `เชื่อมต่อ Kalodata ไม่ได้: ${err.message}`);
       }
-      const json = await res.json().catch(() => null);
+      // some failures come back as plain text/HTML (e.g. HTTP 554), not JSON
+      const text = await res.text().catch(() => '');
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {
+        /* not JSON: handled below by status */
+      }
       if (res.status === 401 || res.status === 403) throw new AppError(502, 'KALODATA_AUTH', 'คีย์ Kalodata ไม่ถูกต้องหรือหมดอายุ');
       if (res.status === 429) throw new AppError(429, 'KALODATA_RATE_LIMIT', 'เรียก Kalodata ถี่เกินไป ลองใหม่อีกครั้ง');
+      if (res.status >= 500 && !json?.message) {
+        const snippet = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+        throw new AppError(502, 'KALODATA_UPSTREAM', `Kalodata ขัดข้องชั่วคราว (HTTP ${res.status}) — ครั้งนี้ไม่เสียเครดิต ลองใหม่ภายหลัง${snippet ? ` [${snippet}]` : ''}`, {
+          status: res.status,
+        });
+      }
       if (!res.ok || !json || json.success === false) {
         const msg = json?.message || `HTTP ${res.status}`;
         const credit = /credit|เครดิต|balance|insufficient/i.test(msg);
@@ -78,7 +91,9 @@ const adapter = defineAdapter(
     productRank: (body) => adapter.call('/tiktok/product/rank', { page_size: 100, page_number: 1, need_image: 1, need_extra: true, ...body }),
     productDetail: (productId, dateRange) => adapter.call('/tiktok/product/detail', { product_id: String(productId), date_range: dateRange, need_image: 1 }),
     productAnalysis: (productId) => adapter.call('/tiktok/product/analysis', { product_id: String(productId), region: MARKET.region, language: MARKET.language }, { market: false }),
-    commentInsight: (productId) => adapter.call('/tiktok/product/comment/insight', { product_id: String(productId), country_code: MARKET.region }, { market: false }),
+    // lower-case country code as in the docs' example ("us"); building the summary can take a while
+    commentInsight: (productId) =>
+      adapter.call('/tiktok/product/comment/insight', { product_id: String(productId), country_code: MARKET.region.toLowerCase() }, { market: false, timeoutMs: 60_000 }),
     videoRank: (body) => adapter.call('/tiktok/video/rank', { page_size: 10, page_number: 1, ...body }),
     creatorRank: (body) => adapter.call('/tiktok/creator/rank', { page_size: 10, page_number: 1, need_image: 1, ...body }),
     videoUrl: (videoId) => adapter.call('/tiktok/video/url', { video_id: String(videoId) }, { market: false }),

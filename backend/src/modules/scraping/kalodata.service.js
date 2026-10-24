@@ -2,7 +2,7 @@
 
 const db = require('../../db/pool');
 const logger = require('../../core/logger');
-const { conflict, badRequest } = require('../../core/errors');
+const { AppError, conflict, badRequest } = require('../../core/errors');
 const { enqueue } = require('../../jobs/queue');
 const kalodata = require('../../integrations/kalodata');
 const { upsertItems, rescore } = require('./trends.service');
@@ -595,7 +595,16 @@ async function fetchExtra(orgId, trend, kind, userId) {
     await applyDetail(orgId, trend.id, period, data, EXTRA_COST.detail);
     await db.tx((conn) => rescore(conn, trend.id));
   } else if (kind === 'analysis') data = await kalodata.productAnalysis(pid);
-  else if (kind === 'comments') data = await kalodata.commentInsight(pid);
+  else if (kind === 'comments') {
+    try {
+      data = await kalodata.commentInsight(pid);
+    } catch (err) {
+      if (err.code !== 'KALODATA_UPSTREAM') throw err;
+      throw new AppError(502, 'KALODATA_UPSTREAM', 'Kalodata ยังสรุปรีวิวของสินค้านี้ไม่ได้ (สินค้าอาจมีรีวิวน้อยหรือกำลังสร้างสรุป) — ครั้งนี้ไม่เสียเครดิต ลองใหม่ภายหลัง', {
+        status: err.details?.status,
+      });
+    }
+  }
   else if (kind === 'videos') data = await kalodata.videoRank({ product_id: pid, date_range: 'last30Day', page_size: 10 });
   else if (kind === 'creators') data = await kalodata.creatorRank({ product_id: pid, date_range: 'last30Day', page_size: 10 });
   else throw badRequest('ไม่รู้จักชนิดข้อมูล');

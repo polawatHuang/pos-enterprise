@@ -294,6 +294,22 @@ describe('product page extras', () => {
     assert.ok(again.body.data.extras.comments && again.body.data.extras.videos);
   });
 
+  test('review summary: lower-case country code; a raw 554 from Kalodata reads clearly and is not cached', async () => {
+    const p = await db.one("SELECT id FROM trending_products WHERE org_id = 1 AND platform = 'kalodata' AND external_id = '10011006'");
+    const sent = mock.state.calls.filter((c) => c.path.endsWith('/comment/insight'));
+    assert.ok(sent.length && sent.every((c) => c.body.country_code === 'th'), 'earlier fetch used "th"');
+    mock.state.commentStatus = 554;
+    try {
+      const res = await admin.post(`/api/scraping/trends/${p.id}/kalodata/comments`);
+      assert.equal(res.status, 502);
+      assert.match(res.body.error.message, /ยังสรุปรีวิว.*ไม่เสียเครดิต/);
+      const cached = await db.one("SELECT COUNT(*) AS n FROM trend_product_extras WHERE trending_product_id = :id AND kind = 'comments'", { id: p.id });
+      assert.equal(Number(cached.n), 0);
+    } finally {
+      mock.state.commentStatus = null;
+    }
+  });
+
   test('content score from a person feeds the 30-point score', async () => {
     const p = await db.one("SELECT id, select_score FROM trending_products WHERE org_id = 1 AND platform = 'kalodata' AND external_id = '10011005'");
     const patch = await admin.patch(`/api/scraping/trends/${p.id}`, { contentScore: 5 });
