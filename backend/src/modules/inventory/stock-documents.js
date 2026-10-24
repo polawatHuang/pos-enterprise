@@ -61,6 +61,7 @@ async function getStockDocument(orgId, id) {
     docNo: d.doc_no,
     docDate: d.day,
     warehouseName: d.warehouse_name,
+    supplierId: d.supplier_id,
     supplierName: d.supplier_name,
     supplierTaxId: d.supplier_tax_id,
     purchaseOrderId: d.purchase_order_id,

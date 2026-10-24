@@ -249,7 +249,7 @@ function WhtPanel({ form, year, month }: { form: "PND3" | "PND53"; year: number;
               </tr>
             )}
             {d.items.map((i) => (
-              <tr key={i.transactionId} className="border-b border-border last:border-0">
+              <tr key={`${i.source ?? "transaction"}-${i.transactionId ?? i.voucherId}`} className="border-b border-border last:border-0">
                 <td className="px-5 py-2.5">{i.seq}</td>
                 <td className="px-5 py-2.5">
                   <p className="font-medium">{i.payee ?? "—"}</p>
@@ -265,6 +265,10 @@ function WhtPanel({ form, year, month }: { form: "PND3" | "PND53"; year: number;
                   {i.certificateId ? (
                     <Link href={`/accounting/documents/${i.certificateId}`} className="text-primary hover:underline">
                       ดู
+                    </Link>
+                  ) : i.voucherId ? (
+                    <Link href={`/accounting/payables/vouchers/${i.voucherId}`} className="text-xs text-primary hover:underline">
+                      ออกจากใบสำคัญจ่าย
                     </Link>
                   ) : (
                     <span className="text-xs text-muted-foreground">ยังไม่ออก</span>

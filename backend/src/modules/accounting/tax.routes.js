@@ -95,19 +95,30 @@ async function pp30(orgId, p) {
 /** ภ.ง.ด.3 (individuals) / ภ.ง.ด.53 (juristic persons): tax we withheld from payees in the month. */
 async function whtReport(orgId, form, p) {
   const { from, next } = monthRange(p);
+  // expenses paid directly, and supplier payments (ใบสำคัญจ่าย) that withheld tax
   const rows = await db.query(
-    `SELECT id, DATE_FORMAT(txn_date, '%Y-%m-%d') AS txn_date, counterparty, counterparty_tax_id, counterparty_type,
-            wht_income_type, wht_rate, amount, wht_amount, description, document_id
-       FROM transactions
-      WHERE org_id = :orgId AND type = 'expense' AND status = 'posted' AND wht_amount > 0
-        AND txn_date >= :from AND txn_date < :next
-        AND ${form === 'PND3' ? "counterparty_type = 'individual'" : "(counterparty_type = 'company' OR counterparty_type IS NULL)"}
-      ORDER BY txn_date, id`,
+    `SELECT * FROM (
+       SELECT 'transaction' AS source, id, DATE_FORMAT(txn_date, '%Y-%m-%d') AS txn_date, counterparty, counterparty_tax_id, counterparty_type,
+              wht_income_type, wht_rate, amount, wht_amount, description, document_id
+         FROM transactions
+        WHERE org_id = :orgId AND type = 'expense' AND status = 'posted' AND wht_amount > 0
+          AND txn_date >= :from AND txn_date < :next
+          AND ${form === 'PND3' ? "counterparty_type = 'individual'" : "(counterparty_type = 'company' OR counterparty_type IS NULL)"}
+       UNION ALL
+       SELECT 'payment_voucher' AS source, v.id, DATE_FORMAT(v.pay_date, '%Y-%m-%d'), s.name, s.tax_id, v.payee_type,
+              v.wht_income_type, v.wht_rate, v.wht_base, v.wht_amount, CONCAT('จ่ายตาม ', v.pv_no),
+              (SELECT d.id FROM documents d WHERE d.payment_voucher_id = v.id AND d.doc_type = 'wht_certificate' AND d.status <> 'void' LIMIT 1)
+         FROM payment_vouchers v JOIN suppliers s ON s.id = v.supplier_id
+        WHERE v.org_id = :orgId AND v.status = 'posted' AND v.wht_amount > 0 AND v.pay_date >= :from AND v.pay_date < :next
+          AND v.payee_type = ${form === 'PND3' ? "'individual'" : "'company'"}
+     ) x ORDER BY x.txn_date, x.source, x.id`,
     { orgId, from, next },
   );
   const items = rows.map((r, i) => ({
     seq: i + 1,
-    transactionId: r.id,
+    source: r.source,
+    transactionId: r.source === 'transaction' ? r.id : null,
+    voucherId: r.source === 'payment_voucher' ? r.id : null,
     date: r.txn_date,
     payee: r.counterparty,
     taxId: r.counterparty_tax_id,

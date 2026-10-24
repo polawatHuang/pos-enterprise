@@ -133,7 +133,7 @@ export function BillingNoteEditor() {
           </CardHeader>
           <CardContent className="grid gap-4">
             {!who ? (
-              <p className="text-sm text-muted-foreground">เลือกลูกค้าทางซ้ายก่อน</p>
+              <p className="text-sm text-muted-foreground">เลือกลูกค้าก่อน</p>
             ) : docs.isPending ? (
               <Skeleton className="h-32" />
             ) : (

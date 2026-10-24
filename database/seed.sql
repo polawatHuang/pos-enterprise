@@ -199,7 +199,8 @@ INSERT INTO chart_of_accounts (id, org_id, code, name, type) VALUES
   (27, 1, '5700', 'ค่าสาธารณูปโภค', 'expense'),
   (28, 1, '5800', 'ค่าบริการซอฟต์แวร์/AI', 'expense'),
   (29, 1, '5900', 'ค่าใช้จ่ายอื่น', 'expense'),
-  (30, 1, '5250', 'ค่าสวัสดิการพนักงาน', 'expense');
+  (30, 1, '5250', 'ค่าสวัสดิการพนักงาน', 'expense'),
+  (31, 1, '1105', 'เงินสดย่อย', 'asset');
 INSERT INTO settings (org_id, setting_key, value) VALUES
   (1, 'pos.receipt_footer', '"ขอบคุณที่อุดหนุนค่ะ"'),
   (1, 'tax.vat_rate', '7'),

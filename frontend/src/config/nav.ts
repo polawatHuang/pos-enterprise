@@ -8,6 +8,8 @@ import {
   CalendarClock,
   ClipboardList,
   FileText,
+  HandCoins,
+  PiggyBank,
   Landmark,
   Wallet,
   Clapperboard,
@@ -110,6 +112,8 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: "/accounting", label: "ภาพรวมบัญชี", icon: Calculator, permission: "accounting:read", phase: 1 },
       { href: "/accounting/transactions", label: "รายรับ-รายจ่าย", icon: Wallet, permission: "accounting:read", phase: 1 },
+      { href: "/accounting/payables", label: "เจ้าหนี้ & จ่ายเงิน", icon: HandCoins, permission: "accounting:read", phase: 1 },
+      { href: "/accounting/petty-cash", label: "เงินสดย่อย", icon: PiggyBank, permission: "accounting:read", phase: 1 },
       { href: "/accounting/tax", label: "ภาษี", icon: Landmark, permission: "accounting:read", phase: 1 },
       { href: "/accounting/reports", label: "รายงานการเงิน", icon: BarChart3, permission: "accounting:read", phase: 1 },
     ],

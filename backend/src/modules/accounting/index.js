@@ -10,6 +10,7 @@ router.use('/transactions', require('./transactions.routes').router);
 router.use('/documents', require('./documents.routes').router);
 router.use('/tax', require('./tax.routes').router);
 router.use('/reports', require('./reports.routes').router);
+router.use('/payables', require('./payables.routes').router);
 router.use('/ai', require('./ai-receipt.routes').router);
 
 module.exports = { router };

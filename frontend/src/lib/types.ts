@@ -854,6 +854,8 @@ export interface Transaction {
   status: "posted" | "void";
   aiExtracted: boolean;
   whtCertificateId: number | null;
+  /** ใบรับรองแทนใบเสร็จ made for this expense */
+  substituteReceiptId?: number | null;
   createdBy: string | null;
   createdAt: string;
 }
@@ -872,6 +874,7 @@ export type DocType =
   | "credit_note"
   | "debit_note"
   | "billing_note"
+  | "substitute_receipt"
   | "wht_certificate";
 
 export interface DocItem {
@@ -954,7 +957,9 @@ export interface WhtReport {
   form: "PND3" | "PND53";
   items: {
     seq: number;
-    transactionId: number;
+    source?: "transaction" | "payment_voucher";
+    transactionId: number | null;
+    voucherId?: number | null;
     date: string;
     payee: string | null;
     taxId: string | null;
@@ -1996,7 +2001,20 @@ export type DocCategory = "sales" | "purchase" | "stock" | "finance" | "hr";
 
 /** One row of the documents hub: any document, wherever it is kept. */
 export interface HubDocument {
-  source: "document" | "purchase_order" | "stock_document" | "stock_transfer" | "stock_count" | "welfare" | "transaction" | "pos_return" | "pos_sale";
+  source:
+    | "document"
+    | "purchase_request"
+    | "purchase_order"
+    | "stock_document"
+    | "supplier_bill"
+    | "payment_voucher"
+    | "petty_cash_topup"
+    | "stock_transfer"
+    | "stock_count"
+    | "welfare"
+    | "transaction"
+    | "pos_return"
+    | "pos_sale";
   id: number;
   type: string;
   category: DocCategory;
@@ -2020,6 +2038,7 @@ export interface StockDocument {
   docNo: string;
   docDate: string;
   warehouseName: string;
+  supplierId: number | null;
   supplierName: string | null;
   supplierTaxId: string | null;
   purchaseOrderId: number | null;
@@ -2048,4 +2067,89 @@ export interface StockLedger {
     closing: number;
     lines: { date: string; docNo: string; type: string; description: string; qtyIn: number; qtyOut: number; unitCost: number | null; balance: number }[];
   }[];
+}
+
+/* ------------------------------------------------------- ซื้อ / เจ้าหนี้ */
+
+export interface PurchaseRequest {
+  id: number;
+  prNo: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  warehouseId: number;
+  warehouseName: string;
+  supplierId: number | null;
+  supplierName: string | null;
+  neededBy: string | null;
+  reason: string | null;
+  requestedBy: string | null;
+  requestedById: number | null;
+  requestedAt: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  rejectReason: string | null;
+  purchaseOrderId: number | null;
+  poNo: string | null;
+  estTotal: number;
+  itemCount: number;
+  items?: { productId: number; sku: string; name: string; unit: string; quantity: number; estUnitCost: number; onHand: number }[];
+}
+
+export interface SupplierBill {
+  id: number;
+  kind: "bill" | "credit_note";
+  billNo: string;
+  supplierId: number;
+  supplierName: string;
+  supplierTaxId: string | null;
+  supplierDocNo: string | null;
+  billDate: string;
+  dueDate: string | null;
+  accountCode: string;
+  amount: number;
+  vatAmount: number;
+  vatClaimable: boolean;
+  total: number;
+  signedTotal: number;
+  purchaseOrderId: number | null;
+  poNo: string | null;
+  stockDocumentId: number | null;
+  grNo: string | null;
+  status: "unpaid" | "paid" | "void";
+  voucherId: number | null;
+  voucherNo: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface PaymentVoucher {
+  id: number;
+  pvNo: string;
+  supplierId: number;
+  supplierName: string;
+  supplierTaxId: string | null;
+  supplierAddress: string | null;
+  payDate: string;
+  paymentMethod: string;
+  payeeType: "company" | "individual";
+  gross: number;
+  whtBase: number;
+  whtRate: number | null;
+  whtIncomeType: string | null;
+  whtAmount: number;
+  netPaid: number;
+  amountText: string;
+  reference: string | null;
+  status: "posted" | "void";
+  note: string | null;
+  certificateId: number | null;
+  createdBy: string | null;
+  createdAt: string;
+  bills?: SupplierBill[];
+  org?: { name: string; legalName: string | null; taxId: string | null; address: string | null; phone: string | null };
+}
+
+export interface PettyCash {
+  balance: number;
+  topups: { id: number; topupNo: string; date: string; amount: number; fromMethod: string; note: string | null; status: "posted" | "void"; by: string | null }[];
+  expenses: { id: number; date: string; category: string; description: string | null; counterparty: string | null; paid: number; status: "posted" | "void" }[];
 }
