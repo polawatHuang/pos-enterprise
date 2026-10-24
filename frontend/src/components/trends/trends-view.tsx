@@ -7,6 +7,8 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   AlertTriangle,
+  ArrowLeft,
+  Maximize2,
   Bot,
   Clapperboard,
   Eye,
@@ -44,19 +46,19 @@ type StatusTab = "active" | TrendStatus | "all";
 
 export function TrendsView() {
   const { can } = useAuth();
-  const [status, setStatus] = useState<StatusTab>("active");
+  // The global search "ดูทั้งหมด" opens this page with ?q=; the category report links ?status= and ?source=
+  const searchParams = useSearchParams();
+  const [status, setStatus] = useState<StatusTab>((searchParams.get("status") as StatusTab | null) ?? "active");
   const [platform, setPlatform] = useState("");
   const [sort, setSort] = useState("pick");
   const [phase, setPhase] = useState("all");
   const [hideTop10, setHideTop10] = useState(false);
-  // The global search "ดูทั้งหมด" opens this page with ?q=
-  const searchParams = useSearchParams();
   const [q, setQ] = useState(searchParams.get("q") ?? "");
   const [minCommission, setMinCommission] = useState("");
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<number | null>(null);
   const [importing, setImporting] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState<number | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<number | null>(searchParams.get("source") ? Number(searchParams.get("source")) : null);
   const aiSearch = useAiSearchLauncher();
 
   const query = {
@@ -83,9 +85,12 @@ export function TrendsView() {
 
   return (
     <div>
+      <Link href="/trends" className="mb-1 inline-flex min-h-10 items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="size-4" /> รายงานหมวดหมู่
+      </Link>
       <PageHeader
-        title="สินค้าเทรนด์"
-        description="สินค้ากระแสไม่เท่ากับสินค้าขายดี — ระบบประเมิน Phase วงจรชีวิตสินค้าและเช็กลิสต์ 9 ข้อ เพื่อหาสินค้าที่กำลังจะเป็นกระแส (Phase 2–4, อันดับ 11 ขึ้นไป)"
+        title="สินค้าเทรนด์ทั้งหมด"
+        description="สินค้าจากทุกแหล่ง (Kalodata, Shopee Affiliate, AI ค้นหา, CSV) — ระบบประเมิน Phase วงจรชีวิตสินค้าและเช็กลิสต์ 9 ข้อ เพื่อหาสินค้าที่กำลังจะเป็นกระแส (Phase 2–4, อันดับ 11 ขึ้นไป)"
         actions={
           <>
             <Button variant="outline" asChild>
@@ -226,12 +231,12 @@ export function TrendsView() {
   );
 }
 
-function PlatformTag({ platform }: { platform: string }) {
+export function PlatformTag({ platform }: { platform: string }) {
   const p = platformMeta(platform);
   return <span className={cn("inline-flex h-5 items-center rounded px-1.5 text-[10px] font-semibold", p.className)}>{p.label}</span>;
 }
 
-function Thumb({ src, className }: { src: string | null; className?: string }) {
+export function Thumb({ src, className }: { src: string | null; className?: string }) {
   return (
     <div className={cn("grid shrink-0 place-items-center overflow-hidden rounded-lg bg-muted text-muted-foreground", className)}>
       {src ? (
@@ -244,7 +249,7 @@ function Thumb({ src, className }: { src: string | null; className?: string }) {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+export function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <p className="truncate text-[11px] text-muted-foreground">{label}</p>
@@ -253,7 +258,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-const dash = (v: number | null, f: (n: number) => string) => (v == null ? "—" : f(v));
+export const dash = (v: number | null, f: (n: number) => string) => (v == null ? "—" : f(v));
 
 function TrendCard({ t, onOpen }: { t: TrendItem; onOpen: () => void }) {
   return (
@@ -323,26 +328,9 @@ function TrendCard({ t, onOpen }: { t: TrendItem; onOpen: () => void }) {
 
 function TrendDrawer({ id, onClose }: { id: number; onClose: () => void }) {
   const { can } = useAuth();
-  const router = useRouter();
-  const qc = useQueryClient();
-  const [busy, setBusy] = useState<string | null>(null);
   const detail = useQuery({ queryKey: ["trends", "detail", id], queryFn: () => api.get<TrendDetail>(`/scraping/trends/${id}`) });
   const t = detail.data;
   const canRun = can("scraping:run");
-
-  const act = async (key: string, fn: () => Promise<unknown>, ok?: string) => {
-    setBusy(key);
-    try {
-      await fn();
-      if (ok) toast.success(ok);
-      await qc.invalidateQueries({ queryKey: ["trends"] });
-    } catch (err) {
-      if (err instanceof ApiError && err.code === "INTEGRATION_NOT_CONFIGURED") toast.error(`ยังไม่ได้ตั้งค่าบนเซิร์ฟเวอร์: ${err.message}`);
-      else toast.error(err instanceof Error ? err.message : "ทำรายการไม่สำเร็จ");
-    } finally {
-      setBusy(null);
-    }
-  };
 
   return (
     <DialogPrimitive.Portal>
@@ -350,6 +338,9 @@ function TrendDrawer({ id, onClose }: { id: number; onClose: () => void }) {
       <DialogPrimitive.Content className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col bg-card shadow-2xl outline-none">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <DialogPrimitive.Title className="min-w-0 flex-1 truncate font-semibold">{t?.title ?? "รายละเอียดสินค้า"}</DialogPrimitive.Title>
+          <Link href={`/trends/${id}`} className="grid size-8 place-items-center rounded-lg hover:bg-accent" aria-label="เปิดหน้ารายละเอียดเต็ม" title="เปิดหน้าเต็ม">
+            <Maximize2 className="size-4" />
+          </Link>
           <DialogPrimitive.Description className="sr-only">รายละเอียดสินค้าเทรนด์</DialogPrimitive.Description>
           <button onClick={onClose} className="grid size-8 place-items-center rounded-lg hover:bg-accent" aria-label="ปิด">
             <X className="size-4" />
@@ -399,97 +390,12 @@ function TrendDrawer({ id, onClose }: { id: number; onClose: () => void }) {
 
             <SalesChart snapshots={t.snapshots} />
 
-            <section className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="flex items-center gap-1.5 font-semibold">
-                  <Bot className="size-4 text-primary" /> AI วิเคราะห์
-                </h3>
-                {canRun && (
-                  <Button
-                    size="sm"
-                    variant={t.aiAnalysis ? "outline" : "default"}
-                    disabled={busy !== null}
-                    onClick={() => act("ai", () => api.post(`/scraping/trends/${id}/analyze`, { refresh: Boolean(t.aiAnalysis) }))}
-                  >
-                    {busy === "ai" ? <Loader2 className="animate-spin" /> : t.aiAnalysis ? <RefreshCw /> : <Sparkles />}
-                    {t.aiAnalysis ? "วิเคราะห์ใหม่" : "ให้ AI วิเคราะห์"}
-                  </Button>
-                )}
-              </div>
-              {t.aiAnalysis ? (
-                <Analysis a={t.aiAnalysis} />
-              ) : (
-                <p className="rounded-xl bg-muted/50 p-3 text-sm text-muted-foreground">
-                  AI จะประเมินความเหมาะสมกับร้านและโปรไฟล์ช่อง จังหวะกระแส กลุ่มเป้าหมาย จุดขาย ไอเดียเปิดคลิป และความเสี่ยงด้านโฆษณา
-                </p>
-              )}
-            </section>
+            <AiAnalysisSection t={t} />
           </div>
         )}
         {t && canRun && (
           <div className="flex flex-wrap gap-2 border-t border-border p-3">
-            {t.status === "imported" ? (
-              can("products:read") &&
-              t.importedProductId && (
-                <Button size="sm" variant="outline" onClick={() => router.push(`/products/${t.importedProductId}`)}>
-                  <PackagePlus /> ดูสินค้าที่นำเข้า
-                </Button>
-              )
-            ) : (
-              <>
-                {can("products:write") && (
-                  <Button
-                    size="sm"
-                    disabled={busy !== null}
-                    onClick={() =>
-                      act(
-                        "import",
-                        () => api.post(`/scraping/trends/${id}/import-product`, {}),
-                        "นำเข้าเป็นสินค้าฉบับร่างแล้ว — ตรวจราคา/ต้นทุนในหน้าสินค้าก่อนเปิดขาย",
-                      )
-                    }
-                  >
-                    {busy === "import" ? <Loader2 className="animate-spin" /> : <PackagePlus />} นำเข้าเป็นสินค้า
-                  </Button>
-                )}
-                {t.status === "watching" ? (
-                  <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => act("st", () => api.patch(`/scraping/trends/${id}`, { status: "new" }))}>
-                    <EyeOff /> เลิกติดตาม
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => act("st", () => api.patch(`/scraping/trends/${id}`, { status: "watching" }), "เพิ่มในรายการติดตาม")}>
-                    <Eye /> ติดตาม
-                  </Button>
-                )}
-                {t.status !== "ignored" && (
-                  <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => act("ig", () => api.patch(`/scraping/trends/${id}`, { status: "ignored" }))}>
-                    ไม่สนใจ
-                  </Button>
-                )}
-              </>
-            )}
-            {can("video:create") && (
-              <Button size="sm" variant="outline" onClick={() => router.push(`/videos?trend=${id}`)}>
-                <Clapperboard /> สร้างวิดีโอ
-              </Button>
-            )}
-            {t.platform === "shopee" &&
-              (t.affiliateUrl ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="ml-auto"
-                  onClick={() => void navigator.clipboard.writeText(t.affiliateUrl!).then(() => toast.success("คัดลอกลิงก์ affiliate แล้ว"))}
-                >
-                  <Link2 /> คัดลอกลิงก์ affiliate
-                </Button>
-              ) : (
-                t.url && (
-                  <Button size="sm" variant="outline" className="ml-auto" disabled={busy !== null} onClick={() => act("aff", () => api.post(`/scraping/trends/${id}/affiliate-link`, {}), "สร้างลิงก์ affiliate แล้ว")}>
-                    {busy === "aff" ? <Loader2 className="animate-spin" /> : <Link2 />} สร้างลิงก์ affiliate
-                  </Button>
-                )
-              ))}
+            <TrendActionButtons t={t} />
           </div>
         )}
       </DialogPrimitive.Content>
@@ -497,10 +403,138 @@ function TrendDrawer({ id, onClose }: { id: number; onClose: () => void }) {
   );
 }
 
+/** Import / watch / ignore / make a video / affiliate link — shared by the drawer and the product page. */
+export function TrendActionButtons({ t }: { t: TrendDetail }) {
+  const { can } = useAuth();
+  const router = useRouter();
+  const { busy, act } = useTrendAct();
+  const id = t.id;
+  return (
+    <>
+      {t.status === "imported" ? (
+        can("products:read") &&
+        t.importedProductId && (
+          <Button size="sm" variant="outline" onClick={() => router.push(`/products/${t.importedProductId}`)}>
+            <PackagePlus /> ดูสินค้าที่นำเข้า
+          </Button>
+        )
+      ) : (
+        <>
+          {can("products:write") && (
+            <Button
+              size="sm"
+              disabled={busy !== null}
+              onClick={() =>
+                act(
+                  "import",
+                  () => api.post(`/scraping/trends/${id}/import-product`, {}),
+                  "นำเข้าเป็นสินค้าฉบับร่างแล้ว — ตรวจราคา/ต้นทุนในหน้าสินค้าก่อนเปิดขาย",
+                )
+              }
+            >
+              {busy === "import" ? <Loader2 className="animate-spin" /> : <PackagePlus />} นำเข้าเป็นสินค้า
+            </Button>
+          )}
+          {t.status === "watching" ? (
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => act("st", () => api.patch(`/scraping/trends/${id}`, { status: "new" }))}>
+              <EyeOff /> เลิกติดตาม
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => act("st", () => api.patch(`/scraping/trends/${id}`, { status: "watching" }), "เพิ่มในรายการติดตาม")}>
+              <Eye /> ติดตาม
+            </Button>
+          )}
+          {t.status !== "ignored" && (
+            <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => act("ig", () => api.patch(`/scraping/trends/${id}`, { status: "ignored" }))}>
+              ไม่สนใจ
+            </Button>
+          )}
+        </>
+      )}
+      {can("video:create") && (
+        <Button size="sm" variant="outline" onClick={() => router.push(`/videos?trend=${id}`)}>
+          <Clapperboard /> สร้างวิดีโอ
+        </Button>
+      )}
+      {t.platform === "shopee" &&
+        (t.affiliateUrl ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto"
+            onClick={() => void navigator.clipboard.writeText(t.affiliateUrl!).then(() => toast.success("คัดลอกลิงก์ affiliate แล้ว"))}
+          >
+            <Link2 /> คัดลอกลิงก์ affiliate
+          </Button>
+        ) : (
+          t.url && (
+            <Button size="sm" variant="outline" className="ml-auto" disabled={busy !== null} onClick={() => act("aff", () => api.post(`/scraping/trends/${id}/affiliate-link`, {}), "สร้างลิงก์ affiliate แล้ว")}>
+              {busy === "aff" ? <Loader2 className="animate-spin" /> : <Link2 />} สร้างลิงก์ affiliate
+            </Button>
+          )
+        ))}
+    </>
+  );
+}
+
+/** Run (or re-run) the AI analysis and show it. */
+export function AiAnalysisSection({ t }: { t: TrendDetail }) {
+  const { can } = useAuth();
+  const { busy, act } = useTrendAct();
+  const canRun = can("scraping:run");
+  const id = t.id;
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-1.5 font-semibold">
+          <Bot className="size-4 text-primary" /> AI วิเคราะห์
+        </h3>
+        {canRun && (
+          <Button
+            size="sm"
+            variant={t.aiAnalysis ? "outline" : "default"}
+            disabled={busy !== null}
+            onClick={() => act("ai", () => api.post(`/scraping/trends/${id}/analyze`, { refresh: Boolean(t.aiAnalysis) }))}
+          >
+            {busy === "ai" ? <Loader2 className="animate-spin" /> : t.aiAnalysis ? <RefreshCw /> : <Sparkles />}
+            {t.aiAnalysis ? "วิเคราะห์ใหม่" : "ให้ AI วิเคราะห์"}
+          </Button>
+        )}
+      </div>
+      {t.aiAnalysis ? (
+        <Analysis a={t.aiAnalysis} />
+      ) : (
+        <p className="rounded-xl bg-muted/50 p-3 text-sm text-muted-foreground">
+          AI จะประเมินความเหมาะสมกับร้านและโปรไฟล์ช่อง จังหวะกระแส กลุ่มเป้าหมาย จุดขาย ไอเดียเปิดคลิป และความเสี่ยงด้านโฆษณา
+        </p>
+      )}
+    </section>
+  );
+}
+
+function useTrendAct() {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState<string | null>(null);
+  const act = async (key: string, fn: () => Promise<unknown>, ok?: string) => {
+    setBusy(key);
+    try {
+      await fn();
+      if (ok) toast.success(ok);
+      await qc.invalidateQueries({ queryKey: ["trends"] });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "INTEGRATION_NOT_CONFIGURED") toast.error(`ยังไม่ได้ตั้งค่าบนเซิร์ฟเวอร์: ${err.message}`);
+      else toast.error(err instanceof Error ? err.message : "ทำรายการไม่สำเร็จ");
+    } finally {
+      setBusy(null);
+    }
+  };
+  return { busy, act };
+}
+
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short" });
 
 /** Single series (units sold over time): no legend, title names it; tooltip on hover. */
-function SalesChart({ snapshots }: { snapshots: TrendDetail["snapshots"] }) {
+export function SalesChart({ snapshots }: { snapshots: TrendDetail["snapshots"] }) {
   const data = snapshots.filter((s) => s.soldCount != null).map((s) => ({ t: s.capturedAt, sold: s.soldCount as number }));
   return (
     <section>
@@ -552,7 +586,7 @@ function SalesChart({ snapshots }: { snapshots: TrendDetail["snapshots"] }) {
   );
 }
 
-function Analysis({ a }: { a: TrendDetail["aiAnalysis"] & object }) {
+export function Analysis({ a }: { a: TrendDetail["aiAnalysis"] & object }) {
   return (
     <div className="space-y-3 text-sm">
       <div className="flex items-start gap-3 rounded-xl bg-primary-soft/60 p-3">

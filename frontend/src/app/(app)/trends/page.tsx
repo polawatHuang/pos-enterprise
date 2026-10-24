@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { RequirePermission } from "@/components/layout/page";
-import { TrendsView } from "@/components/trends/trends-view";
+import { CategoryReportView } from "@/components/trends/category-report";
 
 export const metadata: Metadata = { title: "สินค้าเทรนด์" };
 
 export default function TrendsPage() {
   return (
     <RequirePermission permission="scraping:read">
-      <TrendsView />
+      <Suspense>
+        <CategoryReportView />
+      </Suspense>
     </RequirePermission>
   );
 }

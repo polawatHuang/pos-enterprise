@@ -90,6 +90,7 @@ const TESTS = {
   },
   meta: checkMetaApp,
   meta_social: checkMetaApp,
+  kalodata: async (a) => `เครดิตคงเหลือ ${Number((await a.balance())?.totalRemain ?? 0).toLocaleString('th-TH')}`,
 };
 
 router.post('/:id/test', validate({ params: z.object({ id: z.string().max(40) }) }), async (req, res) => {

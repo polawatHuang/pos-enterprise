@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const db = require('../../db/pool');
 const { trendScore, soldVelocity } = require('./score');
 const { velocitySeries, estimatePhase, evaluateChecklist, pickScore } = require('./lifecycle');
+const { selectScore } = require('./select-score');
 
 /** A snapshot newer than this is overwritten instead of adding a row (re-runs within the hour). */
 const SNAPSHOT_MERGE_MINUTES = 60;
@@ -97,7 +98,8 @@ async function rescore(conn, trendId) {
     capturedAt: s.captured_at,
     soldCount: s.sold_count == null ? null : Number(s.sold_count),
   }));
-  const velocity = soldVelocity(series);
+  // Kalodata reports units per month, not a running total, so snapshot differences mean nothing there
+  const velocity = t.platform === 'kalodata' ? (t.monthly_sold == null ? null : Math.round((Number(t.monthly_sold) / 30) * 100) / 100) : soldVelocity(series);
   const score = trendScore({
     velocity,
     soldCount: t.sold_count,
@@ -135,10 +137,38 @@ async function rescore(conn, trendId) {
     checklist,
     categoryRank: n(t.category_rank),
   });
+  let top3 = null;
+  if (t.kalo_category_id) {
+    const [[c]] = await conn.query(
+      'SELECT top3_shop_ratio FROM trend_categories WHERE org_id = :orgId AND category_id = :cat ORDER BY period DESC LIMIT 1',
+      { orgId: t.org_id, cat: t.kalo_category_id },
+    );
+    top3 = n(c?.top3_shop_ratio);
+  }
+  const growth =
+    n(t.revenue_growth_rate) ??
+    (n(t.monthly_sold) != null && n(t.prev_monthly_sold) > 0 ? Math.round((n(t.monthly_sold) / n(t.prev_monthly_sold) - 1) * 10000) / 100 : null);
+  const select = selectScore({
+    monthlySold: n(t.monthly_sold),
+    categoryRank: n(t.category_rank),
+    growthRate: growth,
+    price: n(t.price),
+    commissionRate: n(t.commission_rate),
+    creatorCount: n(t.creator_count),
+    top3ShopRatio: top3,
+    rating: n(t.rating),
+    reviewCount: n(t.review_count),
+    shopRating: n(t.shop_rating),
+    contentScore: n((json(t.manual_checks) ?? {}).contentScore),
+    phase: est.phase,
+  });
   await conn.query(
     `UPDATE trending_products SET sold_velocity = :velocity, trend_score = :score, lifecycle_phase = :phase, phase_ratio = :ratio,
-        phase_notes = :notes, checklist = :checklist, checklist_passed = :passed, pick_score = :pick WHERE id = :id`,
+        phase_notes = :notes, checklist = :checklist, checklist_passed = :passed, pick_score = :pick,
+        select_score = :selectTotal, select_detail = :selectDetail WHERE id = :id`,
     {
+      selectTotal: select.total,
+      selectDetail: JSON.stringify(select),
       id: trendId,
       velocity,
       score,
