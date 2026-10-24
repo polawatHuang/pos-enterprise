@@ -6,7 +6,6 @@
 // record of that sale, not a second one: it is linked by order_id (the PP.30 VAT report skips
 // documents with an order_id) and posts nothing to the ledger.
 
-const db = require('../../db/pool');
 const { badRequest, conflict, notFound } = require('../../core/errors');
 const { localDate } = require('../../utils/dates');
 const { r2, nextNumber } = require('../accounting/ledger.service');

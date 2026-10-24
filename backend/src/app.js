@@ -28,6 +28,12 @@ const DB_HINTS = {
   UNKNOWN: 'ตรวจค่า DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME แล้ว Restart App',
 };
 
+/** Automatic migrations: what is still missing and why (no secrets). */
+function schemaHealth() {
+  const { status } = require('./db/migrate');
+  return { state: status.state, pending: status.pending, applied: status.applied, ...(status.error ? { error: status.error } : {}) };
+}
+
 function createApp() {
   const app = express();
   const allowOrigin = originMatcher(env.corsOrigins);
@@ -78,6 +84,7 @@ function createApp() {
         status: database === 'ok' ? 'ok' : 'degraded',
         database,
         ...(jobs ? { jobs } : {}),
+        schema: schemaHealth(),
         ...(dbError ? { databaseError: dbError, hint: DB_HINTS[dbError] ?? DB_HINTS.UNKNOWN } : {}),
         time: new Date().toISOString(),
         version: '0.1.0',

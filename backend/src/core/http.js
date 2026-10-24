@@ -32,7 +32,7 @@ function errorHandler(err, req, res, next) {
     return res.status(500).json({
       error: {
         code: 'SCHEMA_OUTDATED',
-        message: `ฐานข้อมูลยังไม่ได้อัปเดต (ไม่พบ ${err.code === 'ER_NO_SUCH_TABLE' ? 'ตาราง' : 'คอลัมน์'} ${what}) — import ไฟล์ใน database/migrations ที่ยังไม่ได้รันผ่าน phpMyAdmin`,
+        message: `ฐานข้อมูลยังไม่ได้อัปเดต (ไม่พบ ${err.code === 'ER_NO_SUCH_TABLE' ? 'ตาราง' : 'คอลัมน์'} ${what}) — กด Restart App ใน Plesk ให้ระบบอัปเดตเอง ถ้ายังไม่หายดูสาเหตุที่ /api/health (ส่วน schema)`,
       },
     });
   }

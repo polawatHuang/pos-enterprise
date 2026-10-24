@@ -599,7 +599,7 @@ router.put(
   async (req, res) => {
     const view = await paymentIntents.saveAdmin(req.user.orgId, req.valid.body);
     // the keys themselves never reach the audit log
-    audit(req, 'pos.payment_gateway', 'settings', 'pos', { provider: req.valid.body.provider, enabled: req.valid.body.enabled, keysChanged: Boolean(req.valid.body.credentials) });
+    audit(req, 'pos.payment_gateway', 'settings', 'pos', { provider: req.valid.body.provider, enabled: req.valid.body.enabled, keysChanged: Object.values(req.valid.body.credentials ?? {}).some(Boolean) });
     res.json({ data: view });
   },
 );

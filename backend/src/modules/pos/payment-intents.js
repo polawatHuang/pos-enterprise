@@ -41,20 +41,45 @@ async function adminView(orgId) {
   const p = cfg.provider ? payments.provider(cfg.provider) : null;
   return {
     ...cfg,
-    providers: payments.available().map((x) => ({ id: x.id, label: x.label, fields: x.fields, devOnly: Boolean(x.devOnly) })),
+    providers: payments.available().map((x) => ({ id: x.id, label: x.label, fields: x.fields, devOnly: Boolean(x.devOnly), webhookHint: x.webhookHint ?? null })),
     hasKey: Boolean(creds),
     mode: creds && p ? p.mode(creds) : null,
+    // switches (e.g. sandbox) are not secret: the form shows what is saved
+    flags: creds && p ? Object.fromEntries(p.fields.filter((f) => f.type === 'boolean').map((f) => [f.key, creds[f.key] === '1'])) : {},
     webhookKey: creds?.webhookKey ?? null,
   };
+}
+
+/**
+ * Keys typed into the form replace only the fields that were filled in, so a shop can change one key
+ * without typing the others again; a switch (boolean field) is always taken as sent.
+ */
+function mergeCredentials(p, saved, input) {
+  if (!input) return null;
+  const next = { ...(saved ?? {}) };
+  delete next.webhookKey;
+  let changed = false;
+  for (const f of p.fields) {
+    if (!(f.key in input)) continue;
+    const v = f.type === 'boolean' ? (['1', 'true', 'on'].includes(String(input[f.key])) ? '1' : '') : String(input[f.key] ?? '');
+    if (f.type !== 'boolean' && !v) continue;
+    if (next[f.key] !== v) changed = true;
+    next[f.key] = v;
+  }
+  // a switch alone, with no key saved yet, is nothing to save
+  const hasKey = p.fields.some((f) => f.type !== 'boolean' && next[f.key]);
+  return changed && hasKey ? next : null;
 }
 
 async function saveAdmin(orgId, { provider: id, enabled, credentials: input }) {
   const p = payments.provider(id);
   let creds = await payments.credentials(orgId, id);
-  if (input && Object.values(input).some(Boolean)) {
-    const bad = p.validateCredentials(input);
+  // a provider without keys still needs its webhook address
+  const merged = p.fields.length ? mergeCredentials(p, creds, input) : creds ? null : {};
+  if (merged) {
+    const bad = p.validateCredentials(merged);
     if (bad) throw badRequest(bad);
-    await payments.saveCredentials(orgId, id, input);
+    await payments.saveCredentials(orgId, id, merged);
     creds = await payments.credentials(orgId, id);
   }
   if (enabled && p.fields.length && !creds) throw badRequest('ใส่คีย์ของผู้ให้บริการก่อนเปิดใช้งาน');
@@ -106,7 +131,7 @@ async function createIntent(user, shift, amount) {
   const creds = (await payments.credentials(user.orgId, cfg.provider)) ?? {};
   let qr;
   try {
-    qr = await p.createQr(creds, { amount: r2(amount), ref: `POS shift ${shift.id}` });
+    qr = await p.createQr(creds, { amount: r2(amount), ref: `POS shift ${shift.id}`, webhookUrl: payments.webhookUrl(cfg.provider, creds.webhookKey) });
   } catch (err) {
     const e = badRequest(`สร้าง QR ไม่สำเร็จ: ${err.message}`);
     e.status = 502;

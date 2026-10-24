@@ -20,6 +20,10 @@ function boot() {
 
   if (env.JOB_RUNNER === 'inprocess') startInProcessLoop();
 
+  // bring the database up to this code (new files in database/migrations); requests keep working
+  const migrations = require('./src/db/migrate');
+  if (migrations.enabled()) void migrations.migrate();
+
   function shutdown(signal) {
     logger.info({ signal }, 'shutting down');
     server.close(() => pool.end().finally(() => process.exit(0)));

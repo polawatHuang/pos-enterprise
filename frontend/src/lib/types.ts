@@ -1973,8 +1973,10 @@ export interface PaymentIntent {
 export interface PaymentGatewayAdmin {
   provider: string | null;
   enabled: boolean;
-  providers: { id: string; label: string; fields: { key: string; label: string; secret: boolean }[]; devOnly: boolean }[];
+  providers: { id: string; label: string; fields: { key: string; label: string; secret: boolean; type?: "boolean" }[]; devOnly: boolean; webhookHint: string | null }[];
   hasKey: boolean;
   mode: "live" | "test" | null;
+  /** saved on/off switches (e.g. sandbox) — not secret */
+  flags: Record<string, boolean>;
   webhookKey: string | null;
 }
