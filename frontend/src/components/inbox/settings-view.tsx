@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Check, Copy, ExternalLink, KeyRound, Loader2, Plus, Send, Trash2, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiFetch } from "@/lib/api";
-import type { AgentProfile, InboxChannelConfig, InboxChannelsMeta, KnowledgeItem, Platform } from "@/lib/types";
+import type { AgentProfile, InboxChannelConfig, InboxChannelsMeta, KnowledgeItem, LineConnectResult, Platform } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -290,6 +290,22 @@ function Channels() {
   };
   const [editing, setEditing] = useState<InboxChannelConfig | "new" | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const [lineBusy, setLineBusy] = useState(false);
+  const [lineResult, setLineResult] = useState<LineConnectResult | null>(null);
+  const connectLine = async () => {
+    setLineBusy(true);
+    try {
+      const r = await api.post<LineConnectResult>("/inbox/channels/line/connect");
+      setLineResult(r);
+      toast.success(`เชื่อมต่อ LINE OA "${r.channel.name}" แล้ว`);
+      await qc.invalidateQueries({ queryKey: ["inbox"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "เชื่อมต่อ LINE OA ไม่สำเร็จ");
+    } finally {
+      setLineBusy(false);
+    }
+  };
 
   const copy = async (url: string) => {
     await navigator.clipboard.writeText(url);
@@ -308,12 +324,16 @@ function Channels() {
             <Button onClick={() => void connectMeta()} disabled={connecting || meta?.metaLogin?.configured === false}>
               {connecting ? <Loader2 className="animate-spin" /> : <ExternalLink />} เชื่อมต่อ Facebook Page / Instagram
             </Button>
+            <Button variant="outline" onClick={() => void connectLine()} disabled={lineBusy || meta?.line?.configured === false}>
+              {lineBusy ? <Loader2 className="animate-spin" /> : <PlatformBadge platform="line" />} เชื่อมต่อ LINE OA
+            </Button>
             <Button variant="outline" onClick={() => setEditing("new")}>
               <Plus /> เพิ่มเอง (กรอก token)
             </Button>
           </div>
         )}
       </div>
+      {meta && <LineSetup meta={meta} result={lineResult} />}
       {meta && <MetaSetup meta={meta} />}
       {list.isPending ? (
         <Skeleton className="h-48" />
@@ -374,6 +394,61 @@ function Channels() {
         {editing !== null && <ChannelDialog key={editing === "new" ? "new" : editing.id} channel={editing === "new" ? null : editing} onDone={() => setEditing(null)} />}
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * LINE OA: "เชื่อมต่อ LINE OA" reads the OA from the keys on the API connections page, saves the channel
+ * and points the LINE webhook here. Two switches exist only in LINE's own console.
+ */
+function LineSetup({ meta, result }: { meta: InboxChannelsMeta; result: LineConnectResult | null }) {
+  const line = meta.line;
+  if (!line) return null;
+  const ready = line.configured && line.hasToken;
+  return (
+    <Card className={cn("p-4 text-sm", !ready && "border-warning/50")}>
+      <p className="font-medium">LINE OA: กด &quot;เชื่อมต่อ LINE OA&quot; ระบบจะเพิ่มช่องทางและตั้ง Webhook URL ใน LINE ให้เอง</p>
+      {!ready && (
+        <p className="mt-1 text-warning">
+          ตั้ง {line.configured ? "LINE_CHANNEL_ACCESS_TOKEN" : "LINE_CHANNEL_SECRET และ LINE_CHANNEL_ACCESS_TOKEN"} ที่หน้า{" "}
+          <a href="/settings/integrations" className="text-primary hover:underline">
+            การเชื่อมต่อ API
+          </a>{" "}
+          ก่อน
+        </p>
+      )}
+      {result && (
+        <div className="mt-3 space-y-1 rounded-lg bg-muted p-3">
+          <p>
+            เชื่อมกับ <b>{result.channel.name}</b> {result.channel.basicId && <span className="text-muted-foreground">({result.channel.basicId})</span>}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Webhook URL: <code>{result.webhookUrl}</code> —{" "}
+            {result.webhookTest?.success ? (
+              <span className="text-success">LINE ส่งทดสอบถึงระบบแล้ว ✓</span>
+            ) : result.webhookSet ? (
+              <span className="text-warning">ตั้งแล้ว แต่ทดสอบไม่ผ่าน</span>
+            ) : (
+              <span className="text-warning">ยังไม่ได้ตั้ง</span>
+            )}
+          </p>
+          {result.warnings.map((w) => (
+            <p key={w} className="text-xs text-warning">
+              {w}
+            </p>
+          ))}
+        </div>
+      )}
+      <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
+        <li>
+          ใน LINE Developers → Messaging API เปิด <b>Use webhook</b> (Webhook URL: <code className="rounded bg-muted px-1">{result?.webhookUrl ?? line.webhookUrl}</code>)
+        </li>
+        <li>
+          ใน LINE Official Account Manager → การตอบกลับ ปิด <b>ข้อความตอบกลับอัตโนมัติ</b> เพื่อไม่ให้ตอบซ้ำกับ AI
+        </li>
+        <li>ลองทักแชต OA จากมือถือ แชตจะขึ้นในหน้า &quot;แชตลูกค้า&quot;</li>
+      </ol>
+    </Card>
   );
 }
 
