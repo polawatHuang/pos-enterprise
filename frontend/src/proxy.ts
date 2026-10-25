@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+const LEGAL_PAGES = new Set(["/terms", "/privacy", "/data-deletion"]);
+
 /**
  * Route guard. Runs before rendering pages (not /api — that is rewritten to the backend).
  * "pe_session" is a non-secret hint cookie set by the backend alongside the httpOnly tokens;
@@ -8,8 +10,9 @@ import { NextResponse, type NextRequest } from "next/server";
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const hasSession = request.cookies.has("pe_session");
-  // /login and the customer's own receipt page (opened from the QR on a receipt) need no session
-  const isAuthPage = pathname === "/login" || pathname.startsWith("/r/");
+  // /login, the customer's own receipt page (opened from the QR on a receipt) and the legal pages
+  // (also given to Meta / TikTok app review) need no session
+  const isAuthPage = pathname === "/login" || pathname.startsWith("/r/") || LEGAL_PAGES.has(pathname);
 
   if (!hasSession && !isAuthPage) {
     const url = new URL("/login", request.url);

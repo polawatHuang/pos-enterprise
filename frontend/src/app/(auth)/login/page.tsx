@@ -52,6 +52,17 @@ export default function LoginPage() {
           <h2 className="text-2xl font-semibold">เข้าสู่ระบบ</h2>
           <p className="mt-1.5 text-sm text-muted-foreground">ใช้อีเมลและรหัสผ่านที่ผู้ดูแลระบบให้ไว้</p>
           <LoginForm />
+          <p className="mt-8 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <a href="/terms" className="hover:underline">
+              ข้อกำหนดการใช้บริการ
+            </a>
+            <a href="/privacy" className="hover:underline">
+              นโยบายความเป็นส่วนตัว
+            </a>
+            <a href="/data-deletion" className="hover:underline">
+              คำขอลบข้อมูล
+            </a>
+          </p>
         </div>
       </section>
     </main>

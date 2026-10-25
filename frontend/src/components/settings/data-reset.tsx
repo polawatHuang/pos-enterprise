@@ -31,7 +31,7 @@ const KEPT = [
 ];
 
 /** Settings > จัดการข้อมูล: wipe the demo data before going live (owner/admin only). */
-export function DataResetView() {
+export function DataResetView({ children }: { children?: React.ReactNode }) {
   const { user } = useAuth();
   const isOwner = !!user?.roles.some((r) => r === "owner" || r === "admin");
   const summary = useQuery({ queryKey: ["org", "data-summary"], queryFn: () => api.get<Summary>("/org/data-summary"), enabled: isOwner });
@@ -39,7 +39,8 @@ export function DataResetView() {
 
   return (
     <>
-      <PageHeader title="จัดการข้อมูล" description="ล้างข้อมูลตัวอย่างก่อนเริ่มใช้งานจริง" />
+      <PageHeader title="จัดการข้อมูล" description="ข้อมูลกิจการ คำขอเรื่องข้อมูลส่วนบุคคล และการล้างข้อมูลตัวอย่างก่อนเริ่มใช้งานจริง" />
+      {children}
       {!isOwner ? (
         <Card className="p-6 text-sm text-muted-foreground">เฉพาะเจ้าของกิจการหรือผู้ดูแลระบบเท่านั้น</Card>
       ) : (

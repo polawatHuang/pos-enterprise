@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS trend_product_extras, trend_product_months, trend_categories, leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS data_requests, trend_product_extras, trend_product_months, trend_categories, leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -1824,6 +1824,26 @@ CREATE TABLE leave_requests (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- This file already contains every migration up to the one listed last
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts');
+CREATE TABLE data_requests (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id         BIGINT UNSIGNED NOT NULL,
+  ref_code       VARCHAR(20)  NOT NULL,
+  kind           ENUM('delete','access','correct','object','withdraw') NOT NULL,
+  requester_name VARCHAR(191) NOT NULL,
+  contact        VARCHAR(191) NOT NULL,
+  platform       ENUM('facebook','instagram','line','tiktok','shop','other') NOT NULL DEFAULT 'other',
+  detail         TEXT NULL,
+  status         ENUM('new','in_progress','done','rejected') NOT NULL DEFAULT 'new',
+  note           TEXT NULL COMMENT 'what was done / why rejected',
+  ip             VARCHAR(45)  NULL,
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  handled_at     DATETIME NULL,
+  handled_by     BIGINT UNSIGNED NULL,
+  UNIQUE KEY uq_data_request_ref (ref_code),
+  KEY idx_data_request_org (org_id, status, created_at),
+  CONSTRAINT fk_data_request_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests');
 
 SET FOREIGN_KEY_CHECKS = 1;
