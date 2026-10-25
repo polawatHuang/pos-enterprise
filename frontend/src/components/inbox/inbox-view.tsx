@@ -32,7 +32,12 @@ import { CONV_STATUS, INTENT_LABEL, OFFER_STATUS, PLATFORM, PROVIDER_LABEL, RETU
 type View = "active" | "human" | "ai" | "resolved";
 const POLL_MS = 5000;
 
-/** Channel filter: every platform with a connected channel, plus Facebook / Instagram to connect when missing. */
+/** The five chat channels always listed; website / email only once connected. */
+const MAIN_PLATFORMS: Platform[] = ["facebook", "instagram", "line", "shopee", "tiktok"];
+/** Chat APIs not built yet: they need partner access from the marketplace first. */
+const PENDING_PLATFORMS: Platform[] = ["shopee", "tiktok"];
+
+/** Channel filter: the five chat channels (connect / coming soon when missing) plus any other connected one. */
 function ChannelFilter({
   platforms,
   value,
@@ -43,11 +48,10 @@ function ChannelFilter({
   onChange: (p: Platform | "all") => void;
 }) {
   const connected = new Map(platforms.map((p) => [p.platform, p]));
-  const order: Platform[] = ["facebook", "instagram", "line", "tiktok", "shopee", "website", "email"];
-  const shown = order.filter((p) => connected.has(p) || p === "facebook" || p === "instagram");
+  const shown = [...MAIN_PLATFORMS, ...(["website", "email"] as Platform[]).filter((p) => connected.has(p))];
   const chip = "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors";
   return (
-    <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" aria-label="ช่องทาง">
+    <div className="flex flex-wrap gap-1.5" role="group" aria-label="ช่องทาง">
       <button
         type="button"
         onClick={() => onChange("all")}
@@ -57,10 +61,24 @@ function ChannelFilter({
       </button>
       {shown.map((p) => {
         const c = connected.get(p);
+        if (!c && PENDING_PLATFORMS.includes(p)) {
+          return (
+            <span
+              key={p}
+              title="รอสิทธิ์ partner API จาก Shopee/TikTok"
+              aria-disabled="true"
+              className={cn(chip, "cursor-not-allowed border-dashed border-border text-muted-foreground opacity-60")}
+            >
+              <PlatformBadge platform={p} className="h-4 px-1 text-[9px]" />
+              {PLATFORM[p].label} · เร็ว ๆ นี้
+            </span>
+          );
+        }
         if (!c) {
           return (
             <Link key={p} href="/inbox/settings?tab=channels" className={cn(chip, "border-dashed border-border text-muted-foreground hover:bg-accent")}>
-              <PlatformBadge platform={p} className="h-4 px-1 text-[9px]" /> + เชื่อมต่อ
+              <PlatformBadge platform={p} className="h-4 px-1 text-[9px]" />
+              {PLATFORM[p].label} + เชื่อมต่อ
             </Link>
           );
         }
@@ -177,9 +195,9 @@ export function InboxView() {
               <div className="grid place-items-center gap-2 px-6 py-16 text-center text-sm text-muted-foreground">
                 <MessageSquareDashed className="size-8" />
                 ไม่มีแชตในมุมมองนี้
-                {s && !s.platforms?.some((p) => p.platform === "facebook" || p.platform === "instagram") && (
+                {s && !s.platforms?.some((p) => ["facebook", "instagram", "line"].includes(p.platform)) && (
                   <Link href="/inbox/settings?tab=channels" className="mt-2 text-primary hover:underline">
-                    เชื่อมต่อ Facebook Page / Instagram เพื่อรับแชตลูกค้า
+                    เชื่อมต่อ Facebook Page / Instagram / LINE OA เพื่อรับแชตลูกค้า
                   </Link>
                 )}
               </div>
