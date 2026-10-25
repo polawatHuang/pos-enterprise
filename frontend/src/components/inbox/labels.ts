@@ -3,9 +3,9 @@ import type { Platform } from "@/lib/types";
 type Tone = "neutral" | "primary" | "success" | "danger" | "warning";
 
 export const PLATFORM: Record<Platform, { label: string; short: string; className: string }> = {
-  facebook: { label: "Facebook", short: "FB", className: "bg-[#1877F2] text-white" },
+  facebook: { label: "Facebook Page", short: "FB", className: "bg-[#1877F2] text-white" },
   instagram: { label: "Instagram", short: "IG", className: "bg-gradient-to-br from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white" },
-  line: { label: "LINE", short: "LINE", className: "bg-[#06C755] text-white" },
+  line: { label: "LINE OA", short: "LINE", className: "bg-[#06C755] text-white" },
   tiktok: { label: "TikTok Shop", short: "TT", className: "bg-black text-white dark:bg-white dark:text-black" },
   shopee: { label: "Shopee", short: "SP", className: "bg-[#EE4D2D] text-white" },
   website: { label: "เว็บไซต์/ทดสอบ", short: "WEB", className: "bg-slate-500 text-white" },
