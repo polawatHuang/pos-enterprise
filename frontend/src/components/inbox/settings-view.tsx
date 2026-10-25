@@ -458,6 +458,7 @@ function MetaSetup({ meta }: { meta: InboxChannelsMeta }) {
   const hook = meta.metaWebhook;
   if (!login || !hook) return null;
   const ready = login.configured && hook.configured;
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
   return (
     <Card className={cn("p-4 text-sm", !ready && "border-warning/50")}>
       <p className="font-medium">Facebook Page / Instagram: สิ่งที่ต้องตั้งค่าใน Meta App (developers.facebook.com) ครั้งเดียว</p>
@@ -468,6 +469,11 @@ function MetaSetup({ meta }: { meta: InboxChannelsMeta }) {
           <a href="/settings/integrations" className="text-primary hover:underline">
             การเชื่อมต่อ API
           </a>
+        </li>
+        <li>
+          ใน Meta App → App settings → Basic ใส่ Privacy Policy URL <code className="rounded bg-muted px-1">{`${origin}/privacy`}</code> · Terms of Service URL{" "}
+          <code className="rounded bg-muted px-1">{`${origin}/terms`}</code> · User data deletion (Data deletion instructions URL){" "}
+          <code className="rounded bg-muted px-1">{`${origin}/data-deletion`}</code>
         </li>
         <li>
           ใน Meta App เปิดผลิตภัณฑ์ <b>Messenger</b> และ <b>Instagram</b> → Webhooks: Callback URL <code className="rounded bg-muted px-1">{hook.callbackUrl}</code> · Verify

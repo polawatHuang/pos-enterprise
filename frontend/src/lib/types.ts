@@ -1866,9 +1866,40 @@ export interface Organization {
   taxId: string | null;
   address: string | null;
   phone: string | null;
+  email: string | null;
   vatRegistered: boolean;
   currency: string;
   timezone: string;
+}
+
+/** GET /public/legal — the provider / data controller shown on /terms and /privacy */
+export interface LegalProvider {
+  name: string;
+  legalName: string | null;
+  taxId: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+}
+
+export type DataRequestKind = "delete" | "access" | "correct" | "object" | "withdraw";
+export type DataRequestStatus = "new" | "in_progress" | "done" | "rejected";
+
+/** A data-subject request (PDPA) sent from /data-deletion */
+export interface DataRequest {
+  id: number;
+  ref: string;
+  kind: DataRequestKind;
+  name: string;
+  contact: string;
+  platform: string;
+  detail: string | null;
+  status: DataRequestStatus;
+  note: string | null;
+  createdAt: string;
+  dueAt: string;
+  handledAt: string | null;
+  handledBy: string | null;
 }
 
 /* --------------------------------------------------------------- customers (CRM) */

@@ -152,12 +152,100 @@ router.get('/roles', requirePermission('users:read'), async (req, res) => {
 router.get('/organization', async (req, res) => {
   const org = await db.one(
     // Any signed-in user: document headers (purchase orders, receipts) need the seller's details
-    `SELECT id, name, legal_name AS legalName, tax_id AS taxId, address, phone, vat_registered AS vatRegistered, currency, timezone
+    `SELECT id, name, legal_name AS legalName, tax_id AS taxId, address, phone, email, vat_registered AS vatRegistered, currency, timezone
        FROM organizations WHERE id = :orgId`,
     { orgId: req.user.orgId },
   );
   res.json({ data: { ...org, vatRegistered: Boolean(org.vatRegistered) } });
 });
+
+const optText = (max) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .nullish()
+    .transform((v) => v || null);
+const orgBody = z.object({
+  name: z.string().trim().min(1, 'กรอกชื่อร้าน').max(191),
+  legalName: optText(191),
+  taxId: z
+    .string()
+    .trim()
+    .regex(/^\d{13}$/, 'เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก')
+    .nullish()
+    .or(z.literal(''))
+    .transform((v) => v || null),
+  address: optText(1000),
+  phone: optText(50),
+  email: z
+    .string()
+    .trim()
+    .email('อีเมลไม่ถูกต้อง')
+    .max(191)
+    .nullish()
+    .or(z.literal(''))
+    .transform((v) => v || null),
+});
+
+/** Business details: document headers, and the provider / data controller on /terms and /privacy. */
+router.put('/organization', requirePermission('settings:manage'), validate({ body: orgBody }), async (req, res) => {
+  const b = req.valid.body;
+  await db.query(
+    'UPDATE organizations SET name = :name, legal_name = :legalName, tax_id = :taxId, address = :address, phone = :phone, email = :email WHERE id = :orgId',
+    { ...b, orgId: req.user.orgId },
+  );
+  audit(req, 'org.update', 'organization', req.user.orgId, { fields: Object.keys(b) });
+  res.json({ data: { ok: true } });
+});
+
+/* ------------------------------------------------- data-subject requests */
+
+const DR_STATUS = ['new', 'in_progress', 'done', 'rejected'];
+
+/** Requests sent from the public /data-deletion page (PDPA: answer within 30 days). */
+router.get('/data-requests', requirePermission('settings:manage'), async (req, res) => {
+  const rows = await db.query(
+    `SELECT dr.*, u.full_name AS handled_by_name FROM data_requests dr LEFT JOIN users u ON u.id = dr.handled_by
+      WHERE dr.org_id = :orgId ORDER BY dr.status IN ('done','rejected'), dr.created_at DESC LIMIT 200`,
+    { orgId: req.user.orgId },
+  );
+  res.json({
+    data: rows.map((r) => ({
+      id: r.id,
+      ref: r.ref_code,
+      kind: r.kind,
+      name: r.requester_name,
+      contact: r.contact,
+      platform: r.platform,
+      detail: r.detail,
+      status: r.status,
+      note: r.note,
+      createdAt: r.created_at,
+      dueAt: new Date(new Date(r.created_at).getTime() + 30 * 86_400_000),
+      handledAt: r.handled_at,
+      handledBy: r.handled_by_name ?? null,
+    })),
+  });
+});
+
+router.patch(
+  '/data-requests/:id',
+  requirePermission('settings:manage'),
+  validate({ params: z.object({ id: z.coerce.number().int().positive() }), body: z.object({ status: z.enum(DR_STATUS), note: optText(2000) }) }),
+  async (req, res) => {
+    const { status, note } = req.valid.body;
+    const r = await db.query(
+      `UPDATE data_requests SET status = :status, note = COALESCE(:note, note),
+              handled_at = IF(:status IN ('done','rejected'), UTC_TIMESTAMP(), NULL), handled_by = :userId
+        WHERE id = :id AND org_id = :orgId`,
+      { id: req.valid.params.id, orgId: req.user.orgId, status, note, userId: req.user.id },
+    );
+    if (!r.affectedRows) throw notFound('ไม่พบคำขอ');
+    audit(req, 'privacy.request.update', 'data_request', req.valid.params.id, { status });
+    res.json({ data: { ok: true } });
+  },
+);
 
 /**
  * Delete a branch that was never used. Deleting a warehouse cascades to stock movements, levels,
