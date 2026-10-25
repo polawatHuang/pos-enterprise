@@ -43,7 +43,13 @@ const adapter = defineAdapter(
         const text = await res.text().catch(() => '');
         throw new AppError(502, 'LINE_API_ERROR', `LINE API ${res.status}: ${text.slice(0, 200)}`);
       }
-      return res.status === 200 && method === 'GET' ? res.json() : null;
+      // most endpoints answer {} or nothing; info / profile / webhook test answer JSON worth reading
+      const text = await res.text().catch(() => '');
+      try {
+        return text ? JSON.parse(text) : null;
+      } catch {
+        return null;
+      }
     },
 
     /** Free reply; the reply token is single-use and valid for about a minute. */
@@ -59,6 +65,21 @@ const adapter = defineAdapter(
     /** Push up to 5 prepared messages (e.g. a Flex report) in one request. */
     pushMessages(token, to, messages) {
       return adapter.call('/message/push', token, { to, messages: messages.slice(0, 5) });
+    },
+
+    /** The OA behind a token: { userId (the webhook "destination"), basicId, displayName }. */
+    botInfo(token) {
+      return adapter.call('/info', token, null, 'GET');
+    },
+
+    /** Point the channel's webhook at us (the "Use webhook" switch itself is only in the console). */
+    setWebhook(token, endpoint) {
+      return adapter.call('/channel/webhook/endpoint', token, { endpoint }, 'PUT');
+    },
+
+    /** LINE sends a test event to the endpoint: { success, statusCode, reason, detail }. */
+    testWebhook(token) {
+      return adapter.call('/channel/webhook/test', token, {});
     },
 
     async getProfile(token, userId) {

@@ -15,6 +15,7 @@ const { replyToConversation } = require('./agent.service');
 const runtime = require('../../config/runtime');
 const metaSocial = require('../../integrations/meta-social');
 const metaWebhook = require('../../integrations/meta');
+const line = require('../../integrations/line');
 const { signState, requireEncryption } = require('../social/accounts.service');
 
 const router = express.Router();
@@ -379,6 +380,8 @@ router.get('/channels', requirePermission('inbox:read'), async (req, res) => {
       // "เชื่อมต่อด้วย Facebook" needs the Facebook Login app keys; messages arrive through the Meta webhook
       metaLogin: { configured: metaSocial.isConfigured(), missing: metaSocial.missing() },
       metaWebhook: { configured: metaWebhook.isConfigured(), missing: metaWebhook.missing(), callbackUrl: `${base}${WEBHOOK_PATH.facebook}` },
+      // "เชื่อมต่อ LINE OA" uses the keys from the API connections page
+      line: { configured: line.isConfigured(), hasToken: Boolean(runtime.get('LINE_CHANNEL_ACCESS_TOKEN')), webhookUrl: `${base}${WEBHOOK_PATH.line}` },
     },
   });
 });
@@ -389,6 +392,57 @@ router.get('/oauth/meta/start', requirePermission('inbox:manage_ai'), (req, res)
   requireEncryption();
   res.json({ data: { url: metaSocial.getAuthorizeUrl(signState({ o: req.user.orgId, u: req.user.id, p: 'meta', k: 'inbox' }), { inbox: true }) } });
 });
+
+/**
+ * "เชื่อมต่อ LINE OA": read the OA behind the access token (its bot user ID is the webhook's
+ * "destination"), create or update the channel, point the LINE webhook at us and test it.
+ * Webhook problems come back as warnings: the channel is still saved.
+ */
+router.post(
+  '/channels/line/connect',
+  requirePermission('inbox:manage_ai'),
+  validate({ body: z.object({ accessToken: z.string().trim().min(10).max(1000).optional() }) }),
+  async (req, res) => {
+    if (!line.isConfigured()) throw badRequest('ยังไม่ได้ตั้ง LINE_CHANNEL_SECRET ที่หน้าการเชื่อมต่อ API');
+    const token = req.valid.body.accessToken || runtime.get('LINE_CHANNEL_ACCESS_TOKEN');
+    if (!token) throw badRequest('ยังไม่มี Channel access token — ตั้ง LINE_CHANNEL_ACCESS_TOKEN ที่หน้าการเชื่อมต่อ API');
+    let info;
+    try {
+      info = await line.botInfo(token);
+    } catch (err) {
+      throw badRequest(`อ่านข้อมูล LINE OA ไม่ได้ — ตรวจ Channel access token อีกครั้ง (${err.message})`);
+    }
+    if (!info?.userId) throw badRequest('LINE ไม่ส่ง Bot user ID กลับมา');
+    const name = info.displayName || info.basicId || 'LINE OA';
+    await db.query(
+      `INSERT INTO channels (org_id, platform, name, external_id, ai_enabled, is_active) VALUES (:orgId, 'line', :name, :externalId, 1, 1)
+       ON DUPLICATE KEY UPDATE name = VALUES(name), is_active = 1`,
+      { orgId: req.user.orgId, name, externalId: info.userId },
+    );
+    const ch = await db.one("SELECT id FROM channels WHERE org_id = :orgId AND platform = 'line' AND external_id = :externalId", {
+      orgId: req.user.orgId,
+      externalId: info.userId,
+    });
+    if (req.valid.body.accessToken) await inbox.saveChannelToken({ org_id: req.user.orgId, platform: 'line', external_id: info.userId }, token);
+
+    const webhookUrl = `${publicApiUrl(req)}${WEBHOOK_PATH.line}`;
+    const warnings = [];
+    let webhookSet = false;
+    let webhookTest = null;
+    try {
+      await line.setWebhook(token, webhookUrl);
+      webhookSet = true;
+      const t = await line.testWebhook(token);
+      webhookTest = { success: Boolean(t?.success), statusCode: t?.statusCode ?? null, reason: t?.reason ?? null };
+      if (!webhookTest.success) warnings.push(`LINE ทดสอบส่ง webhook ไม่ผ่าน (${webhookTest.statusCode ?? '-'} ${webhookTest.reason ?? ''})`.trim());
+    } catch (err) {
+      warnings.push(`${webhookSet ? 'ทดสอบ' : 'ตั้ง'} webhook อัตโนมัติไม่สำเร็จ: ${err.message} — ใส่ URL นี้เองใน LINE Developers`);
+    }
+    if (!process.env.PUBLIC_API_URL) warnings.push('ยังไม่ได้ตั้ง PUBLIC_API_URL — ตรวจว่า webhook URL ด้านล่างเป็นโดเมนของ backend จริง');
+    audit(req, 'inbox.channel.line_connect', 'channel', ch.id, { webhookSet, webhookOk: webhookTest?.success ?? null });
+    res.json({ data: { channel: { id: ch.id, name, externalId: info.userId, basicId: info.basicId ?? null }, webhookUrl, webhookSet, webhookTest, warnings } });
+  },
+);
 
 const channelBody = z.object({
   // Shopee / TikTok Shop chat need partner API access that is not built yet

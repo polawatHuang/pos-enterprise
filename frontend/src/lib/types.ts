@@ -1130,6 +1130,16 @@ export interface InboxChannelsMeta {
   publicApiUrlConfigured: boolean;
   metaLogin?: { configured: boolean; missing: string[] };
   metaWebhook?: { configured: boolean; missing: string[]; callbackUrl: string };
+  line?: { configured: boolean; hasToken: boolean; webhookUrl: string };
+}
+
+/** POST /inbox/channels/line/connect */
+export interface LineConnectResult {
+  channel: { id: number; name: string; externalId: string; basicId: string | null };
+  webhookUrl: string;
+  webhookSet: boolean;
+  webhookTest: { success: boolean; statusCode: number | null; reason: string | null } | null;
+  warnings: string[];
 }
 
 export interface InboxChannelConfig {
