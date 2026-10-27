@@ -68,12 +68,19 @@ handlers['trend.facts'] = (payload) => require('../../modules/scraping/web-facts
 /** Kalodata monthly market pull: one short step per job, re-queued until the run is done. */
 handlers['kalodata.step'] = (payload) => require('../../modules/scraping/kalodata.service').step(payload);
 
+/** Shopee / TikTok Shop chat: sync conversations with unread buyer messages (pushes can be missed). */
+handlers['inbox.marketplace_poll'] = async () => {
+  const [{ n }] = await db.query("SELECT COUNT(*) AS n FROM channels WHERE platform IN ('shopee','tiktok') AND is_active = 1");
+  return Number(n) ? require('../../modules/inbox/marketplace.service').pollAll() : { shops: 0 };
+};
+
 /** Recurring jobs scheduled by the cron tick (idempotent: one queued instance at a time). */
 const recurring = [
   { type: 'system.cleanup', everyMinutes: 60 * 24 },
   { type: 'inventory.alerts', everyMinutes: 60 },
   // every 5 minutes so the report arrives within minutes of its set time
   { type: 'reports.daily_sales', everyMinutes: 5 },
+  { type: 'inbox.marketplace_poll', everyMinutes: 2 },
 ];
 
 async function scheduleRecurring() {

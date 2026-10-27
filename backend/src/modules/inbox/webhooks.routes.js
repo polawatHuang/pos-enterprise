@@ -7,6 +7,8 @@ const { enqueue } = require('../../jobs/queue');
 const line = require('../../integrations/line');
 const meta = require('../../integrations/meta');
 const metaSocial = require('../../integrations/meta-social');
+const shopee = require('../../integrations/shopee');
+const tiktokShop = require('../../integrations/tiktok-shop');
 const inbox = require('./inbox.service');
 const { replyToConversation } = require('./agent.service');
 
@@ -135,4 +137,72 @@ router.post('/meta', async (req, res) => {
   return undefined;
 });
 
-module.exports = { router };
+/* ------------------------------------------------------ Shopee / TikTok Shop */
+
+/** Shop channel by shop id; the sync itself reads the messages from the platform API. */
+const shopChannel = (platform, shopId) =>
+  db.one('SELECT * FROM channels WHERE platform = :platform AND external_id = :shopId AND is_active = 1', { platform, shopId: String(shopId ?? '') });
+
+/** Shopee signs "<push url>|<body>": accept the URL as configured (PUBLIC_API_URL) or as received. */
+function shopeePushUrls(req) {
+  const urls = [`${req.protocol}://${req.get('host')}${req.originalUrl}`];
+  if (process.env.PUBLIC_API_URL) urls.unshift(`${process.env.PUBLIC_API_URL.replace(/\/+$/, '')}/webhooks/shopee`);
+  return urls;
+}
+
+/** Shopee push (Webchat = code 10). Other push codes are acknowledged and ignored. */
+router.post('/shopee', async (req, res) => {
+  if (!shopee.isConfigured()) return res.status(503).json({ error: 'Shopee not configured' });
+  const auth = req.get('authorization');
+  if (!shopeePushUrls(req).some((url) => shopee.verifyPush(url, req.body, auth))) return res.status(401).json({ error: 'bad signature' });
+  res.json({ ok: true });
+
+  let body;
+  try {
+    body = JSON.parse(req.body.toString('utf8'));
+  } catch {
+    return undefined;
+  }
+  if (Number(body.code) !== 10) return undefined;
+  try {
+    const content = body.data?.content ?? body.data ?? {};
+    await logEvent('shopee', content.message_id ? `chat:${content.message_id}` : null, body);
+    const channel = await shopChannel('shopee', body.shop_id);
+    if (!channel) return logger.warn({ shopId: body.shop_id }, 'Shopee push: shop not connected');
+    const conversationId = content.conversation_id;
+    const marketplace = require('./marketplace.service');
+    // No conversation id in this push: check every unread chat instead
+    if (conversationId) await marketplace.syncConversation(channel, String(conversationId), { buyerName: content.from_user_name ?? null });
+    else await marketplace.pollAll();
+  } catch (err) {
+    logger.error({ err }, 'Shopee push failed');
+  }
+  return undefined;
+});
+
+/** TikTok Shop webhook: (13) new conversation, (14) new message. */
+router.post('/tiktok', async (req, res) => {
+  if (!tiktokShop.isConfigured()) return res.status(503).json({ error: 'TikTok Shop not configured' });
+  if (!tiktokShop.verifyWebhook(req.body, req.get('authorization'))) return res.status(401).json({ error: 'bad signature' });
+  res.json({ ok: true });
+
+  let body;
+  try {
+    body = JSON.parse(req.body.toString('utf8'));
+  } catch {
+    return undefined;
+  }
+  if (![13, 14].includes(Number(body.type))) return undefined;
+  try {
+    await logEvent('tiktok_shop', body.tts_notification_id, body);
+    const channel = await shopChannel('tiktok', body.shop_id);
+    if (!channel) return logger.warn({ shopId: body.shop_id }, 'TikTok Shop webhook: shop not connected');
+    const conversationId = body.data?.conversation_id;
+    if (conversationId) await require('./marketplace.service').syncConversation(channel, String(conversationId));
+  } catch (err) {
+    logger.error({ err }, 'TikTok Shop webhook failed');
+  }
+  return undefined;
+});
+
+module.exports = { router, respond };

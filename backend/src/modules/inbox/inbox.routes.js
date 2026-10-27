@@ -16,6 +16,9 @@ const runtime = require('../../config/runtime');
 const metaSocial = require('../../integrations/meta-social');
 const metaWebhook = require('../../integrations/meta');
 const line = require('../../integrations/line');
+const shopee = require('../../integrations/shopee');
+const tiktokShop = require('../../integrations/tiktok-shop');
+const env = require('../../config/env');
 const { signState, requireEncryption } = require('../social/accounts.service');
 
 const router = express.Router();
@@ -351,8 +354,9 @@ router.delete('/knowledge/:id', requirePermission('inbox:manage_ai'), validate({
 
 /* ----------------------------------------------------------------- channels */
 
+const appPublicUrl = () => (env.APP_PUBLIC_URL || env.corsOrigins.find((o) => !o.includes('*')) || 'http://localhost:3000').replace(/\/+$/, '');
 const publicApiUrl = (req) => (process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
-const WEBHOOK_PATH = { line: '/webhooks/line', facebook: '/webhooks/meta', instagram: '/webhooks/meta' };
+const WEBHOOK_PATH = { line: '/webhooks/line', facebook: '/webhooks/meta', instagram: '/webhooks/meta', shopee: '/webhooks/shopee', tiktok: '/webhooks/tiktok' };
 
 router.get('/channels', requirePermission('inbox:read'), async (req, res) => {
   const rows = await db.query(
@@ -373,7 +377,7 @@ router.get('/channels', requirePermission('inbox:read'), async (req, res) => {
       openCount: Number(c.open_count),
       hasToken: Boolean(c.has_token) || (c.platform === 'line' && Boolean(runtime.get('LINE_CHANNEL_ACCESS_TOKEN'))),
       webhookUrl: WEBHOOK_PATH[c.platform] ? `${base}${WEBHOOK_PATH[c.platform]}` : null,
-      supported: ['line', 'facebook', 'instagram', 'website'].includes(c.platform),
+      supported: ['line', 'facebook', 'instagram', 'website', 'shopee', 'tiktok'].includes(c.platform),
     })),
     meta: {
       publicApiUrlConfigured: Boolean(process.env.PUBLIC_API_URL),
@@ -382,6 +386,9 @@ router.get('/channels', requirePermission('inbox:read'), async (req, res) => {
       metaWebhook: { configured: metaWebhook.isConfigured(), missing: metaWebhook.missing(), callbackUrl: `${base}${WEBHOOK_PATH.facebook}` },
       // "เชื่อมต่อ LINE OA" uses the keys from the API connections page
       line: { configured: line.isConfigured(), hasToken: Boolean(runtime.get('LINE_CHANNEL_ACCESS_TOKEN')), webhookUrl: `${base}${WEBHOOK_PATH.line}` },
+      // "เชื่อมต่อร้าน": keys from the API connections page; the redirect URL is registered with the platform
+      shopee: { configured: shopee.isConfigured(), missing: shopee.missing(), webhookUrl: `${base}${WEBHOOK_PATH.shopee}`, redirectUrl: `${appPublicUrl()}/api/inbox/marketplace/shopee/callback` },
+      tiktok: { configured: tiktokShop.isConfigured(), missing: tiktokShop.missing(), webhookUrl: `${base}${WEBHOOK_PATH.tiktok}`, redirectUrl: `${appPublicUrl()}/api/inbox/marketplace/tiktok/callback` },
     },
   });
 });
@@ -468,7 +475,10 @@ router.post('/channels', requirePermission('inbox:manage_ai'), validate({ body: 
   res.status(201).json({ data: { id: r.insertId } });
 });
 
-router.patch('/channels/:id', requirePermission('inbox:manage_ai'), validate({ params: idParam, body: channelBody.partial() }), async (req, res) => {
+// Editing also covers Shopee / TikTok shops (connected with "เชื่อมต่อร้าน"): name, AI on/off, active
+const channelPatch = channelBody.partial().extend({ platform: z.enum(['facebook', 'instagram', 'line', 'website', 'shopee', 'tiktok']).optional() });
+
+router.patch('/channels/:id', requirePermission('inbox:manage_ai'), validate({ params: idParam, body: channelPatch }), async (req, res) => {
   const ch = await db.one('SELECT * FROM channels WHERE id = :id AND org_id = :orgId', { id: req.valid.params.id, orgId: req.user.orgId });
   if (!ch) throw notFound('ไม่พบช่องทาง');
   const b = req.valid.body;

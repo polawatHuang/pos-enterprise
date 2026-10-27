@@ -1131,6 +1131,8 @@ export interface InboxChannelsMeta {
   metaLogin?: { configured: boolean; missing: string[] };
   metaWebhook?: { configured: boolean; missing: string[]; callbackUrl: string };
   line?: { configured: boolean; hasToken: boolean; webhookUrl: string };
+  shopee?: { configured: boolean; missing: string[]; webhookUrl: string; redirectUrl: string };
+  tiktok?: { configured: boolean; missing: string[]; webhookUrl: string; redirectUrl: string };
 }
 
 /** POST /inbox/channels/line/connect */
