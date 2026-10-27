@@ -34,8 +34,6 @@ const POLL_MS = 5000;
 
 /** The five chat channels always listed; website / email only once connected. */
 const MAIN_PLATFORMS: Platform[] = ["facebook", "instagram", "line", "shopee", "tiktok"];
-/** Chat APIs not built yet: they need partner access from the marketplace first. */
-const PENDING_PLATFORMS: Platform[] = ["shopee", "tiktok"];
 
 /** Channel filter: the five chat channels (connect / coming soon when missing) plus any other connected one. */
 function ChannelFilter({
@@ -61,19 +59,6 @@ function ChannelFilter({
       </button>
       {shown.map((p) => {
         const c = connected.get(p);
-        if (!c && PENDING_PLATFORMS.includes(p)) {
-          return (
-            <span
-              key={p}
-              title="รอสิทธิ์ partner API จาก Shopee/TikTok"
-              aria-disabled="true"
-              className={cn(chip, "cursor-not-allowed border-dashed border-border text-muted-foreground opacity-60")}
-            >
-              <PlatformBadge platform={p} className="h-4 px-1 text-[9px]" />
-              {PLATFORM[p].label} · เร็ว ๆ นี้
-            </span>
-          );
-        }
         if (!c) {
           return (
             <Link key={p} href="/inbox/settings?tab=channels" className={cn(chip, "border-dashed border-border text-muted-foreground hover:bg-accent")}>
@@ -195,9 +180,9 @@ export function InboxView() {
               <div className="grid place-items-center gap-2 px-6 py-16 text-center text-sm text-muted-foreground">
                 <MessageSquareDashed className="size-8" />
                 ไม่มีแชตในมุมมองนี้
-                {s && !s.platforms?.some((p) => ["facebook", "instagram", "line"].includes(p.platform)) && (
+                {s && !s.platforms?.some((p) => ["facebook", "instagram", "line", "shopee", "tiktok"].includes(p.platform)) && (
                   <Link href="/inbox/settings?tab=channels" className="mt-2 text-primary hover:underline">
-                    เชื่อมต่อ Facebook Page / Instagram / LINE OA เพื่อรับแชตลูกค้า
+                    เชื่อมต่อ Facebook Page / Instagram / LINE OA / Shopee / TikTok Shop เพื่อรับแชตลูกค้า
                   </Link>
                 )}
               </div>

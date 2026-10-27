@@ -51,7 +51,7 @@ async function saveChannelToken(channel, accessToken, extra = {}) {
  * Idempotent on the platform message id, because webhooks may be delivered more than once.
  * @returns {Promise<{conversationId:number, messageId:number, duplicate:boolean, isNew:boolean}>}
  */
-async function ingestInbound({ channel, threadId, customerName, text, externalMessageId = null, attachments = null }) {
+async function ingestInbound({ channel, threadId, customerName, text, externalMessageId = null, attachments = null, threadMeta = null }) {
   return db.tx(async (conn) => {
     if (externalMessageId) {
       const [[dup]] = await conn.query(
@@ -90,9 +90,10 @@ async function ingestInbound({ channel, threadId, customerName, text, externalMe
       `UPDATE conversations
           SET unread_count = unread_count + 1, last_message_at = UTC_TIMESTAMP(), last_customer_message_at = UTC_TIMESTAMP(),
               status = IF(status IN ('resolved','closed'), 'open', status),
-              customer_name = COALESCE(customer_name, :name)
+              customer_name = COALESCE(customer_name, :name),
+              platform_meta = COALESCE(:meta, platform_meta)
         WHERE id = :id`,
-      { id: conv.id, name: customerName ?? null },
+      { id: conv.id, name: customerName ?? null, meta: threadMeta ? JSON.stringify(threadMeta) : null },
     );
     return { conversationId: conv.id, messageId: msg.insertId, duplicate: false, isNew };
   });
@@ -108,6 +109,8 @@ const META_WINDOW_MS = 24 * 3600 * 1000;
  */
 async function deliver(conversation, channel, text, { replyToken } = {}) {
   if (channel.platform === 'website' || channel.platform === 'email') return { delivered: false, via: 'none' };
+  // Shopee / TikTok Shop keep refreshable tokens of their own
+  if (channel.platform === 'shopee' || channel.platform === 'tiktok') return require('./marketplace.service').deliver(conversation, channel, text);
   const token = await channelToken(channel);
   if (!token) throw badRequest(`ช่องทาง ${channel.name} ยังไม่ได้ตั้งค่า access token`);
   if (channel.platform === 'line') {

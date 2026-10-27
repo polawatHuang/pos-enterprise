@@ -27,7 +27,8 @@ export function InboxSettingsView() {
   });
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
-    if (q.get("connected")) toast.success(`เชื่อมต่อ Facebook / Instagram แล้ว ${q.get("count") ?? ""} ช่องทาง`);
+    const label = { meta: "Facebook / Instagram", shopee: "ร้าน Shopee", tiktok: "ร้าน TikTok Shop" }[q.get("connected") ?? ""] ?? q.get("connected");
+    if (q.get("connected")) toast.success(`เชื่อมต่อ ${label} แล้ว ${q.get("count") ?? ""} ช่องทาง`);
     if (q.get("warning")) toast.warning(q.get("warning"), { duration: 15_000 });
     if (q.get("error")) toast.error(q.get("error"), { duration: 15_000 });
     if (q.size) window.history.replaceState(null, "", window.location.pathname);
@@ -307,6 +308,18 @@ function Channels() {
     }
   };
 
+  const [shopBusy, setShopBusy] = useState<"shopee" | "tiktok" | null>(null);
+  const connectShop = async (platform: "shopee" | "tiktok") => {
+    setShopBusy(platform);
+    try {
+      const { url } = await api.get<{ url: string }>(`/inbox/marketplace/${platform}/start`);
+      window.location.href = url;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "เริ่มเชื่อมต่อไม่สำเร็จ");
+      setShopBusy(null);
+    }
+  };
+
   const copy = async (url: string) => {
     await navigator.clipboard.writeText(url);
     setCopied(url);
@@ -327,6 +340,12 @@ function Channels() {
             <Button variant="outline" onClick={() => void connectLine()} disabled={lineBusy || meta?.line?.configured === false}>
               {lineBusy ? <Loader2 className="animate-spin" /> : <PlatformBadge platform="line" />} เชื่อมต่อ LINE OA
             </Button>
+            <Button variant="outline" onClick={() => void connectShop("shopee")} disabled={!!shopBusy || meta?.shopee?.configured === false}>
+              {shopBusy === "shopee" ? <Loader2 className="animate-spin" /> : <PlatformBadge platform="shopee" />} เชื่อมต่อร้าน Shopee
+            </Button>
+            <Button variant="outline" onClick={() => void connectShop("tiktok")} disabled={!!shopBusy || meta?.tiktok?.configured === false}>
+              {shopBusy === "tiktok" ? <Loader2 className="animate-spin" /> : <PlatformBadge platform="tiktok" />} เชื่อมต่อร้าน TikTok Shop
+            </Button>
             <Button variant="outline" onClick={() => setEditing("new")}>
               <Plus /> เพิ่มเอง (กรอก token)
             </Button>
@@ -335,12 +354,13 @@ function Channels() {
       </div>
       {meta && <LineSetup meta={meta} result={lineResult} />}
       {meta && <MetaSetup meta={meta} />}
+      {meta && <MarketplaceSetup meta={meta} />}
       {list.isPending ? (
         <Skeleton className="h-48" />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {list.data?.map((c) => (
-            <Card key={c.id} className="p-4">
+            <Card key={c.id} className="min-w-0 p-4">
               <div className="flex items-start gap-3">
                 <PlatformBadge platform={c.platform} className="mt-1 h-5 px-1.5 text-[10px]" />
                 <div className="min-w-0 flex-1">
@@ -449,6 +469,56 @@ function LineSetup({ meta, result }: { meta: InboxChannelsMeta; result: LineConn
         <li>ลองทักแชต OA จากมือถือ แชตจะขึ้นในหน้า &quot;แชตลูกค้า&quot;</li>
       </ol>
     </Card>
+  );
+}
+
+/** Shopee / TikTok Shop: what each partner app needs before shop chats can arrive. */
+function MarketplaceSetup({ meta }: { meta: InboxChannelsMeta }) {
+  const { shopee, tiktok } = meta;
+  if (!shopee || !tiktok) return null;
+  const code = (v: string) => <code className="break-all rounded bg-muted px-1">{v}</code>;
+  const missing = (m: { configured: boolean; missing: string[] }) =>
+    m.configured ? (
+      <span className="text-success">ตั้ง key แล้ว ✓</span>
+    ) : (
+      <>
+        ตั้ง <b className="text-warning">{m.missing.join(", ")}</b> ที่หน้า{" "}
+        <a href="/settings/integrations" className="text-primary hover:underline">
+          การเชื่อมต่อ API
+        </a>
+      </>
+    );
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <Card className={cn("p-4 text-sm", !shopee.configured && "border-warning/50")}>
+        <p className="flex items-center gap-2 font-medium">
+          <PlatformBadge platform="shopee" /> Shopee: ตั้งค่าใน Shopee Open Platform ครั้งเดียว
+        </p>
+        <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
+          <li>{missing(shopee)} (SHOPEE_REDIRECT_URL = {code(shopee.redirectUrl)})</li>
+          <li>แอปต้องได้สิทธิ์ SellerChat และตั้ง Redirect URL ของแอปเป็นโดเมนเดียวกัน</li>
+          <li>
+            Push Mechanism → Live Call Back URL {code(shopee.webhookUrl)} และเปิด push <b>Webchat</b>
+          </li>
+          <li>กด &quot;เชื่อมต่อร้าน Shopee&quot; แล้วล็อกอินด้วยบัญชีผู้ขาย — ถ้า push ยังไม่ทำงาน ระบบดึงแชตที่ยังไม่อ่านทุก 2 นาทีแทน</li>
+        </ol>
+      </Card>
+      <Card className={cn("p-4 text-sm", !tiktok.configured && "border-warning/50")}>
+        <p className="flex items-center gap-2 font-medium">
+          <PlatformBadge platform="tiktok" /> TikTok Shop: ตั้งค่าใน Partner Center ครั้งเดียว
+        </p>
+        <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
+          <li>{missing(tiktok)}</li>
+          <li>
+            แอปต้องได้ scope <b>Customer Service</b> (seller.customer_service) และตั้ง Redirect URL เป็น {code(tiktok.redirectUrl)}
+          </li>
+          <li>
+            Webhook URL {code(tiktok.webhookUrl)} แล้ว subscribe <b>New conversation</b> และ <b>New message</b>
+          </li>
+          <li>กด &quot;เชื่อมต่อร้าน TikTok Shop&quot; แล้วอนุญาตด้วยบัญชีผู้ขาย — ทุกร้านที่อนุญาตจะเป็นช่องทางแยกกัน</li>
+        </ol>
+      </Card>
+    </div>
   );
 }
 

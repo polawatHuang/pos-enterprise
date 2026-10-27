@@ -115,6 +115,8 @@ function createApp() {
   app.use('/api/pos', require('./modules/pos/pos.routes').router);
   app.use('/api/customers', require('./modules/customers/customers.routes').router);
   app.use('/api/accounting', require('./modules/accounting').router);
+  // before inbox.routes: its OAuth callback is a browser redirect without a session
+  app.use('/api/inbox/marketplace', require('./modules/inbox/marketplace.routes').router);
   app.use('/api/inbox', require('./modules/inbox/inbox.routes').router);
   app.use('/api/inbox', require('./modules/inbox/aftersales.routes').router);
   app.use('/api/scraping', require('./modules/scraping/scraping.routes').router);
