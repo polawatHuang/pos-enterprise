@@ -113,8 +113,8 @@ const LENGTHS = [
 const EPISODE_PRESETS = [1, 4, 8, 12, 16, 20, 24, 30];
 const MAX_EPISODES = 30;
 
-/** Every shot is a moving MiniMax H3 clip; still-image slides are not offered any more. */
-const VISUAL_MODES = [{ id: 'clips', label: 'วิดีโอเคลื่อนไหวทุกช็อต', hint: 'ตัวละครขยับ พูด และแสดงอารมณ์ทุกช็อตด้วย MiniMax H3 ยาวเท่าบทพูด เหมือนละครจริง', clipShare: 1 }];
+/** Every shot is a moving MiniMax AI clip (Hailuo 2.3 Fast by default, or H3); still-image slides are not offered any more. */
+const VISUAL_MODES = [{ id: 'clips', label: 'วิดีโอเคลื่อนไหวทุกช็อต', hint: 'ตัวละครขยับ พูด และแสดงอารมณ์ทุกช็อตด้วยวิดีโอ AI ของ MiniMax ยาวเท่าบทพูด เหมือนละครจริง', clipShare: 1 }];
 
 const genreOf = (id) => GENRES.find((g) => g.id === id) ?? GENRES.find((g) => g.id === 'custom');
 const styleOf = (id) => STYLES.find((s) => s.id === id) ?? STYLES[0];

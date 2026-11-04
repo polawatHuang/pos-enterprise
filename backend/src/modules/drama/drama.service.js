@@ -36,8 +36,8 @@ const MAX_CLIP_POLLS = 40;
 const MAX_RENDER_POLLS = 45;
 /** H3 attempts per shot (image + clip) before the run stops and asks the user. */
 const MAX_ATTEMPTS = 3;
-/** A shot speaks at most this long, so its clip fits H3's 15 seconds. */
-const MAX_SHOT_SEC = 12;
+/** A shot speaks at most this long, so it fits one AI clip (Hailuo makes 6 or 10 s, H3 up to 15 s). */
+const MAX_SHOT_SEC = 9;
 
 const parse = (v, fallback = null) => {
   if (v == null) return fallback;
@@ -656,20 +656,19 @@ const safeMotionPrompt = (p, s) =>
 
 async function clipStart(p, unit) {
   const s = p.shots.find((x) => x.id === unit.id);
-  await detail(p.id, `${p.episodes_total > 1 ? `ตอนที่ ${s.episode_no}: ` : ''}ส่งช็อต ${s.seq} ให้ MiniMax H3 สร้างคลิปวิดีโอ`);
+  await detail(p.id, `${p.episodes_total > 1 ? `ตอนที่ ${s.episode_no}: ` : ''}ส่งช็อต ${s.seq} ให้ MiniMax สร้างคลิปวิดีโอ`);
   await itemTry(
     async () => {
-      const seconds = voicedSeconds(s);
-      // A tie-in shot is made from references (the shot + the real product photo) so the product looks right;
-      // H3 does not take a first frame and references together
-      const productRef = s.is_product && p.product_image_key ? dataUrl(p.product_image_key) : null;
+      // A tie-in shot is made from references (the shot + the real product photo) when the clip model takes them
+      // (H3, which does not take a first frame and references together); otherwise from the shot, which shows the product
+      const productRef = s.is_product && p.product_image_key && minimaxMedia.clipTakesReferences() ? dataUrl(p.product_image_key) : null;
       const motion = gentle(s) ? safeMotionPrompt(p, s) : motionPrompt(p, s);
-      const { taskId } = await minimaxMedia.createVideoV2({
+      const { taskId, seconds } = await minimaxMedia.startClip({
         prompt: productRef
           ? `${motion}. The character from reference image 1 presents the exact product from reference image 2 (same shape, colors and label), holding it clearly toward the camera`
           : motion,
         ...(productRef ? { references: [dataUrl(s.image_key), productRef] } : { firstFrame: dataUrl(s.image_key) }),
-        duration: seconds,
+        duration: voicedSeconds(s),
         ratio: '9:16',
       });
       await db.query("UPDATE drama_shots SET clip_task_id = :taskId, clip_status = 'processing', clip_polls = 0, clip_sec = :seconds WHERE id = :id", {
@@ -687,7 +686,7 @@ async function clipPoll(p, unit) {
   for (const s of pending) {
     await itemTry(
       async () => {
-        const q = await minimaxMedia.queryVideoV2(s.clip_task_id);
+        const q = await minimaxMedia.pollClip(s.clip_task_id);
         if (q.status === 'ready') {
           const key = await download(q.url, 'video/mp4');
           await db.query("UPDATE drama_shots SET clip_key = :key, clip_status = 'done', error = NULL WHERE id = :id", { id: s.id, key });
@@ -700,7 +699,7 @@ async function clipPoll(p, unit) {
   }
   const left = (await db.query("SELECT COUNT(*) AS n FROM drama_shots WHERE drama_project_id = :id AND episode_no = :ep AND clip_status = 'processing'", { id: p.id, ep: unit.ep }))[0].n;
   if (Number(left)) {
-    await detail(p.id, `MiniMax H3 กำลังสร้างคลิป เหลือ ${left} ช็อต`);
+    await detail(p.id, `MiniMax กำลังสร้างคลิป เหลือ ${left} ช็อต`);
     return CLIP_POLL_MS;
   }
   return 0;

@@ -279,8 +279,8 @@ const clipsStart = step(async ({ projectId }) => {
     }
     const imageUrl = fromImages ? imageDataUrl(picture) : scene.showProduct ? p.product_image : null;
     if (fromImages && !imageUrl) continue;
-    // Every AI video clip is made by MiniMax H3 (video generation v2), as in ละคร AI
-    const { taskId } = await minimaxMedia.createVideoV2({
+    // AI clips use the configured clip model (Hailuo 2.3 Fast by default, or H3), as in ละคร AI
+    const { taskId } = await minimaxMedia.startClip({
       prompt: fromImages
         ? `${scene.visual || scene.caption}. Animate this exact scene with natural, subtle motion; keep the same person, product and framing. No text.`
         : `${scene.visual}. Vertical 9:16 framing, smartphone ad style, no text.`,
@@ -290,7 +290,7 @@ const clipsStart = step(async ({ projectId }) => {
     });
     await db.query(
       `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status, meta)
-       VALUES (:id, 'broll', :i, 'minimax_h3', :taskId, 'processing', :meta)`,
+       VALUES (:id, 'broll', :i, 'minimax_clip', :taskId, 'processing', :meta)`,
       { id: p.id, i, taskId, meta: JSON.stringify(meta) },
     );
     started += 1;
@@ -344,10 +344,11 @@ const clipsPoll = step(async ({ projectId, polls = 1 }) => {
       continue;
     }
     // 'minimax' = a clip started on the older Hailuo v1 API before the switch to H3
-    const h3 = a.provider === 'minimax_h3';
-    const q = h3 ? await minimaxMedia.queryVideoV2(a.external_id) : await minimaxMedia.queryVideo(a.external_id);
+    // 'minimax_clip' / 'minimax_h3' = startClip tasks (tagged ids, or H3 ids before tags); 'minimax' = older Hailuo v1 tasks
+    const tagged = a.provider === 'minimax_clip' || a.provider === 'minimax_h3';
+    const q = tagged ? await minimaxMedia.pollClip(a.external_id) : await minimaxMedia.queryVideo(a.external_id);
     if (q.status === 'ready') {
-      const src = h3 ? q.url : await minimaxMedia.fileUrl(q.fileId);
+      const src = tagged ? q.url : await minimaxMedia.fileUrl(q.fileId);
       const url = (await persist(src, keyFor(p, `clip-${a.scene_index}.mp4`), 'video/mp4')).url;
       await db.query("UPDATE video_assets SET status = 'ready', external_url = :url WHERE id = :id", { id: a.id, url });
     } else if (q.status === 'failed' || polls >= MAX_CLIP_POLLS) {
