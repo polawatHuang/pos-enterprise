@@ -102,19 +102,19 @@ const STYLES = [
   { id: 'papercut', label: 'ภาพกระดาษซ้อน', hint: 'กระดาษตัดหลายชั้น มีขอบและเงา', prompt: 'layered paper cut art, papercraft diorama, soft shadows between layers' },
 ];
 
-/** Lengths offered (short vertical videos) → number of shots the script asks for. */
+/** Length of one episode (short vertical videos) → number of shots the script asks for. */
 const LENGTHS = [
   { sec: 60, label: '1 นาที', shots: 10 },
   { sec: 120, label: '2 นาที', shots: 18 },
   { sec: 180, label: '3 นาที', shots: 26 },
 ];
 
-/** Visual modes: how shots become moving pictures. */
-const VISUAL_MODES = [
-  { id: 'clips', label: 'วิดีโอเคลื่อนไหวทุกช็อต (แนะนำ)', hint: 'ตัวละครขยับ พูด และแสดงอารมณ์ทุกช็อตด้วย MiniMax H3 ยาวเท่าบทพูด เหมือนละครจริง', clipShare: 1 },
-  { id: 'mixed', label: 'ผสม: ช็อตสำคัญเป็นวิดีโอ', hint: 'ช็อตไคลแมกซ์เป็นวิดีโอ H3 (~30%) ที่เหลือภาพนิ่งขยับกล้อง ประหยัดกว่า', clipShare: 0.3 },
-  { id: 'stills', label: 'ภาพนิ่งขยับกล้อง', hint: 'สไลด์ภาพ AI ซูม/แพน เร็วและถูกที่สุด (ไม่ใช่วิดีโอเคลื่อนไหว)', clipShare: 0 },
-];
+/** Series sizes offered in step 01 (any number 1–MAX_EPISODES can be typed). */
+const EPISODE_PRESETS = [1, 4, 8, 12, 16, 20, 24, 30];
+const MAX_EPISODES = 30;
+
+/** Every shot is a moving MiniMax H3 clip; still-image slides are not offered any more. */
+const VISUAL_MODES = [{ id: 'clips', label: 'วิดีโอเคลื่อนไหวทุกช็อต', hint: 'ตัวละครขยับ พูด และแสดงอารมณ์ทุกช็อตด้วย MiniMax H3 ยาวเท่าบทพูด เหมือนละครจริง', clipShare: 1 }];
 
 const genreOf = (id) => GENRES.find((g) => g.id === id) ?? GENRES.find((g) => g.id === 'custom');
 const styleOf = (id) => STYLES.find((s) => s.id === id) ?? STYLES[0];
@@ -123,19 +123,31 @@ const lengthOf = (sec) => LENGTHS.find((l) => l.sec === Number(sec)) ?? LENGTHS[
 /** Image prompt for the style gallery: the genre's sample scene in that style, vertical. */
 const previewPrompt = (genreId, styleId) => `${genreOf(genreId).sample}. ${styleOf(styleId).prompt}. Vertical composition. No text, no letters, no watermark.`;
 
-/** Work an approach needs, shown before the user starts (counts, not prices: provider prices change). */
-function estimate({ lengthSec, visualMode, shots = null, characters = 4 }) {
-  const n = shots ?? lengthOf(lengthSec).shots;
-  const share = (VISUAL_MODES.find((m) => m.id === visualMode) ?? VISUAL_MODES[0]).clipShare;
-  const clips = Math.round(n * share);
-  return {
+/** Work a series needs, shown before the user starts (counts, not prices: provider prices change). */
+function estimate({ lengthSec, episodes = 1, shots = null, characters = 4 }) {
+  const len = lengthOf(lengthSec);
+  const n = shots ?? len.shots;
+  const perEpisode = {
     shots: n,
-    images: n + characters + 1,
-    clips,
-    clipSeconds: clips * 6,
+    images: n,
+    clips: n,
+    clipSeconds: len.sec,
     voiceLines: Math.round(n * 1.6),
-    minutes: Math.max(3, Math.round(n * 0.4 + clips * 1.5)),
+    minutes: Math.max(5, Math.round(n * 2)),
+  };
+  const eps = Math.max(1, Number(episodes) || 1);
+  return {
+    episodes: eps,
+    perEpisode,
+    // series-wide: characters and the cover are made once
+    images: perEpisode.images * eps + characters + 1,
+    clips: perEpisode.clips * eps,
+    clipSeconds: perEpisode.clipSeconds * eps,
+    // the fields the first version showed (one episode)
+    shots: n,
+    voiceLines: perEpisode.voiceLines,
+    minutes: perEpisode.minutes,
   };
 }
 
-module.exports = { GENRES, STYLES, LENGTHS, VISUAL_MODES, genreOf, styleOf, lengthOf, previewPrompt, estimate };
+module.exports = { GENRES, STYLES, LENGTHS, EPISODE_PRESETS, MAX_EPISODES, VISUAL_MODES, genreOf, styleOf, lengthOf, previewPrompt, estimate };

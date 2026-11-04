@@ -48,6 +48,15 @@ const adapter = defineAdapter(
       const json = await res.json().catch(() => null);
       const code = json?.base_resp?.status_code;
       if (!res.ok || (code !== undefined && code !== 0)) {
+        // 402 / 1008: the account has no balance (or its plan does not cover this API) — retrying cannot help
+        if (res.status === 402 || code === 1008) {
+          throw new AppError(
+            402,
+            'MINIMAX_PAYMENT_REQUIRED',
+            'MiniMax แจ้งว่ายอดเงินไม่พอ (HTTP 402) — งานภาพ/วิดีโอ/เสียงผ่าน API คิดเงินจากยอดเงินคงเหลือ (Balance) ของบัญชี ไม่รวมในแพ็กเกจแชต/โค้ด เติมเงินที่ platform.minimax.io → Billing แล้วกด "ทำออโต้" ต่อ งานที่ทำไว้ไม่หาย',
+            { status: res.status, code },
+          );
+        }
         const msg = json?.base_resp?.status_msg || `HTTP ${res.status}`;
         throw new AppError(502, 'MINIMAX_MEDIA_ERROR', `MiniMax: ${msg}`.slice(0, 300), { status: res.status, code });
       }
