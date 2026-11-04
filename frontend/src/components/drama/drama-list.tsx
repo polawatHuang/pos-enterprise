@@ -29,7 +29,7 @@ export function DramaListView() {
   const create = async () => {
     setCreating(true);
     try {
-      const p = await api.post<DramaProject>("/drama", { genre: "ghost", style: "realistic", lengthSec: 60, visualMode: "stills", music: true });
+      const p = await api.post<DramaProject>("/drama", { genre: "ghost", style: "realistic", lengthSec: 60, visualMode: "clips", music: true });
       router.push(`/drama/${p.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "สร้างโปรเจกต์ไม่สำเร็จ");

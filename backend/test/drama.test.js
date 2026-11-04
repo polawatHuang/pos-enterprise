@@ -170,12 +170,18 @@ describe('ละคร AI', () => {
     assert.match(h3[0].body.content[1].image_url.url, /^data:image\//);
     // narrator and characters speak with their own voices
     const tts = calls.filter((c) => c.path === '/v1/t2a_v2').map((c) => [c.body.text, c.body.voice_setting.voice_id]);
+    // clip shots are voiced first (each clip is made as long as its lines), the still shot at export
     assert.deepEqual(tts, [
-      ['คืนแรกในบ้านริมคลอง', 'narrator_v'],
       ['หนูมาแล้วหรือลูก', 'thai_old_lady'],
       ['มะลิรู้แล้วว่ายายรอเธอมาตลอด', 'narrator_v'],
       ['ยายคะ', 'thai_female_1'],
+      ['คืนแรกในบ้านริมคลอง', 'narrator_v'],
     ]);
+    assert.deepEqual(
+      h3.map((c) => c.body.duration),
+      [4, 5],
+    );
+    assert.match(h3[0].body.content[0].text, /speaks with natural lip movement/);
     // the failed shot has no picture, so the render uses the other two
     const edit = calls.find((c) => c.path === 'shotstack.render').body;
     const visuals = edit.timeline.tracks.at(-1).clips;
@@ -211,6 +217,28 @@ describe('ละคร AI', () => {
     assert.equal(r.status, 200);
     assert.equal(r.body.data.shots[2].audioStatus, 'pending');
     assert.equal(r.body.data.shots[1].audioStatus, 'done');
+  });
+
+  test('upgrade to video clips: every still becomes an H3 clip, then the video is rendered again', async () => {
+    const d0 = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    const r = await manager.put(`/api/drama/${projectId}/settings`, {
+      genre: d0.genre,
+      style: d0.style,
+      lengthSec: d0.lengthSec,
+      visualMode: 'clips',
+      narratorVoiceId: d0.narratorVoiceId,
+      music: d0.music,
+    });
+    assert.equal(r.status, 200);
+    assert.ok(r.body.data.shots.every((s) => s.kind === 'clip'));
+    assert.equal(r.body.data.outputUrl, null, 'the old slideshow is replaced');
+    calls = [];
+    await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
+    await drain();
+    const d = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    assert.equal(calls.filter((c) => c.path === '/v2/video_generation').length, 1, 'only the former still shot gets a new clip');
+    assert.ok(d.shots.every((s) => s.clipUrl));
+    assert.ok(d.outputUrl);
   });
 
   test('style previews: one image per style for the genre, cached', async () => {

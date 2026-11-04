@@ -116,6 +116,9 @@ function nextUnit(p, target) {
     if (step === 'storyboard') {
       const img = p.shots.find((s) => !finished(s.image_status));
       if (img) return { step, kind: 'image', id: img.id };
+      // a clip is made as long as its shot's voice lines, so those are voiced first
+      const unvoiced = p.shots.find((s) => s.kind === 'clip' && s.clip_status === 'pending' && !finished(s.audio_status));
+      if (unvoiced) return { step, kind: 'voice', id: unvoiced.id };
       const start = p.shots.find((s) => s.kind === 'clip' && s.clip_status === 'pending');
       if (start) return { step, kind: 'clip_start', id: start.id };
       return { step, kind: 'clip_poll' };
@@ -393,19 +396,43 @@ const shotSeconds = (s) => {
   return Math.max(4, Math.min(10, Math.ceil(chars / 12 + 1)));
 };
 
+/** Seconds the shot lasts in the final video: its voice lines plus the timeline's gaps (see timeline.js). */
+function voicedSeconds(s) {
+  if (s.audio_status !== 'done' || !s.audio.length) return shotSeconds(s);
+  const ms = s.audio.reduce((sum, a) => sum + (a.ms ?? 0), 0);
+  return Math.max(4, Math.min(15, Math.ceil(ms / 1000 + 0.25 * s.audio.length + 0.5)));
+}
+
+/** Motion prompt: the shot as live action — characters act, speak and move; the first frame fixes faces and costumes. */
+function motionPrompt(p, s) {
+  const names = s.characters.map((k) => p.characters.find((c) => c.char_key === k)?.name).filter(Boolean);
+  const speaking = s.dialogue.length
+    ? ` ${s.dialogue.map((d) => p.characters.find((c) => c.char_key === d.character)?.look_prompt?.split(',')[0] || 'the character').join(' and ')} speaks with natural lip movement and emotion.`
+    : '';
+  return styled(
+    p,
+    `Cinematic drama scene, continuous live action: ${s.visual_prompt}.${speaking} Characters${names.length ? '' : ' (if any)'} act with expressive faces, natural body language and believable movement; background life moves too. Camera: ${s.camera || 'slow cinematic push in'}. Keep the exact faces, costumes and setting of the first frame. Smooth motion, no cuts, no subtitles`,
+  );
+}
+
 async function clipStart(p, unit) {
   const s = p.shots.find((x) => x.id === unit.id);
-  await detail(p.id, `ส่งช็อต ${s.seq} ให้ MiniMax H3 สร้างคลิป`);
+  await detail(p.id, `ส่งช็อต ${s.seq} ให้ MiniMax H3 สร้างคลิปวิดีโอ`);
   await itemTry(
     async () => {
       if (s.image_status !== 'done') throw new Error('ไม่มีภาพของช็อตนี้');
+      const seconds = voicedSeconds(s);
       const { taskId } = await minimaxMedia.createVideoV2({
-        prompt: styled(p, `${s.visual_prompt}. Camera: ${s.camera || 'slow cinematic push in'}. Natural subtle motion`),
+        prompt: motionPrompt(p, s),
         firstFrame: dataUrl(s.image_key),
-        duration: shotSeconds(s),
+        duration: seconds,
         ratio: '9:16',
       });
-      await db.query("UPDATE drama_shots SET clip_task_id = :taskId, clip_status = 'processing', clip_polls = 0 WHERE id = :id", { id: s.id, taskId });
+      await db.query("UPDATE drama_shots SET clip_task_id = :taskId, clip_status = 'processing', clip_polls = 0, clip_sec = :seconds WHERE id = :id", {
+        id: s.id,
+        taskId,
+        seconds,
+      });
     },
     (e) => db.query("UPDATE drama_shots SET clip_status = 'failed', error = :e WHERE id = :id", { id: s.id, e }),
   );
@@ -473,7 +500,7 @@ async function render(p) {
     shots: usable.map((s) => ({
       image: fileUrl(s.image_key),
       clip: s.clip_key ? fileUrl(s.clip_key) : null,
-      clipSec: s.clip_key ? shotSeconds(s) : null,
+      clipSec: s.clip_key ? (s.clip_sec ?? shotSeconds(s)) : null,
       lines: (s.audio_status === 'done' ? s.audio : []).map((a) => ({ ...a, url: fileUrl(a.key) })),
     })),
     musicUrl: p.music ? process.env.DRAMA_MUSIC_URL || process.env.VIDEO_MUSIC_URL || null : null,

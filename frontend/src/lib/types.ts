@@ -2491,7 +2491,7 @@ export interface DramaCatalog {
   lengths: { sec: number; label: string; shots: number }[];
   visualModes: { id: DramaVisualMode; label: string; hint: string; clipShare: number }[];
   /** genre → style → sample picture */
-  previews: Record<string, Record<string, { status: string; url: string | null }>>;
+  previews: Record<string, Record<string, { status: string; url: string | null; error?: string | null }>>;
   configured: { minimax: boolean; shotstack: boolean; publicApiUrl: boolean; defaultVoiceId: string | null };
 }
 

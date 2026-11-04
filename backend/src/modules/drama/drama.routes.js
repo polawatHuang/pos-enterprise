@@ -104,9 +104,9 @@ function present(p) {
 /* ----------------------------------------------------------------- catalog */
 
 router.get('/catalog', async (req, res) => {
-  const rows = await db.query('SELECT genre, style, image_key, status FROM drama_style_previews WHERE org_id = :orgId', { orgId: req.user.orgId });
+  const rows = await db.query('SELECT genre, style, image_key, status, error FROM drama_style_previews WHERE org_id = :orgId', { orgId: req.user.orgId });
   const previews = {};
-  for (const r of rows) (previews[r.genre] ??= {})[r.style] = { status: r.status, url: drama.fileUrl(r.image_key) };
+  for (const r of rows) (previews[r.genre] ??= {})[r.style] = { status: r.status, url: drama.fileUrl(r.image_key), error: r.error ?? null };
   res.json({
     data: {
       genres: catalog.GENRES.map(({ id, label, hint, substyles }) => ({ id, label, hint, substyles })),
@@ -217,6 +217,10 @@ router.put('/:id/settings', validate({ params: idParam, body: settingsBody }), a
     );
   }
   if (b.narratorVoiceId !== p.narrator_voice_id) await db.query("UPDATE drama_shots SET audio_status = 'pending' WHERE drama_project_id = :id", { id: p.id });
+  // the finished video no longer matches: render again after the new clips / voices
+  if (b.visualMode !== p.visual_mode || b.narratorVoiceId !== p.narrator_voice_id) {
+    await db.query('UPDATE drama_projects SET output_key = NULL, render_id = NULL WHERE id = :id', { id: p.id });
+  }
   res.json({ data: present(await drama.load(p.id)) });
 });
 

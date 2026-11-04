@@ -1911,6 +1911,7 @@ CREATE TABLE drama_shots (
   clip_key         VARCHAR(80)  NULL,
   clip_status      VARCHAR(20)  NOT NULL DEFAULT 'pending',
   clip_polls       INT NOT NULL DEFAULT 0,
+  clip_sec         INT NULL COMMENT 'length the H3 clip was made for (s)',
   audio            LONGTEXT NULL COMMENT 'JSON [{speaker, text, url, ms}]',
   audio_status     VARCHAR(20)  NOT NULL DEFAULT 'pending',
   error            VARCHAR(500) NULL,
@@ -1931,6 +1932,6 @@ CREATE TABLE drama_style_previews (
   CONSTRAINT fk_drama_preview_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests'), ('031_marketplace_chat'), ('032_drama');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests'), ('031_marketplace_chat'), ('032_drama'), ('033_drama_clip_length');
 
 SET FOREIGN_KEY_CHECKS = 1;
