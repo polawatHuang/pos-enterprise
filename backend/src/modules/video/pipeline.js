@@ -279,16 +279,18 @@ const clipsStart = step(async ({ projectId }) => {
     }
     const imageUrl = fromImages ? imageDataUrl(picture) : scene.showProduct ? p.product_image : null;
     if (fromImages && !imageUrl) continue;
-    const { taskId } = await minimaxMedia.createVideo({
+    // Every AI video clip is made by MiniMax H3 (video generation v2), as in ละคร AI
+    const { taskId } = await minimaxMedia.createVideoV2({
       prompt: fromImages
         ? `${scene.visual || scene.caption}. Animate this exact scene with natural, subtle motion; keep the same person, product and framing. No text.`
         : `${scene.visual}. Vertical 9:16 framing, smartphone ad style, no text.`,
-      imageUrl,
+      firstFrame: imageUrl,
       duration: clipSeconds(voiceMs.get(i)),
+      ratio: '9:16',
     });
     await db.query(
       `INSERT INTO video_assets (video_project_id, kind, scene_index, provider, external_id, status, meta)
-       VALUES (:id, 'broll', :i, 'minimax', :taskId, 'processing', :meta)`,
+       VALUES (:id, 'broll', :i, 'minimax_h3', :taskId, 'processing', :meta)`,
       { id: p.id, i, taskId, meta: JSON.stringify(meta) },
     );
     started += 1;
@@ -341,15 +343,18 @@ const clipsPoll = step(async ({ projectId, polls = 1 }) => {
       await pollShotstackClip(p, a, polls);
       continue;
     }
-    const q = await minimaxMedia.queryVideo(a.external_id);
+    // 'minimax' = a clip started on the older Hailuo v1 API before the switch to H3
+    const h3 = a.provider === 'minimax_h3';
+    const q = h3 ? await minimaxMedia.queryVideoV2(a.external_id) : await minimaxMedia.queryVideo(a.external_id);
     if (q.status === 'ready') {
-      const url = (await persist(await minimaxMedia.fileUrl(q.fileId), keyFor(p, `clip-${a.scene_index}.mp4`), 'video/mp4')).url;
+      const src = h3 ? q.url : await minimaxMedia.fileUrl(q.fileId);
+      const url = (await persist(src, keyFor(p, `clip-${a.scene_index}.mp4`), 'video/mp4')).url;
       await db.query("UPDATE video_assets SET status = 'ready', external_url = :url WHERE id = :id", { id: a.id, url });
     } else if (q.status === 'failed' || polls >= MAX_CLIP_POLLS) {
       // The scene falls back to the product image instead of failing the whole video
       await db.query("UPDATE video_assets SET status = 'failed', error = :e WHERE id = :id", {
         id: a.id,
-        e: q.status === 'failed' ? 'MiniMax สร้างคลิปไม่สำเร็จ' : 'รอนานเกินไป',
+        e: q.status === 'failed' ? `MiniMax สร้างคลิปไม่สำเร็จ${q.error ? `: ${q.error}` : ''}` : 'รอนานเกินไป',
       });
     }
   }

@@ -16,7 +16,7 @@ const adapter = defineAdapter(
     category: 'video',
     usedBy: ['video', 'covers'],
     phase: 6,
-    purpose: 'เสียงพากย์ (speech) และคลิปวิดีโอ AI (Hailuo) ใช้ key เดียวกับ MiniMax chat',
+    purpose: 'เสียงพากย์ (speech) ภาพ AI และคลิปวิดีโอ MiniMax H3 (ทั้ง AI Video และละคร AI) ใช้ key เดียวกับ MiniMax chat หรือ MINIMAX_MEDIA_API_KEY',
     applyUrl: 'https://platform.minimax.io/',
     env: [
       { name: 'MINIMAX_API_KEY' },
@@ -27,10 +27,11 @@ const adapter = defineAdapter(
       { name: 'MINIMAX_TTS_MODEL', optional: true, default: 'speech-2.6-hd' },
       { name: 'MINIMAX_VOICE_ID', optional: true },
       { name: 'MINIMAX_TTS_LANGUAGE', optional: true, default: 'auto' },
+      // older Hailuo v1 API: only for clips that were already being made before the switch to H3
       { name: 'MINIMAX_VIDEO_MODEL', optional: true, default: 'MiniMax-Hailuo-2.3' },
       { name: 'MINIMAX_IMAGE_MODEL', optional: true, default: 'image-01' },
       { name: 'MINIMAX_GROUP_ID', optional: true },
-      // ละคร AI: video generation v2 (Hailuo 3 / H3)
+      // Every video feature (AI Video, ละคร AI): video generation v2, MiniMax H3. The name stays for settings already saved.
       { name: 'MINIMAX_DRAMA_VIDEO_MODEL', optional: true, default: 'MiniMax-H3' },
       { name: 'MINIMAX_DRAMA_RESOLUTION', optional: true, default: '768P' },
     ],
