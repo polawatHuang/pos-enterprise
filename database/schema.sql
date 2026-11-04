@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS data_requests, trend_product_extras, trend_product_months, trend_categories, leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS drama_style_previews, drama_shots, drama_characters, drama_projects, data_requests, trend_product_extras, trend_product_months, trend_categories, leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -1845,6 +1845,92 @@ CREATE TABLE data_requests (
   CONSTRAINT fk_data_request_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests'), ('031_marketplace_chat');
+CREATE TABLE drama_projects (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id            BIGINT UNSIGNED NOT NULL,
+  title             VARCHAR(255) NOT NULL,
+  genre             VARCHAR(40)  NOT NULL DEFAULT 'drama',
+  substyle          VARCHAR(60)  NULL COMMENT 'genre sub-type, e.g. Thai ghost / Ayutthaya era',
+  style             VARCHAR(40)  NOT NULL DEFAULT 'realistic',
+  length_sec        INT NOT NULL DEFAULT 60,
+  visual_mode       ENUM('stills','mixed','clips') NOT NULL DEFAULT 'stills',
+  premise           TEXT NULL,
+  narrator_voice_id VARCHAR(100) NULL,
+  music             TINYINT(1) NOT NULL DEFAULT 1,
+  logline           TEXT NULL,
+  cover_key         VARCHAR(80) NULL COMMENT 'stored image (video media dir)',
+  run_target        VARCHAR(20) NULL COMMENT 'step to finish, or all = auto; NULL = idle',
+  run_token         VARCHAR(32) NULL COMMENT 'the running chain; a new run or cancel invalidates older jobs',
+  stage_detail      VARCHAR(255) NULL,
+  error             TEXT NULL,
+  render_id         VARCHAR(100) NULL,
+  output_key        VARCHAR(80) NULL,
+  output_url        VARCHAR(1000) NULL,
+  subtitle_srt      MEDIUMTEXT NULL,
+  duration_sec      INT NULL,
+  created_by        BIGINT UNSIGNED NULL,
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_drama_org (org_id, updated_at),
+  CONSTRAINT fk_drama_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE drama_characters (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  drama_project_id BIGINT UNSIGNED NOT NULL,
+  char_key         VARCHAR(40)  NOT NULL,
+  name             VARCHAR(120) NOT NULL,
+  role             VARCHAR(255) NULL,
+  gender           VARCHAR(10)  NULL,
+  age              VARCHAR(10)  NULL,
+  description      TEXT NULL,
+  look_prompt      TEXT NULL COMMENT 'English appearance prompt',
+  voice_id         VARCHAR(100) NULL,
+  portrait_key     VARCHAR(80)  NULL,
+  status           VARCHAR(20)  NOT NULL DEFAULT 'pending',
+  error            VARCHAR(500) NULL,
+  sort_order       INT NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_drama_char (drama_project_id, char_key),
+  CONSTRAINT fk_drama_char_project FOREIGN KEY (drama_project_id) REFERENCES drama_projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE drama_shots (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  drama_project_id BIGINT UNSIGNED NOT NULL,
+  seq              INT NOT NULL,
+  scene_title      VARCHAR(255) NULL,
+  narration        TEXT NULL,
+  dialogue         LONGTEXT NULL COMMENT 'JSON [{character, line}]',
+  visual_prompt    TEXT NULL COMMENT 'English shot description',
+  camera           VARCHAR(255) NULL,
+  characters       VARCHAR(500) NULL COMMENT 'JSON character keys in the shot',
+  kind             ENUM('still','clip') NOT NULL DEFAULT 'still',
+  image_key        VARCHAR(80)  NULL,
+  image_status     VARCHAR(20)  NOT NULL DEFAULT 'pending',
+  clip_task_id     VARCHAR(100) NULL,
+  clip_key         VARCHAR(80)  NULL,
+  clip_status      VARCHAR(20)  NOT NULL DEFAULT 'pending',
+  clip_polls       INT NOT NULL DEFAULT 0,
+  audio            LONGTEXT NULL COMMENT 'JSON [{speaker, text, url, ms}]',
+  audio_status     VARCHAR(20)  NOT NULL DEFAULT 'pending',
+  error            VARCHAR(500) NULL,
+  KEY idx_drama_shot (drama_project_id, seq),
+  CONSTRAINT fk_drama_shot_project FOREIGN KEY (drama_project_id) REFERENCES drama_projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE drama_style_previews (
+  id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  org_id     BIGINT UNSIGNED NOT NULL,
+  genre      VARCHAR(40) NOT NULL,
+  style      VARCHAR(40) NOT NULL,
+  image_key  VARCHAR(80) NULL,
+  status     VARCHAR(20) NOT NULL DEFAULT 'pending',
+  error      VARCHAR(500) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_drama_preview (org_id, genre, style),
+  CONSTRAINT fk_drama_preview_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests'), ('031_marketplace_chat'), ('032_drama');
 
 SET FOREIGN_KEY_CHECKS = 1;

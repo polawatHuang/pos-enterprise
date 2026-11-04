@@ -38,7 +38,7 @@ function saveFile(buffer, mime) {
 
 /** Only plain generated names, so a key can never point outside MEDIA_DIR. */
 function filePath(key) {
-  if (!/^[a-z0-9]+-[0-9a-f]{18}\.(mp4|mov|webm|jpg|png|webp)$/.test(key)) return null;
+  if (!/^[a-z0-9]+-[0-9a-f]{18}\.(mp4|mov|webm|jpg|png|webp|mp3)$/.test(String(key))) return null;
   return path.join(MEDIA_DIR, key);
 }
 
@@ -50,7 +50,7 @@ function removeFile(key) {
 const b64url = (s) => Buffer.from(s).toString('base64url');
 const hmac = (data) => crypto.createHmac('sha256', `media:${env.JWT_ACCESS_SECRET}`).update(data).digest('base64url');
 
-/** Signed token for a public, expiring media URL. kind: 'm' = video_media row, 'c' = cover image. */
+/** Signed token for a public, expiring media URL. kind: 'm' = video_media row, 'c' = cover image, 'd' = stored file key (ละคร AI). */
 function signToken(kind, id, ttlSec = URL_TTL_SEC) {
   const payload = b64url(JSON.stringify({ k: kind, id, exp: Math.floor(Date.now() / 1000) + ttlSec }));
   return `${payload}.${hmac(payload)}`;
@@ -83,7 +83,7 @@ function publicUrl(kind, id, ext) {
 
 /** File extension of a stored file ("jpg", "mp4" …), from its storage key. */
 const extOf = (storageKey) => /\.([a-z0-9]+)$/.exec(String(storageKey))?.[1] ?? null;
-const URL_EXTS = new Set(Object.values(TYPES).map((t) => t.ext));
+const URL_EXTS = new Set([...Object.values(TYPES).map((t) => t.ext), 'mp3']);
 /** Token from a media URL path segment, without the extension publicUrl adds. */
 function tokenFromParam(param) {
   const m = /^(.+)\.([a-z0-9]+)$/.exec(String(param));

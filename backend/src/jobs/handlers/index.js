@@ -74,6 +74,10 @@ handlers['inbox.marketplace_poll'] = async () => {
   return Number(n) ? require('../../modules/inbox/marketplace.service').pollAll() : { shops: 0 };
 };
 
+/** ละคร AI: one unit of a project's run per job, and the style gallery's sample pictures. */
+handlers['drama.run'] = (p) => require('../../modules/drama/drama.service').run(p);
+handlers['drama.preview'] = (p) => require('../../modules/drama/drama.service').previewStep(p);
+
 /** Recurring jobs scheduled by the cron tick (idempotent: one queued instance at a time). */
 const recurring = [
   { type: 'system.cleanup', everyMinutes: 60 * 24 },
