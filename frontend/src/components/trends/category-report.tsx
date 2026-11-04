@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronRight, CloudDownload, Info, LayoutGrid, Loader2, Search, Settings2, Sparkles, Store, TrendingUp, UserRound } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRight, CloudDownload, Coins, Info, LayoutGrid, Loader2, Search, Settings2, Store, TrendingUp, UserRound } from "lucide-react";
 import { api } from "@/lib/api";
 import type { CategoryReport } from "@/lib/types";
 import { cn, formatNumber } from "@/lib/utils";
@@ -13,8 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, NativeSelect, Skeleton, TabBar } from "@/components/ui/primitives";
 import { Dialog } from "@/components/ui/overlays";
 import { PageHeader } from "@/components/layout/page";
-import { AiSearchDialog, useAiSearchLauncher } from "./ai-search";
-import { KalodataSettingsDialog } from "./kalodata-settings";
+import { KalodataSettingsDialog, pullPeriod } from "./kalodata-settings";
 import { baht, CategoryTable, type CategorySort, Growth, periodLabel, SIGNAL } from "./kalo-ui";
 
 type Level = "1" | "2" | "3";
@@ -26,7 +26,6 @@ type Level = "1" | "2" | "3";
  */
 export function CategoryReportView() {
   const { can } = useAuth();
-  const router = useRouter();
   const params = useSearchParams();
   const [period, setPeriod] = useState(params.get("period") ?? "");
   const [level, setLevel] = useState<Level>((params.get("level") as Level | null) ?? "1");
@@ -37,7 +36,8 @@ export function CategoryReportView() {
   const [dir, setDir] = useState<"asc" | "desc">("desc");
   const [growingOnly, setGrowingOnly] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const aiSearch = useAiSearchLauncher();
+  const qc = useQueryClient();
+  const [pulling, setPulling] = useState(false);
 
   const query = {
     period: period || undefined,
@@ -56,6 +56,32 @@ export function CategoryReportView() {
     refetchInterval: (qq) => (qq.state.data?.kalodata.running ? 15_000 : false),
   });
   const d = report.data;
+  /** One click: pull the month with the saved Kalodata settings (category, scope); settings open only when something is missing. */
+  const pullNow = async () => {
+    const k = d?.kalodata;
+    if (!k) return;
+    if (!k.configured) {
+      toast.error("ยังไม่ได้ใส่คีย์ Kalodata — ใส่ที่หน้าการเชื่อมต่อ API");
+      setSettingsOpen(true);
+      return;
+    }
+    if (k.estimateCredits == null) {
+      toast.info("เลือกหมวดที่จะดึงข้อมูลก่อน (ครั้งเดียว ครั้งต่อไปกดดึงได้เลย)");
+      setSettingsOpen(true);
+      return;
+    }
+    const target = pullPeriod(k);
+    setPulling(true);
+    try {
+      await api.post("/scraping/kalodata/run", { period: target });
+      toast.success(`เริ่มดึงข้อมูล ${periodLabel(target)}${k.category ? ` หมวด ${k.category.name}` : " ทั้งตลาด"} แล้ว (~${k.estimateCredits} เครดิต) ใช้เวลาประมาณ 5–10 นาที`);
+      await qc.invalidateQueries({ queryKey: ["trends"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "เริ่มดึงข้อมูลไม่สำเร็จ");
+    } finally {
+      setPulling(false);
+    }
+  };
   const shownPeriod = d?.period ?? null;
   const shownParent = d?.parentId ?? null;
   const scope = d?.summary?.scope ?? null;
@@ -99,8 +125,18 @@ export function CategoryReportView() {
               )}
             </Button>
             {can("scraping:run") && (
-              <Button onClick={() => void aiSearch.start()} disabled={aiSearch.starting}>
-                {aiSearch.starting ? <Loader2 className="animate-spin" /> : <Sparkles />} AI ค้นหาสินค้าขายดี
+              <Button
+                onClick={() => void pullNow()}
+                disabled={pulling || !!d?.kalodata.running}
+                title={d?.kalodata.category ? `ดึงหมวด ${d.kalodata.category.path}` : d?.kalodata.scope === "all" ? "ดึงทั้งตลาด" : undefined}
+              >
+                {pulling || d?.kalodata.running ? <Loader2 className="animate-spin" /> : <CloudDownload />}
+                {d?.kalodata.running ? "กำลังดึงข้อมูล…" : "ดึงข้อมูล Kalodata"}
+                {!d?.kalodata.running && d?.kalodata.estimateCredits != null && (
+                  <span className="ml-0.5 inline-flex items-center gap-0.5 rounded-full bg-white/20 px-1.5 text-xs">
+                    <Coins className="size-3" /> ~{d.kalodata.estimateCredits}
+                  </span>
+                )}
               </Button>
             )}
           </>
@@ -261,21 +297,6 @@ export function CategoryReportView() {
 
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         {settingsOpen && <KalodataSettingsDialog />}
-      </Dialog>
-      <Dialog open={aiSearch.state !== null} onOpenChange={(o) => !o && aiSearch.close()}>
-        {aiSearch.state && (
-          <AiSearchDialog
-            key={`${aiSearch.state.sourceId}-${aiSearch.state.runId}`}
-            sourceId={aiSearch.state.sourceId}
-            runId={aiSearch.state.runId}
-            onRestart={(body) => aiSearch.start(body)}
-            onShowResults={() => {
-              const sid = aiSearch.state!.sourceId;
-              aiSearch.close();
-              router.push(`/trends/products?source=${sid}&status=all`);
-            }}
-          />
-        )}
       </Dialog>
     </div>
   );

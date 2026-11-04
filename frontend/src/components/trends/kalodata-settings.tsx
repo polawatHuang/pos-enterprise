@@ -24,7 +24,7 @@ const STAGE: Record<string, string> = {
 };
 
 /** The month "pull now" asks for: the next one if it has ended, else a re-pull of the latest ended month. */
-const pullPeriod = (s: KaloSettings) => (s.nextPeriod <= s.latestFull ? s.nextPeriod : s.latestFull);
+export const pullPeriod = (s: Pick<KaloSettings, "nextPeriod" | "latestFull">) => (s.nextPeriod <= s.latestFull ? s.nextPeriod : s.latestFull);
 
 /** Switch the monthly Kalodata pull on/off, pick the day, see credits and past pulls, pull now. */
 export function KalodataSettingsDialog() {
