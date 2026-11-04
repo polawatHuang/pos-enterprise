@@ -51,6 +51,7 @@ const SHOTS = [
 let episodesInOutline = 1;
 let failClipShot = null; // every H3 attempt whose prompt contains this text fails
 let noBalance = false; // MiniMax answers 402 Payment Required
+let moderate = null; // { text, times }: H3 tasks whose prompt contains text are refused by moderation, the first `times` times
 
 async function drain(rounds = 60) {
   for (let i = 0; i < rounds; i += 1) {
@@ -91,11 +92,17 @@ before(async () => {
     if (u.pathname === '/v1/t2a_v2') return json({ data: { audio: `https://cdn.test/a-${calls.length}.mp3` }, extra_info: { audio_length: 2000 }, base_resp: { status_code: 0 } });
     if (u.pathname === '/v2/video_generation') {
       if (noBalance) return new Response(JSON.stringify({ base_resp: { status_code: 1008, status_msg: 'insufficient balance' } }), { status: 402 });
+      const refused = moderate && moderate.times > 0 && body.content[0].text.includes(moderate.text);
+      if (refused) {
+        moderate.times -= 1;
+        return json({ task_id: `mod-${calls.length}`, base_resp: { status_code: 0 } });
+      }
       const bad = failClipShot && body.content[0].text.includes(failClipShot);
       return json({ task_id: `${bad ? 'bad' : 'task'}-${calls.length}`, base_resp: { status_code: 0 } });
     }
     if (u.pathname.startsWith('/v2/query/video_generation/')) {
-      if (u.pathname.includes('/bad-')) return json({ task: { status: 'Fail', message: 'moderation' }, base_resp: { status_code: 0 } });
+      if (u.pathname.includes('/mod-')) return json({ task: { status: 'Fail', message: 'content blocked by moderation' }, base_resp: { status_code: 0 } });
+      if (u.pathname.includes('/bad-')) return json({ task: { status: 'Fail', message: 'internal error' }, base_resp: { status_code: 0 } });
       return json({ task: { status: 'Success', content: { url: 'https://cdn.test/clip.mp4' } }, base_resp: { status_code: 0 } });
     }
     if (u.host === 'cdn.test') return new Response(Buffer.from('media-bytes'), { status: 200 });
@@ -265,6 +272,46 @@ describe('ละคร AI', () => {
     const d2 = (await manager.get(`/api/drama/${projectId}`)).body.data;
     assert.equal(d2.error, null, d2.error);
     assert.ok(d2.outputUrl);
+  });
+
+  test('moderation: a refused clip is retried with a plain prompt; refused twice, the picture is redrawn gently first', async () => {
+    const d0 = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    // refused once → the second, plain prompt (without the shot's own words) goes through
+    await manager.post(`/api/drama/${projectId}/redo`, { what: 'clip', itemId: d0.shots[1].id });
+    await manager.post(`/api/drama/${projectId}/cancel`);
+    calls = [];
+    moderate = { text: 'ghostly old woman', times: 1 };
+    await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
+    await drain();
+    let d = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    assert.equal(d.error, null, d.error);
+    let h3 = calls.filter((c) => c.path === '/v2/video_generation').map((c) => c.body.content[0].text);
+    assert.equal(h3.length, 2);
+    assert.match(h3[1], /Family-friendly/);
+    assert.doesNotMatch(h3[1], /ghostly old woman/);
+    assert.equal(calls.filter((c) => c.path === '/v1/image_generation').length, 0, 'the picture is kept');
+    assert.ok(d.shots[1].clipUrl);
+
+    // refused twice → the picture is drawn again gently, then the clip goes through on the third try
+    await manager.post(`/api/drama/${projectId}/redo`, { what: 'clip', itemId: d0.shots[1].id });
+    await manager.post(`/api/drama/${projectId}/cancel`);
+    calls = [];
+    // the style words are in both prompts: the first two tries are refused, the third (after a redraw) passes
+    moderate = { text: 'cinematic film still', times: 2 };
+    try {
+      await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
+      await drain();
+    } finally {
+      moderate = null;
+    }
+    d = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    assert.equal(d.error, null, d.error);
+    h3 = calls.filter((c) => c.path === '/v2/video_generation');
+    assert.equal(h3.length, 3, JSON.stringify(h3.map((c) => c.body.content[0].text.slice(0, 40))));
+    const redraw = calls.filter((c) => c.path === '/v1/image_generation');
+    assert.equal(redraw.length, 1, 'the shot picture was drawn again');
+    assert.match(redraw[0].body.prompt, /family-friendly/);
+    assert.ok(d.shots[1].clipUrl);
   });
 
   test('MiniMax 402 (no balance): the run stops at once with how to fix it; no attempt is used up', async () => {

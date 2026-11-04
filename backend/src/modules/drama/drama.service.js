@@ -553,16 +553,28 @@ async function cover(p) {
   await db.query('UPDATE drama_projects SET cover_key = :key WHERE id = :id', { id: p.id, key: saveFile(img.buffer, img.mime) });
 }
 
-/** A failed image or clip is tried again (up to MAX_ATTEMPTS), then marked failed for the user. */
+/** MiniMax refused the content (its safety filter), as opposed to a passing error. */
+const MODERATION = /moderat|sensitive|blocked|1026|safety|inappropriate/i;
+/** The last attempt on this shot was refused by the content filter: try again more gently. */
+const gentle = (s) => (s.clip_attempts ?? 0) > 0 && MODERATION.test(s.error ?? '');
+
+/**
+ * A failed image or clip is tried again (up to MAX_ATTEMPTS), then marked failed for the user.
+ * A clip refused by the content filter is retried with a plain, neutral prompt; refused again, the
+ * picture itself is drawn again (gently) before the last try, as the first frame may be what trips it.
+ */
 function shotFailure(s, what, e) {
   const attempts = (s.clip_attempts ?? 0) + 1;
   const giveUp = attempts >= MAX_ATTEMPTS;
   const status = giveUp ? 'failed' : 'pending';
-  const sets = what === 'image' ? `image_status = '${status}', clip_status = '${status}'` : `clip_status = '${status}'`;
+  const moderation = MODERATION.test(e);
+  const redraw = what === 'clip' && moderation && !giveUp && attempts >= 2;
+  const sets = what === 'image' || redraw ? `image_status = '${status}', clip_status = '${status}'` : `clip_status = '${status}'`;
+  const why = moderation ? `MiniMax ปฏิเสธเนื้อหา (moderation: ${e})${giveUp ? '' : ' — ลองใหม่ด้วยคำสั่งที่นุ่มลง'}${redraw ? ' และวาดภาพตั้งต้นใหม่' : ''}` : e;
   return db.query(`UPDATE drama_shots SET ${sets}, clip_attempts = :attempts, clip_task_id = NULL, error = :e WHERE id = :id`, {
     id: s.id,
     attempts,
-    e: `${what === 'image' ? 'ภาพ' : 'คลิป'} (ครั้งที่ ${attempts}/${MAX_ATTEMPTS}): ${e}`.slice(0, 500),
+    e: `${what === 'image' ? 'ภาพ' : 'คลิป'} (ครั้งที่ ${attempts}/${MAX_ATTEMPTS}): ${why}`.slice(0, 500),
   });
 }
 
@@ -577,17 +589,24 @@ async function shotImage(p, unit) {
     .filter(Boolean)
     .map((c) => `${c.name}: ${c.look_prompt}`)
     .join('; ');
+  const soft = gentle(s);
+  const product = s.is_product ? `. The character clearly holds and shows the product "${p.product_name || 'product'}" to the camera` : '';
   await itemTry(
     async () => {
       const img = await minimaxMedia.generateImage({
-        prompt: styled(
-          p,
-          `${s.visual_prompt}${looks ? `. Characters — ${looks}` : ''}${s.is_product ? `. The character clearly holds and shows the product "${p.product_name || 'product'}" to the camera` : ''}. Vertical 9:16 frame`,
-        ),
+        prompt: soft
+          ? // refused before: the same moment told plainly, without the genre's dark tone or the characters' long descriptions
+            `${String(s.visual_prompt ?? '').slice(0, 300)}${product}. Calm, family-friendly everyday scene, adults fully clothed, soft natural light, ${catalog.styleOf(p.style).prompt}. Vertical 9:16 frame. No text`
+          : styled(p, `${s.visual_prompt}${looks ? `. Characters — ${looks}` : ''}${product}. Vertical 9:16 frame`),
         aspectRatio: '9:16',
         subjectImage: lead ? dataUrl(lead.portrait_key) : null,
       });
-      await db.query("UPDATE drama_shots SET image_key = :key, image_status = 'done', error = NULL WHERE id = :id", { id: s.id, key: saveFile(img.buffer, img.mime) });
+      // a gentle redraw keeps the refusal note, so its clip is asked for gently too
+      await db.query("UPDATE drama_shots SET image_key = :key, image_status = 'done', error = IF(:keep, error, NULL) WHERE id = :id", {
+        id: s.id,
+        key: saveFile(img.buffer, img.mime),
+        keep: soft ? 1 : 0,
+      });
     },
     (e) => shotFailure(s, 'image', e),
   );
@@ -612,6 +631,10 @@ function motionPrompt(p, s) {
   );
 }
 
+/** Plain, neutral motion prompt for a shot the content filter refused: the first frame carries the scene. */
+const safeMotionPrompt = (p, s) =>
+  `Gentle cinematic live action of the scene in the first frame: the people move and talk naturally, calm everyday mood, ${s.camera || 'subtle camera push in'}. ${catalog.styleOf(p.style).prompt}. Family-friendly, fully clothed adults, no violence, no blood, no text`;
+
 async function clipStart(p, unit) {
   const s = p.shots.find((x) => x.id === unit.id);
   await detail(p.id, `${p.episodes_total > 1 ? `ตอนที่ ${s.episode_no}: ` : ''}ส่งช็อต ${s.seq} ให้ MiniMax H3 สร้างคลิปวิดีโอ`);
@@ -621,10 +644,11 @@ async function clipStart(p, unit) {
       // A tie-in shot is made from references (the shot + the real product photo) so the product looks right;
       // H3 does not take a first frame and references together
       const productRef = s.is_product && p.product_image_key ? dataUrl(p.product_image_key) : null;
+      const motion = gentle(s) ? safeMotionPrompt(p, s) : motionPrompt(p, s);
       const { taskId } = await minimaxMedia.createVideoV2({
         prompt: productRef
-          ? `${motionPrompt(p, s)}. The character from reference image 1 presents the exact product from reference image 2 (same shape, colors and label), holding it clearly toward the camera`
-          : motionPrompt(p, s),
+          ? `${motion}. The character from reference image 1 presents the exact product from reference image 2 (same shape, colors and label), holding it clearly toward the camera`
+          : motion,
         ...(productRef ? { references: [dataUrl(s.image_key), productRef] } : { firstFrame: dataUrl(s.image_key) }),
         duration: seconds,
         ratio: '9:16',
