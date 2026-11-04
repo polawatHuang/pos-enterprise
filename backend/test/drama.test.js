@@ -42,7 +42,7 @@ const SCRIPT = {
   shots: [
     { scene: 'ย้ายบ้าน', narration: 'คืนแรกในบ้านริมคลอง', dialogue: [], visual: 'old Thai house by a canal at night', camera: 'slow push in', characters: ['mali'], key: false },
     { scene: 'เสียงเรียก', narration: '', dialogue: [{ character: 'yai', line: 'หนูมาแล้วหรือลูก' }], visual: 'ghostly old woman in doorway', camera: 'handheld', characters: ['yai'], key: true },
-    { scene: 'ความจริง', narration: 'มะลิรู้แล้วว่ายายรอเธอมาตลอด', dialogue: [{ character: 'mali', line: 'ยายคะ' }], visual: 'mali hugging the ghost', camera: 'pull out', characters: ['mali', 'yai'], key: true },
+    { scene: 'ความจริง', narration: 'มะลิรู้แล้วว่ายายรอเธอมาตลอด', dialogue: [{ character: 'mali', line: 'ยายคะ' }], visual: 'mali hugging the ghost', camera: 'pull out', characters: ['mali', 'yai'], key: true, product: true },
   ],
 };
 
@@ -59,7 +59,7 @@ async function drain(rounds = 60) {
 before(async () => {
   Object.assign(process.env, ENV);
   delete process.env.ANTHROPIC_API_KEY;
-  minimax.createMessage = async (params) => ({
+  minimax.createMessage = async (params) => (calls.push({ path: 'ai', body: params }), {
     model: 'MiniMax-M3',
     stop_reason: 'tool_use',
     content: [{ type: 'tool_use', id: 't', name: params.tools[0].name, input: SCRIPT }],
@@ -239,6 +239,53 @@ describe('ละคร AI', () => {
     assert.equal(calls.filter((c) => c.path === '/v2/video_generation').length, 1, 'only the former still shot gets a new clip');
     assert.ok(d.shots.every((s) => s.clipUrl));
     assert.ok(d.outputUrl);
+  });
+
+  test('tie-in: needs the product first; the tie-in shot is made from the product photo and shows it in the video', async () => {
+    const created = await manager.post('/api/drama', {
+      genre: 'drama',
+      style: 'cinematic',
+      lengthSec: 60,
+      visualMode: 'mixed',
+      tieIn: true,
+      productName: 'เซรั่มหน้าใส',
+      productPitch: 'ซึมไว ไม่เหนียว หน้าฉ่ำใน 7 วัน',
+      narratorVoiceId: 'narrator_v',
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const tid = created.body.data.id;
+    try {
+      const blocked = await manager.post(`/api/drama/${tid}/run`, { target: 'all' });
+      assert.equal(blocked.status, 400);
+      assert.match(blocked.body.error.message, /รูปสินค้า/);
+      const up = await manager.post(`/api/drama/${tid}/product-image`, { image: `data:image/png;base64,${PNG.toString('base64')}` });
+      assert.equal(up.status, 200, JSON.stringify(up.body));
+      assert.ok(up.body.data.productImageUrl);
+      calls = [];
+      imageNo = 0;
+      failImageNo = null;
+      await manager.post(`/api/drama/${tid}/run`, { target: 'all' });
+      await drain();
+      const d = (await manager.get(`/api/drama/${tid}`)).body.data;
+      assert.equal(d.error, null, d.error);
+      // the writer was told about the product and what to say
+      const brief = JSON.stringify(calls.find((c) => c.path === 'ai').body.messages);
+      assert.match(brief, /เซรั่มหน้าใส/);
+      assert.match(brief, /ซึมไว ไม่เหนียว/);
+      const tie = d.shots.find((x) => x.isProduct);
+      assert.ok(tie, 'the tie-in shot is marked');
+      assert.equal(tie.kind, 'clip');
+      const h3 = calls.filter((c) => c.path === '/v2/video_generation');
+      const productClip = h3.find((c) => c.body.content.filter((x) => x.role === 'reference_image').length === 2);
+      assert.ok(productClip, 'made from the shot + the product photo');
+      assert.ok(!productClip.body.content.some((x) => x.role === 'first_frame'));
+      assert.match(productClip.body.content[0].text, /exact product from reference image 2/);
+      const edit = calls.find((c) => c.path === 'shotstack.render').body;
+      const cards = edit.timeline.tracks.flatMap((t) => t.clips).filter((c) => c.asset.type === 'image' && c.scale === 0.32);
+      assert.equal(cards.length, 1, 'the product card shows during the tie-in shot');
+    } finally {
+      await db.query('DELETE FROM drama_projects WHERE id = :id', { id: tid });
+    }
   });
 
   test('style previews: one image per style for the genre, cached', async () => {

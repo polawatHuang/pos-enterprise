@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  ShoppingBag,
+  Upload,
   Check,
   Clapperboard,
   Download,
@@ -70,6 +72,9 @@ type Settings = {
   premise: string;
   narratorVoiceId: string;
   music: boolean;
+  tieIn: boolean;
+  productName: string;
+  productPitch: string;
 };
 const settingsOf = (p: DramaProject): Settings => ({
   title: p.title,
@@ -81,6 +86,9 @@ const settingsOf = (p: DramaProject): Settings => ({
   premise: p.premise ?? "",
   narratorVoiceId: p.narratorVoiceId ?? "",
   music: p.music,
+  tieIn: p.tieIn,
+  productName: p.productName ?? "",
+  productPitch: p.productPitch ?? "",
 });
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : "ทำรายการไม่สำเร็จ");
@@ -127,6 +135,8 @@ function Studio({ p }: { p: DramaProject }) {
         substyle: form.substyle || null,
         premise: form.premise || null,
         narratorVoiceId: form.narratorVoiceId || null,
+        productName: form.productName || null,
+        productPitch: form.productPitch || null,
       }),
     );
   const run = (target: DramaStepKey | "all") => call(() => api.post<DramaProject>(`/drama/${id}/run`, { target }));
@@ -220,7 +230,7 @@ function Studio({ p }: { p: DramaProject }) {
         })}
       </nav>
 
-      {step === "setup" && catalog.data && <SetupStep form={form} onChange={setForm} catalog={catalog.data} />}
+      {step === "setup" && catalog.data && <SetupStep form={form} onChange={setForm} catalog={catalog.data} p={p} onSaved={set} />}
       {step === "script" && <ScriptStep p={p} busy={busy} onRun={() => run("script")} onSaved={set} />}
       {step === "characters" && (
         <CharactersStep p={p} busy={busy} catalog={catalog.data} onRun={() => run("characters")} onRedo={(cid) => redo("character", cid)} onSaved={set} />
@@ -264,7 +274,19 @@ function Studio({ p }: { p: DramaProject }) {
 
 /* --------------------------------------------------------------- 01 setup */
 
-function SetupStep({ form, onChange, catalog }: { form: Settings; onChange: (f: Settings) => void; catalog: DramaCatalog }) {
+function SetupStep({
+  form,
+  onChange,
+  catalog,
+  p,
+  onSaved,
+}: {
+  form: Settings;
+  onChange: (f: Settings) => void;
+  catalog: DramaCatalog;
+  p: DramaProject;
+  onSaved: (d: DramaProject) => void;
+}) {
   const qc = useQueryClient();
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...form, [k]: v });
   const genre = catalog.genres.find((g) => g.id === form.genre);
@@ -465,6 +487,7 @@ function SetupStep({ form, onChange, catalog }: { form: Settings; onChange: (f: 
           </div>
         </div>
       </Section>
+      <TieInSection form={form} onChange={onChange} p={p} onSaved={onSaved} />
       {(!catalog.configured.minimax || !catalog.configured.shotstack) && (
         <p className="rounded-xl border border-warning/40 bg-warning-soft p-3 text-sm text-warning">
           ยังไม่ได้ตั้งค่า{" "}
@@ -490,6 +513,148 @@ function StyleImage({ src }: { src: string }) {
   if (failed) return null;
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} className="size-full object-cover transition group-hover:scale-105" />;
+}
+
+/** Shrink a photo in the browser (longest side 1024 px, JPEG) so the upload stays small. */
+async function shrinkImage(file: File): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("อ่านรูปไม่ได้"));
+      el.src = url;
+    });
+    const scale = Math.min(1, 1024 / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("อ่านรูปไม่ได้");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.88);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Optional product tie-in: every episode gets a moment where a character presents the shop's product. */
+function TieInSection({
+  form,
+  onChange,
+  p,
+  onSaved,
+}: {
+  form: Settings;
+  onChange: (f: Settings) => void;
+  p: DramaProject;
+  onSaved: (d: DramaProject) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return toast.error("เลือกไฟล์รูปภาพ");
+    setUploading(true);
+    try {
+      onSaved(await api.post<DramaProject>(`/drama/${p.id}/product-image`, { image: await shrinkImage(file) }));
+      toast.success("อัปโหลดรูปสินค้าแล้ว");
+    } catch (err) {
+      toast.error(errorText(err));
+    } finally {
+      setUploading(false);
+    }
+  };
+  const remove = async () => {
+    try {
+      onSaved(await api.del<DramaProject>(`/drama/${p.id}/product-image`));
+    } catch (err) {
+      toast.error(errorText(err));
+    }
+  };
+  return (
+    <Section
+      n="05"
+      title="ไทอินสินค้า"
+      hint="ให้ตัวละครหยิบ ใช้ และพูดถึงสินค้าของร้านอย่างเป็นธรรมชาติในทุกตอน"
+      action={
+        <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+          <span>{form.tieIn ? "เปิด" : "ปิด"}</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={form.tieIn}
+            aria-label="ไทอินสินค้า"
+            onClick={() => onChange({ ...form, tieIn: !form.tieIn })}
+            className={cn("relative h-6 w-11 rounded-full transition", form.tieIn ? "bg-gradient-to-r from-rose-600 to-fuchsia-600" : "bg-muted")}
+          >
+            <span className={cn("absolute top-0.5 size-5 rounded-full bg-white shadow transition-all", form.tieIn ? "left-[1.375rem]" : "left-0.5")} />
+          </button>
+        </label>
+      }
+    >
+      {form.tieIn ? (
+        <div className="grid gap-4 md:grid-cols-[12rem_1fr]">
+          <div>
+            <Label className="mb-1.5 block">รูปสินค้า</Label>
+            <label
+              className={cn(
+                "relative grid aspect-square cursor-pointer place-items-center overflow-hidden rounded-xl border-2 border-dashed bg-muted/40 text-center text-xs text-muted-foreground transition hover:border-rose-500",
+                p.productImageUrl ? "border-transparent" : "border-border",
+              )}
+            >
+              {p.productImageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={p.productImageUrl} alt="สินค้า" className="size-full object-contain" />
+              ) : uploading ? (
+                <Loader2 className="size-6 animate-spin" />
+              ) : (
+                <span className="flex flex-col items-center gap-1 p-3">
+                  <Upload className="size-6" /> แตะเพื่อเลือกรูปสินค้า
+                  <span className="text-[11px]">พื้นหลังเรียบ เห็นฉลากชัด</span>
+                </span>
+              )}
+              <input type="file" accept="image/*" className="sr-only" onChange={(e) => void upload(e.target.files?.[0])} />
+            </label>
+            {p.productImageUrl && (
+              <button type="button" onClick={() => void remove()} className="mt-1.5 text-xs text-muted-foreground hover:text-danger">
+                ลบรูป
+              </button>
+            )}
+          </div>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="dr-product">ชื่อสินค้า</Label>
+              <Input
+                id="dr-product"
+                value={form.productName}
+                maxLength={191}
+                onChange={(e) => onChange({ ...form, productName: e.target.value })}
+                placeholder="เช่น เซรั่มหน้าใส สูตรเข้มข้น"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dr-pitch">สิ่งที่อยากให้ตัวละครพูดไทอิน</Label>
+              <Textarea
+                id="dr-pitch"
+                rows={4}
+                maxLength={1500}
+                value={form.productPitch}
+                onChange={(e) => onChange({ ...form, productPitch: e.target.value })}
+                placeholder="เช่น ซึมไว ไม่เหนียว ใช้ทุกเช้าหน้าฉ่ำ สั่งได้ที่ตะกร้าในคลิป มีโปร 1 แถม 1 ถึงสิ้นเดือน"
+              />
+              <p className="text-xs text-muted-foreground">
+                AI จะแต่งฉากไทอิน 1–2 ช็อตให้เข้ากับเรื่อง ตัวละครพูดตามนี้ และโชว์รูปสินค้าจริงบนจอช่วงนั้น · ห้ามอ้างสรรพคุณเกินจริง
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">ปิดอยู่ — ละครจะไม่มีการพูดถึงสินค้า</p>
+      )}
+    </Section>
+  );
 }
 
 function Section({ n, title, hint, action, children }: { n: string; title: string; hint?: string; action?: React.ReactNode; children: React.ReactNode }) {
@@ -610,6 +775,11 @@ function ShotEditor({ p, shot, onSaved }: { p: DramaProject; shot: DramaShot; on
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <span className="grid size-7 place-items-center rounded-lg bg-muted text-xs font-bold tabular-nums">{shot.seq}</span>
         <p className="min-w-0 flex-1 truncate font-medium">{shot.scene}</p>
+        {shot.isProduct && (
+          <Badge tone="warning">
+            <ShoppingBag className="size-3" /> ไทอินสินค้า
+          </Badge>
+        )}
         <Badge tone={shot.kind === "clip" ? "primary" : "neutral"}>{shot.kind === "clip" ? "คลิป H3" : "ภาพนิ่ง"}</Badge>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
@@ -859,6 +1029,11 @@ function StoryboardStep({
                   </div>
                 )}
                 <span className="absolute left-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 text-xs font-bold text-white tabular-nums">{s.seq}</span>
+                {s.isProduct && (
+                  <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-amber-400 px-1.5 py-0.5 text-[11px] font-semibold text-amber-950">
+                    <ShoppingBag className="size-3" /> ไทอิน
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => void toggle(s)}

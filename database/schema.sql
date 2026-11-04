@@ -1857,6 +1857,10 @@ CREATE TABLE drama_projects (
   premise           TEXT NULL,
   narrator_voice_id VARCHAR(100) NULL,
   music             TINYINT(1) NOT NULL DEFAULT 1,
+  tie_in            TINYINT(1)   NOT NULL DEFAULT 0,
+  product_name      VARCHAR(191) NULL,
+  product_pitch     TEXT NULL COMMENT 'what the characters should say about the product',
+  product_image_key VARCHAR(80)  NULL,
   logline           TEXT NULL,
   cover_key         VARCHAR(80) NULL COMMENT 'stored image (video media dir)',
   run_target        VARCHAR(20) NULL COMMENT 'step to finish, or all = auto; NULL = idle',
@@ -1905,6 +1909,7 @@ CREATE TABLE drama_shots (
   camera           VARCHAR(255) NULL,
   characters       VARCHAR(500) NULL COMMENT 'JSON character keys in the shot',
   kind             ENUM('still','clip') NOT NULL DEFAULT 'still',
+  is_product       TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'a character presents the tie-in product',
   image_key        VARCHAR(80)  NULL,
   image_status     VARCHAR(20)  NOT NULL DEFAULT 'pending',
   clip_task_id     VARCHAR(100) NULL,
@@ -1932,6 +1937,6 @@ CREATE TABLE drama_style_previews (
   CONSTRAINT fk_drama_preview_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests'), ('031_marketplace_chat'), ('032_drama'), ('033_drama_clip_length');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests'), ('031_marketplace_chat'), ('032_drama'), ('033_drama_clip_length'), ('034_drama_tie_in');
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -218,7 +218,7 @@ const SCRIPT_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['scene', 'narration', 'dialogue', 'visual', 'camera', 'characters', 'key'],
+        required: ['scene', 'narration', 'dialogue', 'visual', 'camera', 'characters', 'key', 'product'],
         properties: {
           scene: { type: 'string', description: 'ชื่อฉากสั้น ๆ ภาษาไทย' },
           narration: { type: 'string', description: 'คำบรรยายของผู้เล่าเรื่อง ภาษาไทยแบบพูด 1-2 ประโยค (เว้นว่างได้ถ้ามีบทพูด)' },
@@ -236,6 +236,7 @@ const SCRIPT_SCHEMA = {
           camera: { type: 'string', description: 'English camera/motion for video: e.g. slow push in, handheld, pan left' },
           characters: { type: 'array', items: { type: 'string' }, description: 'key ของตัวละครที่อยู่ในภาพ (ตัวหลักก่อน)' },
           key: { type: 'boolean', description: 'true ถ้าเป็นช็อตสำคัญ/ไคลแมกซ์ที่ควรเป็นคลิปเคลื่อนไหว' },
+          product: { type: 'boolean', description: 'true เฉพาะช็อตที่ตัวละครหยิบ/ใช้/พูดถึงสินค้าที่ไทอิน (false ถ้าไม่มีไทอิน)' },
         },
       },
     },
@@ -283,6 +284,14 @@ async function writeScript(p) {
           `ความยาว: ${len.label} ประมาณ ${len.shots} ช็อต`,
           p.premise ? `ไอเดียเรื่องจากผู้ใช้: ${p.premise}` : 'ให้คิดเรื่องใหม่ที่น่าติดตามเอง',
           share > 0 && share < 1 ? `ทำเครื่องหมาย key=true ให้ช็อตสำคัญประมาณ ${Math.round(len.shots * share)} ช็อต` : '',
+          p.tie_in
+            ? [
+                `ไทอินสินค้า (product placement): "${p.product_name || 'สินค้าของร้าน'}" — สิ่งที่ต้องพูดถึง: ${p.product_pitch}`,
+                '- สอดสินค้าเข้าไปในเรื่องอย่างเป็นธรรมชาติ 1-2 ช็อต (ช่วงกลางเรื่องหรือก่อนจบ) ตัวละครหยิบ ใช้ หรือแนะนำสินค้าเหมือนเป็นส่วนหนึ่งของเหตุการณ์ ไม่ขายของโต้ง ๆ',
+                '- บทพูดในช็อตนั้นต้องสื่อจุดเด่นตามที่ร้านบอก กระชับ เป็นภาษาพูด ห้ามอ้างสรรพคุณเกินจริงหรือรักษาโรค',
+                '- ทำเครื่องหมาย product=true และ key=true ให้ช็อตไทอิน และให้ visual บรรยายตัวละครถือ/ใช้สินค้าให้เห็นชัด',
+              ].join('\n')
+            : 'ไม่มีไทอินสินค้า: ทุกช็อต product=false',
         ]
           .filter(Boolean)
           .join('\n'),
@@ -313,10 +322,11 @@ async function writeScript(p) {
       );
     }
     for (const [i, s] of shots.entries()) {
-      const kind = p.visual_mode === 'clips' || (p.visual_mode === 'mixed' && s.key) ? 'clip' : 'still';
+      // tie-in shots move whenever the project makes any clips
+      const kind = p.visual_mode === 'clips' || (p.visual_mode === 'mixed' && (s.key || (p.tie_in && s.product))) ? 'clip' : 'still';
       await conn.query(
-        `INSERT INTO drama_shots (drama_project_id, seq, scene_title, narration, dialogue, visual_prompt, camera, characters, kind, clip_status)
-         VALUES (:id, :seq, :scene, :narration, :dialogue, :visual, :camera, :chars, :kind, :clipStatus)`,
+        `INSERT INTO drama_shots (drama_project_id, seq, scene_title, narration, dialogue, visual_prompt, camera, characters, kind, clip_status, is_product)
+         VALUES (:id, :seq, :scene, :narration, :dialogue, :visual, :camera, :chars, :kind, :clipStatus, :isProduct)`,
         {
           id: p.id,
           seq: i + 1,
@@ -328,6 +338,7 @@ async function writeScript(p) {
           chars: JSON.stringify((s.characters ?? []).filter((k) => keys.has(k))),
           kind,
           clipStatus: kind === 'clip' ? 'pending' : 'done',
+          isProduct: p.tie_in && s.product ? 1 : 0,
         },
       );
     }
@@ -380,7 +391,10 @@ async function shotImage(p, unit) {
   await itemTry(
     async () => {
       const img = await minimaxMedia.generateImage({
-        prompt: styled(p, `${s.visual_prompt}${looks ? `. Characters — ${looks}` : ''}. Vertical 9:16 frame`),
+        prompt: styled(
+          p,
+          `${s.visual_prompt}${looks ? `. Characters — ${looks}` : ''}${s.is_product ? `. The character clearly holds and shows the product "${p.product_name || 'product'}" to the camera` : ''}. Vertical 9:16 frame`,
+        ),
         aspectRatio: '9:16',
         subjectImage: lead ? dataUrl(lead.portrait_key) : null,
       });
@@ -422,9 +436,14 @@ async function clipStart(p, unit) {
     async () => {
       if (s.image_status !== 'done') throw new Error('ไม่มีภาพของช็อตนี้');
       const seconds = voicedSeconds(s);
+      // A tie-in shot is made from references (the shot + the real product photo) so the product looks right;
+      // H3 does not take a first frame and references together
+      const productRef = s.is_product && p.product_image_key ? dataUrl(p.product_image_key) : null;
       const { taskId } = await minimaxMedia.createVideoV2({
-        prompt: motionPrompt(p, s),
-        firstFrame: dataUrl(s.image_key),
+        prompt: productRef
+          ? `${motionPrompt(p, s)}. The character from reference image 1 presents the exact product from reference image 2 (same shape, colors and label), holding it clearly toward the camera`
+          : motionPrompt(p, s),
+        ...(productRef ? { references: [dataUrl(s.image_key), productRef] } : { firstFrame: dataUrl(s.image_key) }),
         duration: seconds,
         ratio: '9:16',
       });
@@ -502,6 +521,7 @@ async function render(p) {
       clip: s.clip_key ? fileUrl(s.clip_key) : null,
       clipSec: s.clip_key ? (s.clip_sec ?? shotSeconds(s)) : null,
       lines: (s.audio_status === 'done' ? s.audio : []).map((a) => ({ ...a, url: fileUrl(a.key) })),
+      product: s.is_product && p.product_image_key ? { url: fileUrl(p.product_image_key), name: p.product_name } : null,
     })),
     musicUrl: p.music ? process.env.DRAMA_MUSIC_URL || process.env.VIDEO_MUSIC_URL || null : null,
   });
@@ -579,4 +599,4 @@ async function previewStep({ orgId, genre }) {
   return { status: 'ok', style: row.style };
 }
 
-module.exports = { STEPS, load, stepStates, nextUnit, start, cancel, run, redo, previewStep, fileUrl, estimateFor: catalog.estimate, pickVoice, shotSeconds, SCRIPT_SCHEMA };
+module.exports = { STEPS, load, stepStates, nextUnit, start, cancel, run, redo, previewStep, fileUrl, saveFile, estimateFor: catalog.estimate, pickVoice, shotSeconds, SCRIPT_SCHEMA };

@@ -2529,6 +2529,8 @@ export interface DramaShot {
   camera: string | null;
   characters: string[];
   kind: "still" | "clip";
+  /** a character presents the tie-in product in this shot */
+  isProduct: boolean;
   imageUrl: string | null;
   imageStatus: string;
   clipUrl: string | null;
@@ -2549,6 +2551,11 @@ export interface DramaProject {
   premise: string | null;
   narratorVoiceId: string | null;
   music: boolean;
+  /** product tie-in woven into the story */
+  tieIn: boolean;
+  productName: string | null;
+  productPitch: string | null;
+  productImageUrl: string | null;
   logline: string | null;
   coverUrl: string | null;
   outputUrl: string | null;
