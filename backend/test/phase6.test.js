@@ -75,11 +75,12 @@ function mockProviders({ clipStatus = () => 'Success', renderStatus = () => 'don
       const body = JSON.parse(init.body);
       return json({ data: { audio: `https://cdn.minimax.test/voice-${body.text.length}.mp3` }, extra_info: { audio_length: 2000 + body.text.length * 10 }, base_resp: { status_code: 0 } });
     },
-    '/v1/video_generation': () => json({ task_id: `task${(task += 1)}`, base_resp: { status_code: 0 } }),
-    '/v1/query/video_generation': (url) => {
-      const id = new URL(url).searchParams.get('task_id');
+    // MiniMax H3 (video generation v2)
+    '/v2/video_generation': () => json({ task_id: `task${(task += 1)}`, base_resp: { status_code: 0 } }),
+    '/v2/query/video_generation/': (url) => {
+      const id = String(url).split('/').pop();
       const s = clipStatus(id);
-      return json({ task_id: id, status: s, file_id: s === 'Success' ? `file-${id}` : undefined, base_resp: { status_code: 0 } });
+      return json({ task: { task_id: id, status: s, content: s === 'Success' ? { url: `https://cdn.minimax.test/file-${id}.mp4` } : undefined }, base_resp: { status_code: 0 } });
     },
     '/v1/files/retrieve': (url) => json({ file: { download_url: `https://cdn.minimax.test/${new URL(url).searchParams.get('file_id')}.mp4` }, base_resp: { status_code: 0 } }),
     'api.shotstack.io/edit/stage/render/': () => {
@@ -331,9 +332,10 @@ describe('generation pipeline', () => {
     assert.equal((await marketer.post(`/api/videos/${p.id}/generate`)).status, 202);
     await drain(); // voice → clips_start → (poll scheduled +1 min)
     assert.equal((await project(p.id)).status, 'generating_clips');
-    const created = calls.filter((c) => c.url.includes('/v1/video_generation'));
+    const created = calls.filter((c) => c.url.includes('/v2/video_generation'));
     assert.equal(created.length, 3);
-    assert.equal(JSON.parse(created[0].init.body).first_frame_image, undefined); // scene 1 has no product shot
+    assert.equal(JSON.parse(created[0].init.body).model, 'MiniMax-H3');
+    assert.ok(!JSON.parse(created[0].init.body).content.some((x) => x.role === 'first_frame')); // scene 1 has no product shot
     assert.equal(JSON.parse(calls.find((c) => c.url.includes('/v1/t2a_v2')).init.body).voice_setting.voice_id, 'Thai_male_2');
     await drain(); // poll #1: still processing
     assert.equal((await project(p.id)).status, 'generating_clips');
@@ -350,7 +352,7 @@ describe('generation pipeline', () => {
     calls.length = 0;
     await marketer.post(`/api/videos/${p.id}/generate`);
     await drain();
-    assert.equal(calls.filter((c) => c.url.includes('/v1/video_generation')).length, 1);
+    assert.equal(calls.filter((c) => c.url.includes('/v2/video_generation')).length, 1);
   });
 
   test('parts ready → compose reuses the existing voice (no new speech), refused once provider links expire', async () => {

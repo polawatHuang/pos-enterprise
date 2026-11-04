@@ -100,11 +100,11 @@ before(async () => {
       });
     }
     if (u.includes('/v1/image_generation')) return json({ data: { image_base64: [PNG_B64] }, base_resp: { status_code: 0 } });
-    if (u.includes('/v1/video_generation')) {
+    if (u.includes('/v2/video_generation')) {
       const body = JSON.parse(init.body);
-      return json({ task_id: `t${calls.filter((c) => c.url.includes('/v1/video_generation')).length}-${body.duration}`, base_resp: { status_code: 0 } });
+      return json({ task_id: `t${calls.filter((c) => c.url.includes('/v2/video_generation')).length}-${body.duration}`, base_resp: { status_code: 0 } });
     }
-    if (u.includes('/v1/query/video_generation')) return json({ status: 'Success', file_id: new URL(u).searchParams.get('task_id'), base_resp: { status_code: 0 } });
+    if (u.includes('/v2/query/video_generation/')) return json({ task: { status: 'Success', content: { url: `https://cdn.minimax.test/${u.split('/').pop()}.mp4` } }, base_resp: { status_code: 0 } });
     if (u.includes('/v1/files/retrieve')) return json({ file: { download_url: `https://cdn.minimax.test/${new URL(u).searchParams.get('file_id')}.mp4` }, base_resp: { status_code: 0 } });
     if (u === 'https://img.example.com/p16.jpg') return new Response(Buffer.from(PNG_B64, 'base64'), { headers: { 'content-type': 'image/png' } });
     // Shotstack Edit API generation (models, /generate jobs) — shotstackGen lets a test fail a job or the request
@@ -429,9 +429,9 @@ describe('own footage, hooks and variants', () => {
     assert.equal((await marketer.post(`/api/videos/${pid}/generate`)).status, 202);
     for (let i = 0; i < 6 && (await db.one('SELECT status FROM video_projects WHERE id = :id', { id: pid })).status !== 'ready'; i += 1) await drain();
     // Scene 1 is the user's own video (played as is); scene 2's photo is animated by Hailuo as the first frame
-    const hailuo = calls.filter((x) => x.url.includes('/v1/video_generation'));
+    const hailuo = calls.filter((x) => x.url.includes('/v2/video_generation'));
     assert.equal(hailuo.length, 1);
-    assert.match(JSON.parse(hailuo[0].init.body).first_frame_image, /^data:image\/png;base64,/);
+    assert.match(JSON.parse(hailuo[0].init.body).content.find((x) => x.role === 'first_frame').image_url.url, /^data:image\/png;base64,/);
     const render = calls.find((x) => x.url.endsWith('/edit/stage/render'));
     assert.ok(render, 'render requested');
     const edit = JSON.parse(render.init.body);
@@ -506,9 +506,9 @@ describe('scene pictures → AI video', () => {
         ['AI · ฉาก 1', 'รูปสินค้า · ฉาก 2', 'AI · ฉาก 3'],
       );
       assert.equal(calls.filter((c) => c.url.includes('/v1/image_generation')).length, 2);
-      const hailuo = calls.filter((c) => c.url.includes('/v1/video_generation')).map((c) => JSON.parse(c.init.body));
+      const hailuo = calls.filter((c) => c.url.includes('/v2/video_generation')).map((c) => JSON.parse(c.init.body));
       assert.equal(hailuo.length, 3);
-      assert.ok(hailuo.every((b) => b.first_frame_image.startsWith('data:image/')));
+      assert.ok(hailuo.every((b) => b.model === 'MiniMax-H3' && b.content.find((x) => x.role === 'first_frame').image_url.url.startsWith('data:image/')));
       // the render plays the three AI clips in scene order
       const edit = JSON.parse(calls.find((x) => x.url.endsWith('/edit/stage/render')).init.body);
       const shots = edit.timeline.tracks
@@ -524,7 +524,7 @@ describe('scene pictures → AI video', () => {
       calls.length = 0;
       await marketer.post(`/api/videos/${id}/generate`);
       for (let i = 0; i < 6 && (await db.one('SELECT status FROM video_projects WHERE id = :id', { id })).status !== 'ready'; i += 1) await drain();
-      assert.equal(calls.filter((c) => c.url.includes('/v1/video_generation') || c.url.includes('/v1/image_generation')).length, 0);
+      assert.equal(calls.filter((c) => c.url.includes('/v2/video_generation') || c.url.includes('/v1/image_generation')).length, 0);
     } finally {
       await db.query('UPDATE products SET image_url = :u WHERE id = 16', { u: before });
       delete process.env.SHOTSTACK_API_KEY;
@@ -564,7 +564,7 @@ describe('scene pictures → AI video with Shotstack (VIDEO_SCENE_AI=shotstack)'
     const id = await project();
     const v = await run(id);
     assert.equal(v.status, 'ready', v.error);
-    assert.equal(calls.filter((c) => c.url.includes('/v1/image_generation') || c.url.includes('/v1/video_generation')).length, 0);
+    assert.equal(calls.filter((c) => c.url.includes('/v1/image_generation') || c.url.includes('/v2/video_generation')).length, 0);
 
     const gens = calls.filter((c) => c.url.endsWith('/edit/stage/generate')).map((c) => JSON.parse(c.init.body));
     const imgs = gens.filter((g) => g.asset.type === 'image');
