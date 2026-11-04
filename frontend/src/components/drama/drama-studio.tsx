@@ -131,6 +131,20 @@ function Studio({ p }: { p: DramaProject }) {
     );
   const run = (target: DramaStepKey | "all") => call(() => api.post<DramaProject>(`/drama/${id}/run`, { target }));
   const redo = (what: "character" | "shot" | "cover" | "voices", itemId?: number) => call(() => api.post<DramaProject>(`/drama/${id}/redo`, { what, itemId }));
+  /** Every shot becomes an H3 video clip (as long as its lines), then the video is rendered again. */
+  const upgrade = async () => {
+    const next = { ...form, visualMode: "clips" as const };
+    setForm(next);
+    const ok = await call(() =>
+      api.put<DramaProject>(`/drama/${id}/settings`, {
+        ...next,
+        substyle: next.substyle || null,
+        premise: next.premise || null,
+        narratorVoiceId: next.narratorVoiceId || null,
+      }),
+    );
+    if (ok && (await run("all"))) toast.success("เริ่มสร้างวิดีโอเคลื่อนไหวทุกช็อตแล้ว ใช้เวลาประมาณ 10–30 นาที ปิดหน้านี้ได้");
+  };
   const stop = () => call(() => api.post<DramaProject>(`/drama/${id}/cancel`), "ยกเลิกงานออโต้แล้ว งานที่สร้างเสร็จยังอยู่ในโปรเจกต์");
   const statusOf = (k: DramaStepKey) => p.steps.find((s) => s.key === k)?.status ?? "todo";
   const running = Boolean(p.runTarget);
@@ -213,7 +227,7 @@ function Studio({ p }: { p: DramaProject }) {
       )}
       {step === "cover" && <CoverStep p={p} busy={busy} onRun={() => run("cover")} onRedo={() => redo("cover")} />}
       {step === "storyboard" && <StoryboardStep p={p} busy={busy} onRun={() => run("storyboard")} onRedo={(sid) => redo("shot", sid)} onSaved={set} />}
-      {step === "export" && <ExportStep p={p} busy={busy} onRun={() => run("export")} onRevoice={() => redo("voices")} />}
+      {step === "export" && <ExportStep p={p} busy={busy} onRun={() => run("export")} onRevoice={() => redo("voices")} onUpgrade={() => void upgrade()} />}
 
       {/* sticky actions */}
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/90 backdrop-blur lg:left-[var(--sidebar-width,16rem)]">
@@ -875,12 +889,41 @@ function StoryboardStep({
 
 /* -------------------------------------------------------------- 06 export */
 
-function ExportStep({ p, busy, onRun, onRevoice }: { p: DramaProject; busy: boolean; onRun: () => void; onRevoice: () => void }) {
+function ExportStep({
+  p,
+  busy,
+  onRun,
+  onRevoice,
+  onUpgrade,
+}: {
+  p: DramaProject;
+  busy: boolean;
+  onRun: () => void;
+  onRevoice: () => void;
+  onUpgrade: () => void;
+}) {
   if (!p.shots.length) return <NeedScript />;
   const voiced = p.shots.filter((s) => s.audioStatus === "done").length;
+  const stills = p.shots.filter((s) => s.kind === "still").length;
+  const upgradeCard =
+    stills > 0 && !p.runTarget ? (
+      <Card className="flex flex-wrap items-center gap-3 border-rose-500/40 bg-gradient-to-r from-rose-600/10 to-fuchsia-600/10 p-4">
+        <Film className="size-8 shrink-0 text-rose-600" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">อัปเกรดเป็นวิดีโอเคลื่อนไหวทุกช็อต</p>
+          <p className="text-sm text-muted-foreground">
+            ตอนนี้มี {stills} ช็อตที่เป็นภาพนิ่ง ให้ MiniMax H3 ทำให้ตัวละครขยับ พูด และแสดงอารมณ์ยาวเท่าบทพูด แล้วรวมวิดีโอใหม่ (ภาพและเสียงเดิมใช้ต่อ)
+          </p>
+        </div>
+        <Button onClick={onUpgrade} disabled={busy} className="bg-gradient-to-r from-rose-600 to-fuchsia-600 text-white">
+          <Sparkles /> อัปเกรดเป็นวิดีโอ
+        </Button>
+      </Card>
+    ) : null;
   if (!p.outputUrl) {
     return (
       <div className="space-y-4">
+        {upgradeCard}
         <StepCta
           p={p}
           step="export"
@@ -894,64 +937,67 @@ function ExportStep({ p, busy, onRun, onRevoice }: { p: DramaProject; busy: bool
     );
   }
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_1fr]">
-      <div className="mx-auto w-full max-w-xs overflow-hidden rounded-2xl bg-black shadow-2xl">
-        <video src={p.outputUrl} poster={p.coverUrl ?? undefined} controls playsInline className="aspect-[9/16] w-full" />
-      </div>
-      <div className="space-y-4">
-        <Card className="space-y-3 p-4">
-          <p className="text-lg font-semibold">{p.title}</p>
-          <p className="text-sm text-muted-foreground">
-            {p.durationSec ? `${Math.floor(p.durationSec / 60)}:${String(p.durationSec % 60).padStart(2, "0")} นาที · ` : ""}
-            {p.shots.length} ช็อต · 9:16
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <a
-              href={p.outputUrl}
-              download={`${p.title}.mp4`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground"
-            >
-              <Download className="size-4" /> ดาวน์โหลด MP4
-            </a>
-            {p.hasSubtitles && (
-              <Button variant="outline" onClick={() => void apiDownload(`/drama/${p.id}/subtitles.srt`, undefined, `drama-${p.id}.srt`)}>
-                <Download /> คำบรรยาย .srt
+    <div className="space-y-4">
+      {upgradeCard}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_1fr]">
+        <div className="mx-auto w-full max-w-xs self-start overflow-hidden rounded-2xl bg-black shadow-2xl">
+          <video src={p.outputUrl} poster={p.coverUrl ?? undefined} controls playsInline className="aspect-[9/16] w-full object-contain" />
+        </div>
+        <div className="space-y-4">
+          <Card className="space-y-3 p-4">
+            <p className="text-lg font-semibold">{p.title}</p>
+            <p className="text-sm text-muted-foreground">
+              {p.durationSec ? `${Math.floor(p.durationSec / 60)}:${String(p.durationSec % 60).padStart(2, "0")} นาที · ` : ""}
+              {p.shots.length} ช็อต · 9:16
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={p.outputUrl}
+                download={`${p.title}.mp4`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground"
+              >
+                <Download className="size-4" /> ดาวน์โหลด MP4
+              </a>
+              {p.hasSubtitles && (
+                <Button variant="outline" onClick={() => void apiDownload(`/drama/${p.id}/subtitles.srt`, undefined, `drama-${p.id}.srt`)}>
+                  <Download /> คำบรรยาย .srt
+                </Button>
+              )}
+              <Link href="/social" className="inline-flex h-10 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium hover:bg-accent">
+                ตั้งเวลาโพสต์
+              </Link>
+            </div>
+          </Card>
+          <Card className="space-y-2 p-4">
+            <div className="flex items-center gap-2">
+              <p className="flex-1 font-semibold">เสียงพากย์</p>
+              <Button variant="outline" size="sm" onClick={onRevoice} disabled={busy || !!p.runTarget}>
+                <RefreshCw /> พากย์ใหม่ทั้งเรื่อง
               </Button>
-            )}
-            <Link href="/social" className="inline-flex h-10 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium hover:bg-accent">
-              ตั้งเวลาโพสต์
-            </Link>
-          </div>
-        </Card>
-        <Card className="space-y-2 p-4">
-          <div className="flex items-center gap-2">
-            <p className="flex-1 font-semibold">เสียงพากย์</p>
-            <Button variant="outline" size="sm" onClick={onRevoice} disabled={busy || !!p.runTarget}>
-              <RefreshCw /> พากย์ใหม่ทั้งเรื่อง
-            </Button>
-          </div>
-          <ul className="max-h-72 space-y-1.5 overflow-y-auto text-sm">
-            {p.shots.flatMap((s) =>
-              s.audio.map((a, i) => (
-                <li key={`${s.id}-${i}`} className="flex items-center gap-2">
-                  <span className="w-6 shrink-0 text-xs text-muted-foreground tabular-nums">{s.seq}</span>
-                  <span
-                    className={cn(
-                      "shrink-0 rounded px-1.5 text-xs",
-                      a.speaker === "narrator" ? "bg-muted" : "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100",
-                    )}
-                  >
-                    {a.speaker === "narrator" ? "ผู้บรรยาย" : (a.name ?? a.speaker)}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">{a.text}</span>
-                  {a.url && <audio src={a.url} controls preload="none" className="h-8 w-28 shrink-0 sm:w-40" />}
-                </li>
-              )),
-            )}
-          </ul>
-        </Card>
+            </div>
+            <ul className="max-h-72 space-y-1.5 overflow-y-auto text-sm">
+              {p.shots.flatMap((s) =>
+                s.audio.map((a, i) => (
+                  <li key={`${s.id}-${i}`} className="flex items-center gap-2">
+                    <span className="w-6 shrink-0 text-xs text-muted-foreground tabular-nums">{s.seq}</span>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded px-1.5 text-xs",
+                        a.speaker === "narrator" ? "bg-muted" : "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100",
+                      )}
+                    >
+                      {a.speaker === "narrator" ? "ผู้บรรยาย" : (a.name ?? a.speaker)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{a.text}</span>
+                    {a.url && <audio src={a.url} controls preload="none" className="h-8 w-28 shrink-0 sm:w-40" />}
+                  </li>
+                )),
+              )}
+            </ul>
+          </Card>
+        </div>
       </div>
     </div>
   );

@@ -217,6 +217,10 @@ router.put('/:id/settings', validate({ params: idParam, body: settingsBody }), a
     );
   }
   if (b.narratorVoiceId !== p.narrator_voice_id) await db.query("UPDATE drama_shots SET audio_status = 'pending' WHERE drama_project_id = :id", { id: p.id });
+  // the finished video no longer matches: render again after the new clips / voices
+  if (b.visualMode !== p.visual_mode || b.narratorVoiceId !== p.narrator_voice_id) {
+    await db.query('UPDATE drama_projects SET output_key = NULL, render_id = NULL WHERE id = :id', { id: p.id });
+  }
   res.json({ data: present(await drama.load(p.id)) });
 });
 

@@ -111,9 +111,9 @@ const LENGTHS = [
 
 /** Visual modes: how shots become moving pictures. */
 const VISUAL_MODES = [
-  { id: 'stills', label: 'ภาพนิ่งขยับกล้อง', hint: 'ภาพ AI ทุกช็อต ซูม/แพนแบบภาพยนตร์ ประหยัดและเร็ว', clipShare: 0 },
-  { id: 'mixed', label: 'ผสม: ช็อตสำคัญเป็นคลิป', hint: 'ภาพนิ่ง + ช็อตไคลแมกซ์เป็นคลิป MiniMax H3 (~30%)', clipShare: 0.3 },
-  { id: 'clips', label: 'คลิป H3 ทุกช็อต', hint: 'เคลื่อนไหวทั้งเรื่อง สวยที่สุด ใช้เครดิตมากที่สุด', clipShare: 1 },
+  { id: 'clips', label: 'วิดีโอเคลื่อนไหวทุกช็อต (แนะนำ)', hint: 'ตัวละครขยับ พูด และแสดงอารมณ์ทุกช็อตด้วย MiniMax H3 ยาวเท่าบทพูด เหมือนละครจริง', clipShare: 1 },
+  { id: 'mixed', label: 'ผสม: ช็อตสำคัญเป็นวิดีโอ', hint: 'ช็อตไคลแมกซ์เป็นวิดีโอ H3 (~30%) ที่เหลือภาพนิ่งขยับกล้อง ประหยัดกว่า', clipShare: 0.3 },
+  { id: 'stills', label: 'ภาพนิ่งขยับกล้อง', hint: 'สไลด์ภาพ AI ซูม/แพน เร็วและถูกที่สุด (ไม่ใช่วิดีโอเคลื่อนไหว)', clipShare: 0 },
 ];
 
 const genreOf = (id) => GENRES.find((g) => g.id === id) ?? GENRES.find((g) => g.id === 'custom');
