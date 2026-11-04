@@ -27,6 +27,9 @@ const adapter = defineAdapter(
       { name: 'MINIMAX_VIDEO_MODEL', optional: true, default: 'MiniMax-Hailuo-2.3' },
       { name: 'MINIMAX_IMAGE_MODEL', optional: true, default: 'image-01' },
       { name: 'MINIMAX_GROUP_ID', optional: true },
+      // ละคร AI: video generation v2 (Hailuo 3 / H3)
+      { name: 'MINIMAX_DRAMA_VIDEO_MODEL', optional: true, default: 'MiniMax-H3' },
+      { name: 'MINIMAX_DRAMA_RESOLUTION', optional: true, default: '768P' },
     ],
   },
   {
@@ -157,6 +160,43 @@ const adapter = defineAdapter(
       if (s === 'Success') return { status: 'ready', fileId: String(r.file_id) };
       if (s === 'Fail') return { status: 'failed' };
       return { status: 'processing' }; // Preparing / Queueing / Processing
+    },
+
+    /**
+     * Video generation v2 (MiniMax H3): text + optional first-frame or reference images
+     * (URLs or data URLs). Duration 4–15 s, ratio e.g. "9:16".
+     */
+    async createVideoV2({ prompt, firstFrame = null, references = [], duration = 6, ratio = '9:16' }) {
+      const env = adapter.requireConfig();
+      const content = [{ type: 'text', text: String(prompt).slice(0, 2000) }];
+      if (firstFrame) content.push({ type: 'image_url', image_url: { url: firstFrame }, role: 'first_frame' });
+      else for (const url of references.slice(0, 9)) content.push({ type: 'image_url', image_url: { url }, role: 'reference_image' });
+      const r = await adapter.call('/v2/video_generation', {
+        method: 'POST',
+        timeoutMs: 120_000,
+        body: {
+          model: env.MINIMAX_DRAMA_VIDEO_MODEL || 'MiniMax-H3',
+          content,
+          duration: Math.max(4, Math.min(15, Math.round(duration))),
+          resolution: env.MINIMAX_DRAMA_RESOLUTION || '768P',
+          ratio,
+        },
+      });
+      const taskId = r?.task_id ?? r?.data?.task_id ?? r?.task?.id;
+      if (!taskId) throw new AppError(502, 'MINIMAX_MEDIA_ERROR', 'MiniMax ไม่ส่ง task_id กลับมา');
+      return { taskId: String(taskId) };
+    },
+
+    /** @returns {{status:'processing'|'ready'|'failed', url?:string, error?:string}} */
+    async queryVideoV2(taskId) {
+      const r = await adapter.call(`/v2/query/video_generation/${encodeURIComponent(taskId)}`);
+      const task = r?.task ?? r?.data ?? r ?? {};
+      const s = String(task.status ?? r?.status ?? '').toLowerCase();
+      const url = task.content?.url ?? task.content?.video_url ?? task.video_url ?? task.url ?? null;
+      if (url && /success|succeed|done|complete/.test(s || 'success')) return { status: 'ready', url };
+      if (/fail|error|cancel/.test(s)) return { status: 'failed', error: task.error?.message ?? task.message ?? 'MiniMax สร้างคลิปไม่สำเร็จ' };
+      if (!url && task.file_id) return { status: 'ready', url: await adapter.fileUrl(task.file_id) };
+      return { status: 'processing' };
     },
 
     async fileUrl(fileId) {

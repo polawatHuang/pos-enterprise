@@ -2479,3 +2479,103 @@ export interface HrOrg {
   phone?: string | null;
   branchNo?: string;
 }
+
+/* ------------------------------------------------------------------ ละคร AI */
+
+export type DramaStepKey = "setup" | "script" | "characters" | "cover" | "storyboard" | "export";
+export type DramaVisualMode = "stills" | "mixed" | "clips";
+
+export interface DramaCatalog {
+  genres: { id: string; label: string; hint: string; substyles: string[] }[];
+  styles: { id: string; label: string; hint: string }[];
+  lengths: { sec: number; label: string; shots: number }[];
+  visualModes: { id: DramaVisualMode; label: string; hint: string; clipShare: number }[];
+  /** genre → style → sample picture */
+  previews: Record<string, Record<string, { status: string; url: string | null }>>;
+  configured: { minimax: boolean; shotstack: boolean; publicApiUrl: boolean; defaultVoiceId: string | null };
+}
+
+export interface DramaEstimate {
+  shots: number;
+  images: number;
+  clips: number;
+  clipSeconds: number;
+  voiceLines: number;
+  minutes: number;
+}
+
+export interface DramaCharacter {
+  id: number;
+  key: string;
+  name: string;
+  role: string | null;
+  gender: string | null;
+  age: string | null;
+  description: string | null;
+  lookPrompt: string | null;
+  voiceId: string | null;
+  portraitUrl: string | null;
+  status: string;
+  error: string | null;
+}
+
+export interface DramaShot {
+  id: number;
+  seq: number;
+  scene: string | null;
+  narration: string | null;
+  dialogue: { character: string; line: string }[];
+  visualPrompt: string | null;
+  camera: string | null;
+  characters: string[];
+  kind: "still" | "clip";
+  imageUrl: string | null;
+  imageStatus: string;
+  clipUrl: string | null;
+  clipStatus: string;
+  audio: { speaker: string; name: string | null; text: string; ms: number | null; url: string | null }[];
+  audioStatus: string;
+  error: string | null;
+}
+
+export interface DramaProject {
+  id: number;
+  title: string;
+  genre: string;
+  substyle: string | null;
+  style: string;
+  lengthSec: number;
+  visualMode: DramaVisualMode;
+  premise: string | null;
+  narratorVoiceId: string | null;
+  music: boolean;
+  logline: string | null;
+  coverUrl: string | null;
+  outputUrl: string | null;
+  durationSec: number | null;
+  hasSubtitles: boolean;
+  runTarget: string | null;
+  runningStep: DramaStepKey | null;
+  stageDetail: string | null;
+  error: string | null;
+  steps: { key: DramaStepKey; status: "done" | "todo" | "running" }[];
+  characters: DramaCharacter[];
+  shots: DramaShot[];
+  estimate: DramaEstimate;
+  updatedAt: string;
+}
+
+export interface DramaListItem {
+  id: number;
+  title: string;
+  genre: string;
+  style: string;
+  lengthSec: number;
+  visualMode: DramaVisualMode;
+  shots: number;
+  coverUrl: string | null;
+  done: boolean;
+  running: boolean;
+  error: string | null;
+  updatedAt: string;
+}

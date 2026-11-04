@@ -67,6 +67,7 @@ const ACTIONS: { label: string; href: string; icon: LucideIcon; permission: stri
   { label: "สร้างใบวางบิล", href: "/accounting/documents/new?type=billing_note", icon: FilePlus2, permission: "accounting:write", keywords: "วางบิล billing note ใบแจ้งหนี้ค้าง" },
   { label: "ศูนย์เอกสาร (ค้นหาเอกสารทุกประเภท)", href: "/documents", icon: FilePlus2, permission: "inventory:read", keywords: "เอกสาร ใบสั่งซื้อ ใบรับสินค้า ใบโอน po gr" },
   { label: "สร้างวิดีโอ AI", href: "/videos", icon: Video, permission: "video:create", keywords: "วิดีโอ video คลิป" },
+  { label: "สร้างละคร AI", href: "/drama", icon: Video, permission: "video:create", keywords: "ละคร drama เรื่องผี นิทาน story" },
   { label: "สินค้าคงเหลือทั้งหมด", href: "/inventory", icon: Boxes, permission: "inventory:read", keywords: "คงเหลือ stock" },
 ];
 

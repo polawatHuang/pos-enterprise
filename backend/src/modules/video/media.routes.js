@@ -29,6 +29,13 @@ router.get('/:token', async (req, res) => {
     if (!a) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'ไม่พบไฟล์' } });
     return res.type(a.mime).send(Buffer.from(a.data));
   }
+  if (t.k === 'd') {
+    // ละคร AI: images, clips, voice lines and the final video, addressed by their storage key
+    const p = filePath(t.id);
+    if (!p || !fs.existsSync(p)) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'ไม่พบไฟล์' } });
+    const ext = p.split('.').pop();
+    return res.type({ jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', mp4: 'video/mp4', mp3: 'audio/mpeg' }[ext] ?? 'application/octet-stream').sendFile(p);
+  }
   return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'ชนิดไฟล์ไม่รองรับ' } });
 });
 
