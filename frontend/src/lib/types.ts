@@ -2593,6 +2593,8 @@ export interface DramaProject {
   runTarget: string | null;
   /** episode the current run works on */
   runEpisode: number | null;
+  /** a one-shot run ("สร้างช็อตนี้ใหม่") works on this shot only */
+  runShotId: number | null;
   runningStep: DramaStepKey | null;
   stageDetail: string | null;
   error: string | null;
