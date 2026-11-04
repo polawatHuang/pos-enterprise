@@ -20,6 +20,9 @@ const adapter = defineAdapter(
     applyUrl: 'https://platform.minimax.io/',
     env: [
       { name: 'MINIMAX_API_KEY' },
+      // pay-as-you-go key for images / speech / video when MINIMAX_API_KEY is an M Plan (sk-cp-) key whose plan
+      // does not cover them; the two kinds of key are not interchangeable on MiniMax
+      { name: 'MINIMAX_MEDIA_API_KEY', optional: true },
       { name: 'MINIMAX_API_HOST', optional: true, default: 'https://api.minimax.io' },
       { name: 'MINIMAX_TTS_MODEL', optional: true, default: 'speech-2.6-hd' },
       { name: 'MINIMAX_VOICE_ID', optional: true },
@@ -41,7 +44,7 @@ const adapter = defineAdapter(
       const url = `${host}${path}${env.MINIMAX_GROUP_ID ? `${sep}GroupId=${encodeURIComponent(env.MINIMAX_GROUP_ID)}` : ''}`;
       const res = await fetch(url, {
         method,
-        headers: { Authorization: `Bearer ${env.MINIMAX_API_KEY}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        headers: { Authorization: `Bearer ${adapter.mediaKey()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
         body: body ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -50,10 +53,18 @@ const adapter = defineAdapter(
       if (!res.ok || (code !== undefined && code !== 0)) {
         // 402 / 1008: the account has no balance (or its plan does not cover this API) — retrying cannot help
         if (res.status === 402 || code === 1008) {
+          const reason = [json?.base_resp?.status_msg, code !== undefined ? `code ${code}` : null].filter(Boolean).join(', ');
+          const planKey = /^sk-cp-/.test(adapter.mediaKey());
           throw new AppError(
             402,
             'MINIMAX_PAYMENT_REQUIRED',
-            'MiniMax แจ้งว่ายอดเงินไม่พอ (HTTP 402) — งานภาพ/วิดีโอ/เสียงผ่าน API คิดเงินจากยอดเงินคงเหลือ (Balance) ของบัญชี ไม่รวมในแพ็กเกจแชต/โค้ด เติมเงินที่ platform.minimax.io → Billing แล้วกด "ทำออโต้" ต่อ งานที่ทำไว้ไม่หาย',
+            [
+              `MiniMax ปฏิเสธเพราะเรื่องเงิน/สิทธิ์ (HTTP 402${reason ? `: ${reason}` : ''})`,
+              planKey
+                ? 'ตอนนี้ใช้ M Plan key (sk-cp-) ซึ่งใช้ได้เฉพาะสิทธิ์และ credit ของแพ็กเกจ ถ้าแพ็กเกจไม่ครอบคลุมวิดีโอ/ภาพ/เสียง ให้เติมเงินที่ Billing → Balance แล้วสร้าง key แบบ pay-as-you-go ที่ API keys และใส่ในช่อง MINIMAX_MEDIA_API_KEY ที่หน้าการเชื่อมต่อ API'
+                : 'ตอนนี้ใช้ key แบบ pay-as-you-go ให้เติมเงินที่ platform.minimax.io → Billing → Balance',
+              'แล้วกด "ทำออโต้" ต่อ งานที่ทำไว้ไม่หาย',
+            ].join(' — '),
             { status: res.status, code },
           );
         }
@@ -61,6 +72,12 @@ const adapter = defineAdapter(
         throw new AppError(502, 'MINIMAX_MEDIA_ERROR', `MiniMax: ${msg}`.slice(0, 300), { status: res.status, code });
       }
       return json;
+    },
+
+    /** Key for the media endpoints: the pay-as-you-go media key when set, else the shared MiniMax key. */
+    mediaKey() {
+      const env = adapter.requireConfig();
+      return env.MINIMAX_MEDIA_API_KEY || env.MINIMAX_API_KEY;
     },
 
     /**

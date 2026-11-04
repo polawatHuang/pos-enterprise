@@ -100,7 +100,7 @@ const VOICE_TTL_MS = 10 * 60_000;
 let voiceCache = null;
 
 router.get('/voices', validate({ query: z.object({ provider: z.enum(['minimax']).default('minimax') }) }), async (req, res) => {
-  const { MINIMAX_API_KEY: key } = minimaxMedia.requireConfig();
+  const key = minimaxMedia.mediaKey();
   if (!voiceCache || voiceCache.key !== key || Date.now() - voiceCache.at > VOICE_TTL_MS) {
     voiceCache = { key, at: Date.now(), data: await minimaxMedia.listVoices() };
   }
