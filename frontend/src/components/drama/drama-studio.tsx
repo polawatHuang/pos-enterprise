@@ -1306,7 +1306,7 @@ function StoryboardStep({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {p.shots.map((s) => {
           const bad = s.imageStatus === "failed" || s.clipStatus === "failed";
-          const working = p.runningStep === "storyboard" && !bad && !(s.clipStatus === "done" && s.clipUrl);
+          const working = p.runningStep === "storyboard" && (p.runShotId ? s.id === p.runShotId : !bad && !(s.clipStatus === "done" && s.clipUrl));
           return (
             <div key={s.id} className={cn("overflow-hidden rounded-xl border bg-card", bad ? "border-danger/60" : "border-border")}>
               <div className="relative aspect-[9/16] bg-gradient-to-br from-slate-700 to-slate-950">

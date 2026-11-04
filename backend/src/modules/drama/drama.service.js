@@ -135,8 +135,27 @@ function nextEpisode(p) {
   return null;
 }
 
+/** Run target that remakes one shot only ("สร้างช็อตนี้ใหม่" / "สร้างคลิปใหม่"): 'shot:<id>'. */
+const shotTarget = (id) => `shot:${id}`;
+const targetShotId = (target) => (/^shot:\d+$/.test(String(target ?? '')) ? Number(String(target).slice(5)) : null);
+
+/** The next unit for a one-shot run: its picture, its voice, its clip — nothing of the other shots. */
+function shotUnit(p, id) {
+  const s = p.shots.find((x) => x.id === id);
+  if (!s) return null;
+  const step = 'storyboard';
+  if (s.image_status === 'pending') return { step, kind: 'image', id: s.id };
+  if (s.clip_status === 'pending' && s.image_status === 'done' && !finished(s.audio_status)) return { step, kind: 'voice', id: s.id };
+  if (s.clip_status === 'pending' && s.image_status === 'done') return { step, kind: 'clip_start', id: s.id };
+  if (s.clip_status === 'processing') return { step, kind: 'clip_poll', ep: s.episode_no };
+  if (shotFailed(s)) return { step, kind: 'blocked', ep: s.episode_no, ids: [s.id] };
+  return null;
+}
+
 /** The next unit of work in step order for episode `ep`, or null when everything up to `target` is done. */
 function nextUnit(p, target, ep = 1) {
+  const only = targetShotId(target);
+  if (only) return shotUnit(p, only);
   const last = target === 'all' || target === 'series' ? STEPS.length - 1 : STEPS.indexOf(target);
   const states = stepStates(p, ep);
   const shots = shotsOf(p, ep);
@@ -856,6 +875,8 @@ async function previewStep({ orgId, genre }) {
 
 module.exports = {
   STEPS,
+  shotTarget,
+  targetShotId,
   MAX_ATTEMPTS,
   load,
   stepStates,

@@ -233,6 +233,30 @@ describe('ละคร AI', () => {
     assert.equal(d.outputUrl, null, 'the finished video is outdated after a redo');
   });
 
+  test('"สร้างช็อตนี้ใหม่" remakes only that shot, even while other shots are still unfinished', async () => {
+    const d0 = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    // shot 3 waits for a new clip (unfinished), then the user redoes shot 1
+    await manager.post(`/api/drama/${projectId}/redo`, { what: 'clip', itemId: d0.shots[2].id });
+    await manager.post(`/api/drama/${projectId}/cancel`);
+    calls = [];
+    const r = await manager.post(`/api/drama/${projectId}/redo`, { what: 'shot', itemId: d0.shots[0].id });
+    assert.equal(r.body.data.runShotId, d0.shots[0].id);
+    await drain();
+    const d = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    assert.equal(d.error, null, d.error);
+    assert.equal(calls.filter((c) => c.path === '/v1/image_generation').length, 1);
+    const h3 = calls.filter((c) => c.path === '/v2/video_generation');
+    assert.equal(h3.length, 1, 'only shot 1 got a new clip');
+    assert.match(h3[0].body.content[0].text, /old Thai house by a canal/);
+    assert.ok(d.shots[0].clipUrl);
+    assert.equal(d.shots[2].clipStatus, 'pending', 'shot 3 waits for auto');
+    assert.equal(d.runTarget, null);
+    // auto finishes the rest
+    await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
+    await drain();
+    assert.ok((await manager.get(`/api/drama/${projectId}`)).body.data.shots.every((s) => s.clipUrl));
+  });
+
   test('cancel stops a queued run; editing a line re-voices only that shot', async () => {
     await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
     await manager.post(`/api/drama/${projectId}/cancel`);

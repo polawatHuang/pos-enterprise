@@ -106,6 +106,8 @@ function present(p, asked = null) {
     hasSubtitles: Boolean(e?.subtitle_srt),
     runTarget: p.run_target,
     runEpisode: runEp,
+    /** a one-shot run ("สร้างช็อตนี้ใหม่"): only this shot is being made */
+    runShotId: drama.targetShotId(p.run_target),
     runningStep: running,
     stageDetail: p.stage_detail,
     error: p.error,
@@ -391,7 +393,8 @@ router.post(
     const ep = shot?.episode_no ?? Math.min(req.valid.body.episode ?? 1, p.episodes_total);
     await drama.redo(p, what, itemId, ep);
     const step = { character: 'characters', shot: 'storyboard', clip: 'storyboard', cover: 'cover', voices: 'export', episode: 'script', outline: 'script' }[what];
-    await drama.start(p.id, step, what === 'outline' ? 1 : ep);
+    // a shot or clip redo remakes that shot only; the other unfinished shots wait for "ทำออโต้"
+    await drama.start(p.id, shot ? drama.shotTarget(shot.id) : step, what === 'outline' ? 1 : ep);
     audit(req, 'drama.redo', 'drama_project', p.id, { what, episode: ep });
     res.status(202).json({ data: present(await drama.load(p.id), what === 'outline' ? 1 : ep) });
   },
