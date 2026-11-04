@@ -80,7 +80,7 @@ before(async () => {
   global.fetch = async (url, init = {}) => {
     const u = new URL(String(url));
     const body = init.body ? JSON.parse(init.body) : null;
-    calls.push({ path: u.pathname, body });
+    calls.push({ path: u.pathname, body, auth: init.headers?.Authorization });
     if (u.pathname === '/v1/image_generation') {
       imageNo += 1;
       if (failImageNo === imageNo) return json({ base_resp: { status_code: 1026, status_msg: 'content blocked' } });
@@ -281,8 +281,8 @@ describe('ละคร AI', () => {
     }
     const d = (await manager.get(`/api/drama/${projectId}`)).body.data;
     assert.equal(calls.filter((c) => c.path === '/v2/video_generation').length, 1, 'not retried');
-    assert.match(d.error, /ยอดเงินไม่พอ \(HTTP 402\)/);
-    assert.match(d.error, /platform\.minimax\.io/);
+    assert.match(d.error, /HTTP 402: insufficient balance, code 1008/, 'shows MiniMax\'s own reason');
+    assert.match(d.error, /Balance/);
     assert.equal(d.shots[0].clipStatus, 'pending');
     assert.equal(d.shots[0].clipAttempts, 0);
     assert.equal(d.runTarget, null);
@@ -292,6 +292,20 @@ describe('ละคร AI', () => {
     const d2 = (await manager.get(`/api/drama/${projectId}`)).body.data;
     assert.equal(d2.error, null, d2.error);
     assert.ok(d2.outputUrl);
+  });
+
+  test('MINIMAX_MEDIA_API_KEY (pay-as-you-go) is used for images, speech and video; chat keeps the shared key', async () => {
+    process.env.MINIMAX_MEDIA_API_KEY = 'payg-key';
+    try {
+      calls = [];
+      await require('../src/integrations/minimax-media').synthesize('ทดสอบ', { voiceId: 'v1' });
+      assert.equal(calls.find((c) => c.path === '/v1/t2a_v2').auth, 'Bearer payg-key');
+    } finally {
+      delete process.env.MINIMAX_MEDIA_API_KEY;
+    }
+    calls = [];
+    await require('../src/integrations/minimax-media').synthesize('ทดสอบ', { voiceId: 'v1' });
+    assert.equal(calls.find((c) => c.path === '/v1/t2a_v2').auth, 'Bearer mm-key');
   });
 
   test('series: 3 episodes share characters and cover; each is written from the outline and gets its own video', async () => {
