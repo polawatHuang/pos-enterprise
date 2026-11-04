@@ -31,6 +31,10 @@ const settingsBody = z.object({
   premise: z.string().trim().max(2000).nullish(),
   narratorVoiceId: z.string().trim().max(100).nullish(),
   music: z.boolean().default(true),
+  // product tie-in: the shop's product is woven into the story
+  tieIn: z.boolean().default(false),
+  productName: z.string().trim().max(191).nullish(),
+  productPitch: z.string().trim().max(1500).nullish(),
 });
 
 async function own(req) {
@@ -54,6 +58,10 @@ function present(p) {
     premise: p.premise,
     narratorVoiceId: p.narrator_voice_id,
     music: Boolean(p.music),
+    tieIn: Boolean(p.tie_in),
+    productName: p.product_name,
+    productPitch: p.product_pitch,
+    productImageUrl: drama.fileUrl(p.product_image_key),
     logline: p.logline,
     coverUrl: drama.fileUrl(p.cover_key),
     outputUrl: drama.fileUrl(p.output_key),
@@ -88,6 +96,7 @@ function present(p) {
       camera: s.camera,
       characters: s.characters,
       kind: s.kind,
+      isProduct: Boolean(s.is_product),
       imageUrl: drama.fileUrl(s.image_key),
       imageStatus: s.image_status,
       clipUrl: drama.fileUrl(s.clip_key),
@@ -168,8 +177,8 @@ router.get('/', async (req, res) => {
 router.post('/', validate({ body: settingsBody }), async (req, res) => {
   const b = req.valid.body;
   const r = await db.query(
-    `INSERT INTO drama_projects (org_id, title, genre, substyle, style, length_sec, visual_mode, premise, narrator_voice_id, music, created_by)
-     VALUES (:orgId, :title, :genre, :substyle, :style, :lengthSec, :visualMode, :premise, :voice, :music, :userId)`,
+    `INSERT INTO drama_projects (org_id, title, genre, substyle, style, length_sec, visual_mode, premise, narrator_voice_id, music, tie_in, product_name, product_pitch, created_by)
+     VALUES (:orgId, :title, :genre, :substyle, :style, :lengthSec, :visualMode, :premise, :voice, :music, :tieIn, :productName, :productPitch, :userId)`,
     {
       orgId: req.user.orgId,
       title: b.title || `ละคร${catalog.genreOf(b.genre).label}`,
@@ -181,6 +190,9 @@ router.post('/', validate({ body: settingsBody }), async (req, res) => {
       premise: b.premise ?? null,
       voice: b.narratorVoiceId ?? null,
       music: b.music ? 1 : 0,
+      tieIn: b.tieIn ? 1 : 0,
+      productName: b.productName || null,
+      productPitch: b.productPitch || null,
       userId: req.user.id,
     },
   );
@@ -195,7 +207,8 @@ router.put('/:id/settings', validate({ params: idParam, body: settingsBody }), a
   const b = req.valid.body;
   await db.query(
     `UPDATE drama_projects SET title = COALESCE(:title, title), genre = :genre, substyle = :substyle, style = :style, length_sec = :lengthSec,
-            visual_mode = :visualMode, premise = :premise, narrator_voice_id = :voice, music = :music WHERE id = :id`,
+            visual_mode = :visualMode, premise = :premise, narrator_voice_id = :voice, music = :music,
+            tie_in = :tieIn, product_name = :productName, product_pitch = :productPitch WHERE id = :id`,
     {
       id: p.id,
       title: b.title || null,
@@ -207,6 +220,9 @@ router.put('/:id/settings', validate({ params: idParam, body: settingsBody }), a
       premise: b.premise ?? null,
       voice: b.narratorVoiceId ?? null,
       music: b.music ? 1 : 0,
+      tieIn: b.tieIn ? 1 : 0,
+      productName: b.productName || null,
+      productPitch: b.productPitch || null,
     },
   );
   // A new visual mode re-plans which shots become clips (finished clips stay)
@@ -291,6 +307,9 @@ router.put('/:id/characters/:cid', validate({ params: idParam.extend({ cid: z.co
 router.post('/:id/run', validate({ params: idParam, body: z.object({ target: z.enum([...drama.STEPS.slice(1), 'all']) }) }), async (req, res) => {
   const p = await own(req);
   const { target } = req.valid.body;
+  if ((target === 'script' || (target === 'all' && !p.shots.length)) && p.tie_in && (!p.product_pitch || !p.product_image_key)) {
+    throw badRequest('เปิดไทอินสินค้าแล้ว — ใส่รูปสินค้าและสิ่งที่อยากให้ตัวละครพูดก่อน (ขั้น 01)');
+  }
   if (target === 'script') {
     // writing the script again starts the story over
     await db.query('DELETE FROM drama_shots WHERE drama_project_id = :id', { id: p.id });
@@ -322,6 +341,31 @@ router.post(
   },
 );
 
+/* -------------------------------------------------------- tie-in product */
+
+const IMAGE_MIME = { 'image/jpeg': true, 'image/png': true, 'image/webp': true };
+const MAX_PRODUCT_IMAGE = 6 * 1024 * 1024;
+
+/** The tie-in product photo, as a data URL (the browser shrinks it first). */
+router.post('/:id/product-image', validate({ params: idParam, body: z.object({ image: z.string().max(10_000_000) }) }), async (req, res) => {
+  const p = await own(req);
+  const m = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(req.valid.body.image);
+  if (!m || !IMAGE_MIME[m[1]]) throw badRequest('รองรับรูป JPG, PNG หรือ WebP');
+  const buffer = Buffer.from(m[2], 'base64');
+  if (!buffer.length || buffer.length > MAX_PRODUCT_IMAGE) throw badRequest('รูปใหญ่เกิน 6 MB');
+  const key = drama.saveFile(buffer, m[1]);
+  await db.query('UPDATE drama_projects SET product_image_key = :key WHERE id = :id', { id: p.id, key });
+  if (p.product_image_key) media.removeFile(p.product_image_key);
+  res.json({ data: present(await drama.load(p.id)) });
+});
+
+router.delete('/:id/product-image', validate({ params: idParam }), async (req, res) => {
+  const p = await own(req);
+  await db.query('UPDATE drama_projects SET product_image_key = NULL WHERE id = :id', { id: p.id });
+  if (p.product_image_key) media.removeFile(p.product_image_key);
+  res.json({ data: present(await drama.load(p.id)) });
+});
+
 router.get('/:id/subtitles.srt', validate({ params: idParam }), async (req, res) => {
   const p = await own(req);
   if (!p.subtitle_srt) throw notFound('ยังไม่มีคำบรรยาย');
@@ -330,7 +374,7 @@ router.get('/:id/subtitles.srt', validate({ params: idParam }), async (req, res)
 
 router.delete('/:id', validate({ params: idParam }), async (req, res) => {
   const p = await own(req);
-  const keys = [p.cover_key, p.output_key, ...p.characters.map((c) => c.portrait_key), ...p.shots.flatMap((s) => [s.image_key, s.clip_key, ...s.audio.map((a) => a.key)])];
+  const keys = [p.cover_key, p.output_key, p.product_image_key, ...p.characters.map((c) => c.portrait_key), ...p.shots.flatMap((s) => [s.image_key, s.clip_key, ...s.audio.map((a) => a.key)])];
   await db.query('DELETE FROM drama_projects WHERE id = :id', { id: p.id });
   for (const k of keys.filter(Boolean)) media.removeFile(k);
   audit(req, 'drama.delete', 'drama_project', p.id, {});

@@ -25,7 +25,7 @@ const titleCss =
 
 /**
  * @param {{title:string, coverUrl:string|null, musicUrl?:string|null, fontUrl?:string,
- *   shots:{image:string|null, clip:string|null, clipSec:number|null, lines:{speaker:string, name?:string|null, text:string, url:string, ms:number|null}[]}[]}} p
+ *   shots:{image:string|null, clip:string|null, clipSec:number|null, product?:{url:string, name:string|null}|null, lines:{speaker:string, name?:string|null, text:string, url:string, ms:number|null}[]}[]}} p
  * @returns {{edit:object, srt:string, durationSec:number}}
  */
 function buildDramaEdit({ title, coverUrl, shots, musicUrl = null, fontUrl = DEFAULT_FONT_URL }) {
@@ -78,6 +78,35 @@ function buildDramaEdit({ title, coverUrl, shots, musicUrl = null, fontUrl = DEF
   if (coverUrl) {
     visualClips.unshift({ start: 0, length: intro, fit: 'crop', asset: { type: 'image', src: coverUrl }, effect: 'zoomInSlow' });
   }
+  // Tie-in shots: the real product photo as a card with its name, top right (clear of captions)
+  const productCards = shots.flatMap((s, i) =>
+    s.product?.url
+      ? [
+          {
+            asset: { type: 'image', src: s.product.url },
+            start: r2(shotTimes[i].start + intro + 0.3),
+            length: r2(Math.max(1, shotTimes[i].length - 0.3)),
+            fit: 'contain',
+            scale: 0.32,
+            position: 'topRight',
+            offset: { x: -0.04, y: -0.1 },
+            transition: { in: 'zoom', out: 'fade' },
+          },
+          ...(s.product.name
+            ? [
+                {
+                  asset: { type: 'html', html: `<p>${escapeHtml(s.product.name)}</p>`, css: nameCss, width: 520, height: 100 },
+                  start: r2(shotTimes[i].start + intro + 0.3),
+                  length: r2(Math.max(1, shotTimes[i].length - 0.3)),
+                  position: 'topRight',
+                  offset: { x: -0.03, y: -0.33 },
+                  transition: { in: 'fade', out: 'fade' },
+                },
+              ]
+            : []),
+        ]
+      : [],
+  );
   const titleCard = coverUrl
     ? [{ asset: { type: 'html', html: `<p>${escapeHtml(title)}</p>`, css: titleCss, width: 980, height: 600 }, start: 0, length: intro, position: 'top', offset: { y: -0.12 }, transition: { in: 'fade', out: 'fade' } }]
     : [];
@@ -95,7 +124,9 @@ function buildDramaEdit({ title, coverUrl, shots, musicUrl = null, fontUrl = DEF
       background: '#000000',
       fonts: [{ src: fontUrl }],
       ...(musicUrl ? { soundtrack: { src: musicUrl, effect: 'fadeInFadeOut', volume: 0.1 } } : {}),
-      tracks: [{ clips: [label] }, { clips: titleCard }, { clips: names }, { clips: words }, { clips: voice }, { clips: visualClips }].filter((tr) => tr.clips.length),
+      tracks: [{ clips: [label] }, { clips: titleCard }, { clips: names }, { clips: words }, { clips: productCards }, { clips: voice }, { clips: visualClips }].filter(
+        (tr) => tr.clips.length,
+      ),
     },
     output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 },
   };
