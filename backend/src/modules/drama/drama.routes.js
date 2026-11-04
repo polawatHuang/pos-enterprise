@@ -104,9 +104,9 @@ function present(p) {
 /* ----------------------------------------------------------------- catalog */
 
 router.get('/catalog', async (req, res) => {
-  const rows = await db.query('SELECT genre, style, image_key, status FROM drama_style_previews WHERE org_id = :orgId', { orgId: req.user.orgId });
+  const rows = await db.query('SELECT genre, style, image_key, status, error FROM drama_style_previews WHERE org_id = :orgId', { orgId: req.user.orgId });
   const previews = {};
-  for (const r of rows) (previews[r.genre] ??= {})[r.style] = { status: r.status, url: drama.fileUrl(r.image_key) };
+  for (const r of rows) (previews[r.genre] ??= {})[r.style] = { status: r.status, url: drama.fileUrl(r.image_key), error: r.error ?? null };
   res.json({
     data: {
       genres: catalog.GENRES.map(({ id, label, hint, substyles }) => ({ id, label, hint, substyles })),

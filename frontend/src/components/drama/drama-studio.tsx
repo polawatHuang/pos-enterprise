@@ -324,8 +324,8 @@ function SetupStep({ form, onChange, catalog }: { form: Settings; onChange: (f: 
         hint="ภาพทุกช็อต ตัวละคร และปกจะใช้สไตล์เดียวกัน"
         action={
           missing && catalog.configured.minimax ? (
-            <Button size="sm" variant="outline" onClick={() => void makePreviews()} disabled={pending}>
-              {pending ? <Loader2 className="animate-spin" /> : <Sparkles />} {pending ? "กำลังสร้างภาพตัวอย่าง…" : "สร้างภาพตัวอย่างสไตล์"}
+            <Button size="sm" variant="ghost" onClick={() => void makePreviews()} disabled={pending}>
+              {pending ? <Loader2 className="animate-spin" /> : <Sparkles />} {pending ? "กำลังสร้างภาพของร้าน…" : "สร้างภาพชุดใหม่ของร้าน"}
             </Button>
           ) : null
         }
@@ -345,12 +345,19 @@ function SetupStep({ form, onChange, catalog }: { form: Settings; onChange: (f: 
                 )}
               >
                 <div className={cn("relative aspect-[4/3] overflow-hidden bg-gradient-to-br", STYLE_GRADIENT[s.id] ?? "from-slate-500 to-slate-900")}>
-                  {pv?.url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={pv.url} alt="" className="size-full object-cover transition group-hover:scale-105" />
-                  ) : pv?.status === "pending" ? (
+                  {pv?.status === "pending" && !pv.url ? (
                     <Loader2 className="absolute inset-0 m-auto size-6 animate-spin text-white/70" />
-                  ) : null}
+                  ) : (
+                    <StyleImage key={`${form.genre}-${s.id}-${pv?.url ?? ""}`} src={pv?.url ?? defaultPreview(form.genre, s.id)} />
+                  )}
+                  {pv?.status === "failed" && !pv.url && (
+                    <span
+                      className="absolute inset-x-1 bottom-1 truncate rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white"
+                      title={pv.error ?? undefined}
+                    >
+                      สร้างภาพไม่สำเร็จ: {pv.error}
+                    </span>
+                  )}
                   {on && (
                     <span className="absolute right-2 top-2 grid size-6 place-items-center rounded-full bg-rose-600 text-white">
                       <Check className="size-4" />
@@ -458,6 +465,17 @@ function SetupStep({ form, onChange, catalog }: { form: Settings; onChange: (f: 
       )}
     </div>
   );
+}
+
+/** Built-in sample picture of a style for a genre (public/drama-styles); "ระบุเอง" uses the drama set. */
+const defaultPreview = (genre: string, style: string) => `/drama-styles/${genre === "custom" ? "drama" : genre}/${style}.webp`;
+
+/** A style card picture that quietly falls back to the card's gradient when the file is missing. */
+function StyleImage({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} className="size-full object-cover transition group-hover:scale-105" />;
 }
 
 function Section({ n, title, hint, action, children }: { n: string; title: string; hint?: string; action?: React.ReactNode; children: React.ReactNode }) {
