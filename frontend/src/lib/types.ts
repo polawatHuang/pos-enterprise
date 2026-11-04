@@ -2489,6 +2489,9 @@ export interface DramaCatalog {
   genres: { id: string; label: string; hint: string; substyles: string[] }[];
   styles: { id: string; label: string; hint: string }[];
   lengths: { sec: number; label: string; shots: number }[];
+  /** series sizes offered (any 1–maxEpisodes can be typed) */
+  episodePresets: number[];
+  maxEpisodes: number;
   visualModes: { id: DramaVisualMode; label: string; hint: string; clipShare: number }[];
   /** genre → style → sample picture */
   previews: Record<string, Record<string, { status: string; url: string | null; error?: string | null }>>;
@@ -2496,12 +2499,29 @@ export interface DramaCatalog {
 }
 
 export interface DramaEstimate {
-  shots: number;
+  episodes: number;
+  /** one episode: every shot is an H3 clip */
+  perEpisode: { shots: number; images: number; clips: number; clipSeconds: number; voiceLines: number; minutes: number };
+  /** whole series */
   images: number;
   clips: number;
   clipSeconds: number;
+  shots: number;
   voiceLines: number;
   minutes: number;
+}
+
+export interface DramaEpisode {
+  no: number;
+  title: string | null;
+  summary: string | null;
+  cliffhanger: string | null;
+  shots: number;
+  clipsDone: number;
+  status: "todo" | "progress" | "running" | "failed" | "done";
+  outputUrl: string | null;
+  durationSec: number | null;
+  hasSubtitles: boolean;
 }
 
 export interface DramaCharacter {
@@ -2521,6 +2541,7 @@ export interface DramaCharacter {
 
 export interface DramaShot {
   id: number;
+  episodeNo: number;
   seq: number;
   scene: string | null;
   narration: string | null;
@@ -2535,6 +2556,8 @@ export interface DramaShot {
   imageStatus: string;
   clipUrl: string | null;
   clipStatus: string;
+  /** failed H3 attempts (retried automatically up to 3) */
+  clipAttempts: number;
   audio: { speaker: string; name: string | null; text: string; ms: number | null; url: string | null }[];
   audioStatus: string;
   error: string | null;
@@ -2548,6 +2571,12 @@ export interface DramaProject {
   style: string;
   lengthSec: number;
   visualMode: DramaVisualMode;
+  /** series size; script, shots and the video below are of `episode` */
+  episodesTotal: number;
+  episode: number;
+  episodes: DramaEpisode[];
+  /** the series outline (characters + episode summaries) exists */
+  hasOutline: boolean;
   premise: string | null;
   narratorVoiceId: string | null;
   music: boolean;
@@ -2562,6 +2591,8 @@ export interface DramaProject {
   durationSec: number | null;
   hasSubtitles: boolean;
   runTarget: string | null;
+  /** episode the current run works on */
+  runEpisode: number | null;
   runningStep: DramaStepKey | null;
   stageDetail: string | null;
   error: string | null;
@@ -2579,6 +2610,8 @@ export interface DramaListItem {
   style: string;
   lengthSec: number;
   visualMode: DramaVisualMode;
+  episodesTotal: number;
+  episodesDone: number;
   shots: number;
   coverUrl: string | null;
   done: boolean;

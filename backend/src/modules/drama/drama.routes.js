@@ -27,7 +27,9 @@ const settingsBody = z.object({
   substyle: z.string().trim().max(60).nullish(),
   style: z.enum(STYLE_IDS),
   lengthSec: z.coerce.number().int().refine((v) => catalog.LENGTHS.some((l) => l.sec === v), 'ความยาวไม่รองรับ'),
-  visualMode: z.enum(['stills', 'mixed', 'clips']),
+  // every shot is a moving clip now; older clients still send this
+  visualMode: z.enum(['stills', 'mixed', 'clips']).optional(),
+  episodesTotal: z.coerce.number().int().min(1).max(catalog.MAX_EPISODES).default(1),
   premise: z.string().trim().max(2000).nullish(),
   narratorVoiceId: z.string().trim().max(100).nullish(),
   music: z.boolean().default(true),
@@ -43,10 +45,24 @@ async function own(req) {
   return p;
 }
 
-/** Everything the studio shows, with signed file URLs. */
-function present(p) {
-  const states = drama.stepStates(p);
-  const running = p.run_target ? drama.nextUnit(p, p.run_target)?.step ?? null : null;
+/** The episode the studio shows: asked for, or the one being worked on, or the first unfinished one. */
+function pickEpisode(p, asked) {
+  const n = Number(asked);
+  if (Number.isInteger(n) && n >= 1 && n <= p.episodes_total) return n;
+  if (p.run_target && p.run_episode) return Math.min(p.run_episode, p.episodes_total);
+  return (drama.hasOutline(p) && drama.nextEpisode(p)) || 1;
+}
+
+/** Everything the studio shows for one episode (plus the series), with signed file URLs. */
+function present(p, asked = null) {
+  const ep = pickEpisode(p, asked);
+  const states = drama.stepStates(p, ep);
+  const runEp = p.run_target ? (p.run_target === 'series' ? (drama.hasOutline(p) ? drama.nextEpisode(p) : 1) : p.run_episode || 1) : null;
+  const runUnit = p.run_target && runEp ? drama.nextUnit(p, p.run_target, runEp) : null;
+  // series-wide steps show as running from any episode; episode steps only on the episode being made
+  const seriesStep = runUnit && ['script', 'characters', 'cover'].includes(runUnit.step) && runUnit.kind !== 'episode_script';
+  const running = runUnit && (runEp === ep || seriesStep) ? runUnit.step : null;
+  const e = drama.episodeOf(p, ep);
   return {
     id: p.id,
     title: p.title,
@@ -54,7 +70,9 @@ function present(p) {
     substyle: p.substyle,
     style: p.style,
     lengthSec: p.length_sec,
-    visualMode: p.visual_mode,
+    visualMode: 'clips',
+    episodesTotal: p.episodes_total,
+    episode: ep,
     premise: p.premise,
     narratorVoiceId: p.narrator_voice_id,
     music: Boolean(p.music),
@@ -64,10 +82,30 @@ function present(p) {
     productImageUrl: drama.fileUrl(p.product_image_key),
     logline: p.logline,
     coverUrl: drama.fileUrl(p.cover_key),
-    outputUrl: drama.fileUrl(p.output_key),
-    durationSec: p.duration_sec,
-    hasSubtitles: Boolean(p.subtitle_srt),
+    hasOutline: drama.hasOutline(p),
+    episodes: Array.from({ length: p.episodes_total }, (_, i) => {
+      const no = i + 1;
+      const row = drama.episodeOf(p, no);
+      const shots = drama.shotsOf(p, no);
+      const status = drama.episodeStatus(p, no);
+      return {
+        no,
+        title: row?.title ?? null,
+        summary: row?.summary ?? null,
+        cliffhanger: row?.cliffhanger ?? null,
+        shots: shots.length,
+        clipsDone: shots.filter((s) => s.clip_status === 'done' && s.clip_key).length,
+        status: p.run_target && runEp === no && status !== 'done' ? 'running' : status,
+        outputUrl: status === 'done' ? drama.fileUrl(row?.output_key) : null,
+        durationSec: row?.duration_sec ?? null,
+        hasSubtitles: Boolean(row?.subtitle_srt),
+      };
+    }),
+    outputUrl: states.export === 'done' ? drama.fileUrl(e?.output_key) : null,
+    durationSec: e?.duration_sec ?? null,
+    hasSubtitles: Boolean(e?.subtitle_srt),
     runTarget: p.run_target,
+    runEpisode: runEp,
     runningStep: running,
     stageDetail: p.stage_detail,
     error: p.error,
@@ -86,8 +124,9 @@ function present(p) {
       status: c.status,
       error: c.error,
     })),
-    shots: p.shots.map((s) => ({
+    shots: drama.shotsOf(p, ep).map((s) => ({
       id: s.id,
+      episodeNo: s.episode_no,
       seq: s.seq,
       scene: s.scene_title,
       narration: s.narration,
@@ -95,20 +134,23 @@ function present(p) {
       visualPrompt: s.visual_prompt,
       camera: s.camera,
       characters: s.characters,
-      kind: s.kind,
+      kind: 'clip',
       isProduct: Boolean(s.is_product),
       imageUrl: drama.fileUrl(s.image_key),
       imageStatus: s.image_status,
       clipUrl: drama.fileUrl(s.clip_key),
       clipStatus: s.clip_status,
+      clipAttempts: s.clip_attempts ?? 0,
       audio: s.audio.map((a) => ({ speaker: a.speaker, name: a.name, text: a.text, ms: a.ms, url: drama.fileUrl(a.key) })),
       audioStatus: s.audio_status,
       error: s.error,
     })),
-    estimate: catalog.estimate({ lengthSec: p.length_sec, visualMode: p.visual_mode, shots: p.shots.length || null, characters: p.characters.length || 4 }),
+    estimate: catalog.estimate({ lengthSec: p.length_sec, episodes: p.episodes_total, shots: drama.shotsOf(p, ep).length || null, characters: p.characters.length || 4 }),
     updatedAt: p.updated_at,
   };
 }
+
+const epQuery = z.object({ episode: z.coerce.number().int().positive().optional() });
 
 /* ----------------------------------------------------------------- catalog */
 
@@ -121,6 +163,8 @@ router.get('/catalog', async (req, res) => {
       genres: catalog.GENRES.map(({ id, label, hint, substyles }) => ({ id, label, hint, substyles })),
       styles: catalog.STYLES.map(({ id, label, hint }) => ({ id, label, hint })),
       lengths: catalog.LENGTHS,
+      episodePresets: catalog.EPISODE_PRESETS,
+      maxEpisodes: catalog.MAX_EPISODES,
       visualModes: catalog.VISUAL_MODES,
       previews,
       configured: {
@@ -152,7 +196,8 @@ router.post('/catalog/previews', validate({ body: z.object({ genre: z.enum(GENRE
 
 router.get('/', async (req, res) => {
   const rows = await db.query(
-    `SELECT p.*, (SELECT COUNT(*) FROM drama_shots s WHERE s.drama_project_id = p.id) AS shot_count
+    `SELECT p.*, (SELECT COUNT(*) FROM drama_shots s WHERE s.drama_project_id = p.id) AS shot_count,
+            (SELECT COUNT(*) FROM drama_episodes e WHERE e.drama_project_id = p.id AND e.output_key IS NOT NULL AND e.episode_no <= p.episodes_total) AS episodes_done
        FROM drama_projects p WHERE p.org_id = :orgId ORDER BY p.updated_at DESC LIMIT 100`,
     { orgId: req.user.orgId },
   );
@@ -163,10 +208,12 @@ router.get('/', async (req, res) => {
       genre: p.genre,
       style: p.style,
       lengthSec: p.length_sec,
-      visualMode: p.visual_mode,
+      visualMode: 'clips',
+      episodesTotal: Number(p.episodes_total ?? 1),
+      episodesDone: Number(p.episodes_done),
       shots: Number(p.shot_count),
       coverUrl: drama.fileUrl(p.cover_key),
-      done: Boolean(p.output_key),
+      done: Number(p.episodes_done) >= Number(p.episodes_total ?? 1),
       running: Boolean(p.run_target),
       error: p.error,
       updatedAt: p.updated_at,
@@ -177,8 +224,8 @@ router.get('/', async (req, res) => {
 router.post('/', validate({ body: settingsBody }), async (req, res) => {
   const b = req.valid.body;
   const r = await db.query(
-    `INSERT INTO drama_projects (org_id, title, genre, substyle, style, length_sec, visual_mode, premise, narrator_voice_id, music, tie_in, product_name, product_pitch, created_by)
-     VALUES (:orgId, :title, :genre, :substyle, :style, :lengthSec, :visualMode, :premise, :voice, :music, :tieIn, :productName, :productPitch, :userId)`,
+    `INSERT INTO drama_projects (org_id, title, genre, substyle, style, length_sec, visual_mode, episodes_total, premise, narrator_voice_id, music, tie_in, product_name, product_pitch, created_by)
+     VALUES (:orgId, :title, :genre, :substyle, :style, :lengthSec, 'clips', :episodes, :premise, :voice, :music, :tieIn, :productName, :productPitch, :userId)`,
     {
       orgId: req.user.orgId,
       title: b.title || `ละคร${catalog.genreOf(b.genre).label}`,
@@ -186,7 +233,7 @@ router.post('/', validate({ body: settingsBody }), async (req, res) => {
       substyle: b.substyle ?? null,
       style: b.style,
       lengthSec: b.lengthSec,
-      visualMode: b.visualMode,
+      episodes: b.episodesTotal,
       premise: b.premise ?? null,
       voice: b.narratorVoiceId ?? null,
       music: b.music ? 1 : 0,
@@ -196,18 +243,21 @@ router.post('/', validate({ body: settingsBody }), async (req, res) => {
       userId: req.user.id,
     },
   );
-  audit(req, 'drama.create', 'drama_project', r.insertId, { genre: b.genre, style: b.style });
+  audit(req, 'drama.create', 'drama_project', r.insertId, { genre: b.genre, style: b.style, episodes: b.episodesTotal });
   res.status(201).json({ data: present(await drama.load(r.insertId)) });
 });
 
-router.get('/:id', validate({ params: idParam }), async (req, res) => res.json({ data: present(await own(req)) }));
+router.get('/:id', validate({ params: idParam, query: epQuery }), async (req, res) => res.json({ data: present(await own(req), req.valid.query.episode) }));
 
-router.put('/:id/settings', validate({ params: idParam, body: settingsBody }), async (req, res) => {
+router.put('/:id/settings', validate({ params: idParam, query: epQuery, body: settingsBody }), async (req, res) => {
   const p = await own(req);
   const b = req.valid.body;
+  if (b.episodesTotal !== p.episodes_total && p.shots.length) {
+    throw badRequest('เปลี่ยนจำนวนตอนได้ก่อนเขียนบทตอนแรกเท่านั้น — ถ้าต้องการเปลี่ยน ให้เขียนเรื่องใหม่ทั้งหมดที่ขั้น 02');
+  }
   await db.query(
     `UPDATE drama_projects SET title = COALESCE(:title, title), genre = :genre, substyle = :substyle, style = :style, length_sec = :lengthSec,
-            visual_mode = :visualMode, premise = :premise, narrator_voice_id = :voice, music = :music,
+            visual_mode = 'clips', episodes_total = :episodes, premise = :premise, narrator_voice_id = :voice, music = :music,
             tie_in = :tieIn, product_name = :productName, product_pitch = :productPitch WHERE id = :id`,
     {
       id: p.id,
@@ -216,7 +266,7 @@ router.put('/:id/settings', validate({ params: idParam, body: settingsBody }), a
       substyle: b.substyle ?? null,
       style: b.style,
       lengthSec: b.lengthSec,
-      visualMode: b.visualMode,
+      episodes: b.episodesTotal,
       premise: b.premise ?? null,
       voice: b.narratorVoiceId ?? null,
       music: b.music ? 1 : 0,
@@ -225,19 +275,14 @@ router.put('/:id/settings', validate({ params: idParam, body: settingsBody }), a
       productPitch: b.productPitch || null,
     },
   );
-  // A new visual mode re-plans which shots become clips (finished clips stay)
-  if (b.visualMode !== p.visual_mode && p.shots.length) {
-    await db.query(
-      `UPDATE drama_shots SET kind = :kind, clip_status = IF(:kind = 'clip', IF(clip_key IS NULL, 'pending', 'done'), 'done') WHERE drama_project_id = :id ${b.visualMode === 'mixed' ? 'AND 0' : ''}`,
-      { id: p.id, kind: b.visualMode === 'clips' ? 'clip' : 'still' },
-    );
+  // a new number of episodes needs a new outline (nothing is written yet)
+  if (b.episodesTotal !== p.episodes_total) await drama.redo(p, 'outline');
+  if (b.narratorVoiceId !== p.narrator_voice_id) {
+    // every episode's narration needs the new voice
+    await db.query("UPDATE drama_shots SET audio_status = 'pending' WHERE drama_project_id = :id", { id: p.id });
+    await db.query('UPDATE drama_episodes SET output_key = NULL, render_id = NULL WHERE drama_project_id = :id', { id: p.id });
   }
-  if (b.narratorVoiceId !== p.narrator_voice_id) await db.query("UPDATE drama_shots SET audio_status = 'pending' WHERE drama_project_id = :id", { id: p.id });
-  // the finished video no longer matches: render again after the new clips / voices
-  if (b.visualMode !== p.visual_mode || b.narratorVoiceId !== p.narrator_voice_id) {
-    await db.query('UPDATE drama_projects SET output_key = NULL, render_id = NULL WHERE id = :id', { id: p.id });
-  }
-  res.json({ data: present(await drama.load(p.id)) });
+  res.json({ data: present(await drama.load(p.id), req.valid.query.episode) });
 });
 
 const shotBody = z.object({
@@ -245,7 +290,6 @@ const shotBody = z.object({
   dialogue: z.array(z.object({ character: z.string().max(40), line: z.string().trim().min(1).max(500) })).max(4).optional(),
   visualPrompt: z.string().trim().max(2000).optional(),
   camera: z.string().trim().max(255).nullish(),
-  kind: z.enum(['still', 'clip']).optional(),
 });
 
 router.put('/:id/shots/:sid', validate({ params: idParam.extend({ sid: z.coerce.number().int().positive() }), body: shotBody }), async (req, res) => {
@@ -255,23 +299,20 @@ router.put('/:id/shots/:sid', validate({ params: idParam.extend({ sid: z.coerce.
   const b = req.valid.body;
   const textChanged =
     (b.narration !== undefined && (b.narration || null) !== s.narration) || (b.dialogue !== undefined && JSON.stringify(b.dialogue) !== JSON.stringify(s.dialogue));
-  const kind = b.kind ?? s.kind;
   await db.query(
-    `UPDATE drama_shots SET narration = :narration, dialogue = :dialogue, visual_prompt = :visual, camera = :camera, kind = :kind,
-            clip_status = :clipStatus, audio_status = IF(:textChanged, 'pending', audio_status) WHERE id = :sid`,
+    `UPDATE drama_shots SET narration = :narration, dialogue = :dialogue, visual_prompt = :visual, camera = :camera,
+            audio_status = IF(:textChanged, 'pending', audio_status) WHERE id = :sid`,
     {
       sid: s.id,
       narration: b.narration === undefined ? s.narration : b.narration || null,
       dialogue: JSON.stringify(b.dialogue ?? s.dialogue),
       visual: b.visualPrompt ?? s.visual_prompt,
       camera: b.camera === undefined ? s.camera : b.camera || null,
-      kind,
-      clipStatus: kind === 'clip' ? (s.clip_key ? 'done' : s.kind === 'clip' ? s.clip_status : 'pending') : 'done',
       textChanged: textChanged ? 1 : 0,
     },
   );
-  if (textChanged || kind !== s.kind) await db.query('UPDATE drama_projects SET output_key = NULL, render_id = NULL WHERE id = :id', { id: p.id });
-  res.json({ data: present(await drama.load(p.id)) });
+  if (textChanged) await drama.outdated(p.id, s.episode_no);
+  res.json({ data: present(await drama.load(p.id), s.episode_no) });
 });
 
 const characterBody = z.object({
@@ -281,7 +322,7 @@ const characterBody = z.object({
   voiceId: z.string().trim().max(100).nullish(),
 });
 
-router.put('/:id/characters/:cid', validate({ params: idParam.extend({ cid: z.coerce.number().int().positive() }), body: characterBody }), async (req, res) => {
+router.put('/:id/characters/:cid', validate({ params: idParam.extend({ cid: z.coerce.number().int().positive() }), query: epQuery, body: characterBody }), async (req, res) => {
   const p = await own(req);
   const c = p.characters.find((x) => x.id === req.valid.params.cid);
   if (!c) throw notFound('ไม่พบตัวละคร');
@@ -297,47 +338,84 @@ router.put('/:id/characters/:cid', validate({ params: idParam.extend({ cid: z.co
   if (b.voiceId !== undefined && (b.voiceId || null) !== c.voice_id) {
     for (const s of p.shots.filter((x) => x.dialogue.some((d) => d.character === c.char_key))) {
       await db.query("UPDATE drama_shots SET audio_status = 'pending' WHERE id = :id", { id: s.id });
+      await drama.outdated(p.id, s.episode_no);
     }
-    await db.query('UPDATE drama_projects SET output_key = NULL, render_id = NULL WHERE id = :id', { id: p.id });
   }
-  res.json({ data: present(await drama.load(p.id)) });
+  res.json({ data: present(await drama.load(p.id), req.valid.query.episode) });
 });
 
-/** Run one step ('script' … 'export') or everything that is left ('all' = ทำออโต้ที่ค้างต่อ). */
-router.post('/:id/run', validate({ params: idParam, body: z.object({ target: z.enum([...drama.STEPS.slice(1), 'all']) }) }), async (req, res) => {
-  const p = await own(req);
-  const { target } = req.valid.body;
-  if ((target === 'script' || (target === 'all' && !p.shots.length)) && p.tie_in && (!p.product_pitch || !p.product_image_key)) {
-    throw badRequest('เปิดไทอินสินค้าแล้ว — ใส่รูปสินค้าและสิ่งที่อยากให้ตัวละครพูดก่อน (ขั้น 01)');
-  }
-  if (target === 'script') {
-    // writing the script again starts the story over
-    await db.query('DELETE FROM drama_shots WHERE drama_project_id = :id', { id: p.id });
-    await db.query('DELETE FROM drama_characters WHERE drama_project_id = :id', { id: p.id });
-  }
-  if (target !== 'script' && target !== 'all' && drama.STEPS.indexOf(target) > 1 && !p.shots.length) throw badRequest('ต้องมีบทก่อน — ไปขั้น 02 บทบรรยาย');
-  await drama.start(p.id, target);
-  audit(req, 'drama.run', 'drama_project', p.id, { target });
-  res.status(202).json({ data: present(await drama.load(p.id)) });
-});
+const episodeNo = z.number().int().positive().optional();
 
-router.post('/:id/cancel', validate({ params: idParam }), async (req, res) => {
+/**
+ * Run one step ('script' … 'export') of an episode, everything left of it ('all' = ทำออโต้ตอนนี้),
+ * or every episode in order ('series' = ทำทุกตอนต่อเนื่อง).
+ */
+router.post(
+  '/:id/run',
+  validate({ params: idParam, body: z.object({ target: z.enum([...drama.STEPS.slice(1), 'all', 'series']), episode: episodeNo }) }),
+  async (req, res) => {
+    const p = await own(req);
+    const { target } = req.valid.body;
+    const ep = Math.min(req.valid.body.episode ?? 1, p.episodes_total);
+    const shots = drama.shotsOf(p, ep);
+    if ((target === 'script' || ((target === 'all' || target === 'series') && !p.shots.length)) && p.tie_in && (!p.product_pitch || !p.product_image_key)) {
+      throw badRequest('เปิดไทอินสินค้าแล้ว — ใส่รูปสินค้าและสิ่งที่อยากให้ตัวละครพูดก่อน (ขั้น 01)');
+    }
+    // writing the script again starts this episode over (the outline and other episodes stay)
+    if (target === 'script' && shots.length) await drama.redo(p, 'episode', null, ep);
+    if ((target === 'storyboard' || target === 'export') && !shots.length) throw badRequest(`ต้องมีบทของตอนที่ ${ep} ก่อน — ไปขั้น 02 บทบรรยาย`);
+    if ((target === 'characters' || target === 'cover') && !drama.hasOutline(p)) throw badRequest('ต้องมีโครงเรื่องก่อน — ไปขั้น 02 บทบรรยาย');
+    await drama.start(p.id, target, ep);
+    audit(req, 'drama.run', 'drama_project', p.id, { target, episode: ep });
+    res.status(202).json({ data: present(await drama.load(p.id), ep) });
+  },
+);
+
+router.post('/:id/cancel', validate({ params: idParam, query: epQuery }), async (req, res) => {
   const p = await own(req);
   await drama.cancel(p.id);
-  res.json({ data: present(await drama.load(p.id)) });
+  res.json({ data: present(await drama.load(p.id), req.valid.query.episode) });
 });
 
 router.post(
   '/:id/redo',
-  validate({ params: idParam, body: z.object({ what: z.enum(['character', 'shot', 'cover', 'voices']), itemId: z.number().int().positive().optional() }) }),
+  validate({
+    params: idParam,
+    body: z.object({ what: z.enum(['character', 'shot', 'clip', 'cover', 'voices', 'episode', 'outline']), itemId: z.number().int().positive().optional(), episode: episodeNo }),
+  }),
   async (req, res) => {
     const p = await own(req);
     const { what, itemId } = req.valid.body;
-    if ((what === 'character' || what === 'shot') && !itemId) throw badRequest('ระบุรายการที่จะสร้างใหม่');
-    await drama.redo(p, what, itemId);
-    const step = { character: 'characters', shot: 'storyboard', cover: 'cover', voices: 'export' }[what];
-    await drama.start(p.id, step);
-    res.status(202).json({ data: present(await drama.load(p.id)) });
+    if (['character', 'shot', 'clip'].includes(what) && !itemId) throw badRequest('ระบุรายการที่จะสร้างใหม่');
+    const shot = itemId && (what === 'shot' || what === 'clip') ? p.shots.find((s) => s.id === itemId) : null;
+    const ep = shot?.episode_no ?? Math.min(req.valid.body.episode ?? 1, p.episodes_total);
+    await drama.redo(p, what, itemId, ep);
+    const step = { character: 'characters', shot: 'storyboard', clip: 'storyboard', cover: 'cover', voices: 'export', episode: 'script', outline: 'script' }[what];
+    await drama.start(p.id, step, what === 'outline' ? 1 : ep);
+    audit(req, 'drama.redo', 'drama_project', p.id, { what, episode: ep });
+    res.status(202).json({ data: present(await drama.load(p.id), what === 'outline' ? 1 : ep) });
+  },
+);
+
+/** Edit an episode in the outline (before its script is written, this steers it). */
+router.put(
+  '/:id/episodes/:no',
+  validate({
+    params: idParam.extend({ no: z.coerce.number().int().positive() }),
+    body: z.object({ title: z.string().trim().min(1).max(255).optional(), summary: z.string().trim().max(3000).nullish(), cliffhanger: z.string().trim().max(1500).nullish() }),
+  }),
+  async (req, res) => {
+    const p = await own(req);
+    const e = drama.episodeOf(p, req.valid.params.no);
+    if (!e) throw notFound('ไม่พบตอนนี้');
+    const b = req.valid.body;
+    await db.query('UPDATE drama_episodes SET title = :title, summary = :summary, cliffhanger = :cliff WHERE id = :id', {
+      id: e.id,
+      title: b.title ?? e.title,
+      summary: b.summary === undefined ? e.summary : b.summary || null,
+      cliff: b.cliffhanger === undefined ? e.cliffhanger : b.cliffhanger || null,
+    });
+    res.json({ data: present(await drama.load(p.id), e.episode_no) });
   },
 );
 
@@ -347,7 +425,7 @@ const IMAGE_MIME = { 'image/jpeg': true, 'image/png': true, 'image/webp': true }
 const MAX_PRODUCT_IMAGE = 6 * 1024 * 1024;
 
 /** The tie-in product photo, as a data URL (the browser shrinks it first). */
-router.post('/:id/product-image', validate({ params: idParam, body: z.object({ image: z.string().max(10_000_000) }) }), async (req, res) => {
+router.post('/:id/product-image', validate({ params: idParam, query: epQuery, body: z.object({ image: z.string().max(10_000_000) }) }), async (req, res) => {
   const p = await own(req);
   const m = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(req.valid.body.image);
   if (!m || !IMAGE_MIME[m[1]]) throw badRequest('รองรับรูป JPG, PNG หรือ WebP');
@@ -356,25 +434,27 @@ router.post('/:id/product-image', validate({ params: idParam, body: z.object({ i
   const key = drama.saveFile(buffer, m[1]);
   await db.query('UPDATE drama_projects SET product_image_key = :key WHERE id = :id', { id: p.id, key });
   if (p.product_image_key) media.removeFile(p.product_image_key);
-  res.json({ data: present(await drama.load(p.id)) });
+  res.json({ data: present(await drama.load(p.id), req.valid.query.episode) });
 });
 
-router.delete('/:id/product-image', validate({ params: idParam }), async (req, res) => {
+router.delete('/:id/product-image', validate({ params: idParam, query: epQuery }), async (req, res) => {
   const p = await own(req);
   await db.query('UPDATE drama_projects SET product_image_key = NULL WHERE id = :id', { id: p.id });
   if (p.product_image_key) media.removeFile(p.product_image_key);
-  res.json({ data: present(await drama.load(p.id)) });
+  res.json({ data: present(await drama.load(p.id), req.valid.query.episode) });
 });
 
-router.get('/:id/subtitles.srt', validate({ params: idParam }), async (req, res) => {
+router.get('/:id/subtitles.srt', validate({ params: idParam, query: epQuery }), async (req, res) => {
   const p = await own(req);
-  if (!p.subtitle_srt) throw notFound('ยังไม่มีคำบรรยาย');
-  res.type('application/x-subrip').attachment(`drama-${p.id}.srt`).send(p.subtitle_srt);
+  const ep = req.valid.query.episode ?? 1;
+  const e = drama.episodeOf(p, ep);
+  if (!e?.subtitle_srt) throw notFound('ยังไม่มีคำบรรยาย');
+  res.type('application/x-subrip').attachment(p.episodes_total > 1 ? `drama-${p.id}-ep${ep}.srt` : `drama-${p.id}.srt`).send(e.subtitle_srt);
 });
 
 router.delete('/:id', validate({ params: idParam }), async (req, res) => {
   const p = await own(req);
-  const keys = [p.cover_key, p.output_key, p.product_image_key, ...p.characters.map((c) => c.portrait_key), ...p.shots.flatMap((s) => [s.image_key, s.clip_key, ...s.audio.map((a) => a.key)])];
+  const keys = [p.cover_key, p.output_key, p.product_image_key, ...p.episodes.map((e) => e.output_key), ...p.characters.map((c) => c.portrait_key), ...p.shots.flatMap((s) => [s.image_key, s.clip_key, ...s.audio.map((a) => a.key)])];
   await db.query('DELETE FROM drama_projects WHERE id = :id', { id: p.id });
   for (const k of keys.filter(Boolean)) media.removeFile(k);
   audit(req, 'drama.delete', 'drama_project', p.id, {});

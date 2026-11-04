@@ -1,8 +1,9 @@
 'use strict';
 
-// ละคร AI: a project goes through script → characters → cover → storyboard (stills + MiniMax H3
-// clips) → voices → render in queued units; finished work is not redone; cancel stops the run;
-// one failed shot does not fail the project. MiniMax, the AI writer and Shotstack are mocked.
+// ละคร AI: a series (1–30 episodes) goes through outline → characters → cover → per episode: script →
+// storyboard (a MiniMax H3 clip for every shot) → voices → render in queued units; finished work is not
+// redone; cancel stops the run; failed images/clips are retried, then the run stops (never a still
+// slide). MiniMax, the AI writer and Shotstack are mocked.
 process.env.NODE_ENV = 'test';
 process.env.MEDIA_DIR = require('node:path').join(require('node:os').tmpdir(), `drama-test-${process.pid}`);
 const savedPublicUrl = process.env.PUBLIC_API_URL;
@@ -17,7 +18,7 @@ const { runDue } = require('../src/jobs/runner');
 const minimax = require('../src/integrations/minimax');
 const shotstack = require('../src/integrations/shotstack');
 const { buildDramaEdit } = require('../src/modules/drama/timeline');
-const { pickVoice } = require('../src/modules/drama/drama.service');
+const { pickVoice, splitLongShot } = require('../src/modules/drama/drama.service');
 
 const app = createApp();
 const ENV = { MINIMAX_API_KEY: 'mm-key', AI_PROVIDER: 'minimax' };
@@ -32,19 +33,24 @@ let manager;
 const PNG = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex');
 const json = (b) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
 
-const SCRIPT = {
+const CHARACTERS = [
+  { key: 'mali', name: 'มะลิ', role: 'นางเอก', gender: 'female', age: 'young', description: 'สาวกล้า', look: 'young Thai woman, long black hair, white blouse' },
+  { key: 'yai', name: 'ยายเพียร', role: 'ผีบ้าน', gender: 'female', age: 'elder', description: 'ยายผู้เฝ้าบ้าน', look: 'elderly Thai woman, grey bun, faded sarong' },
+];
+const outlineOf = (n) => ({
   title: 'ผีบ้านริมคลอง',
   logline: 'มะลิย้ายเข้าบ้านเก่าแล้วพบความลับของยาย',
-  characters: [
-    { key: 'mali', name: 'มะลิ', role: 'นางเอก', gender: 'female', age: 'young', description: 'สาวกล้า', look: 'young Thai woman, long black hair, white blouse' },
-    { key: 'yai', name: 'ยายเพียร', role: 'ผีบ้าน', gender: 'female', age: 'elder', description: 'ยายผู้เฝ้าบ้าน', look: 'elderly Thai woman, grey bun, faded sarong' },
-  ],
-  shots: [
-    { scene: 'ย้ายบ้าน', narration: 'คืนแรกในบ้านริมคลอง', dialogue: [], visual: 'old Thai house by a canal at night', camera: 'slow push in', characters: ['mali'], key: false },
-    { scene: 'เสียงเรียก', narration: '', dialogue: [{ character: 'yai', line: 'หนูมาแล้วหรือลูก' }], visual: 'ghostly old woman in doorway', camera: 'handheld', characters: ['yai'], key: true },
-    { scene: 'ความจริง', narration: 'มะลิรู้แล้วว่ายายรอเธอมาตลอด', dialogue: [{ character: 'mali', line: 'ยายคะ' }], visual: 'mali hugging the ghost', camera: 'pull out', characters: ['mali', 'yai'], key: true, product: true },
-  ],
-};
+  characters: CHARACTERS,
+  episodes: Array.from({ length: n }, (_, i) => ({ title: `คืนที่ ${i + 1}`, summary: `เหตุการณ์ตอน ${i + 1}`, cliffhanger: `จุดค้างตอน ${i + 1}` })),
+});
+const SHOTS = [
+  { scene: 'ย้ายบ้าน', narration: 'คืนแรกในบ้านริมคลอง', dialogue: [], visual: 'old Thai house by a canal at night', camera: 'slow push in', characters: ['mali'], product: false },
+  { scene: 'เสียงเรียก', narration: '', dialogue: [{ character: 'yai', line: 'หนูมาแล้วหรือลูก' }], visual: 'ghostly old woman in doorway', camera: 'handheld', characters: ['yai'], product: false },
+  { scene: 'ความจริง', narration: 'มะลิรู้แล้วว่ายายรอเธอมาตลอด', dialogue: [{ character: 'mali', line: 'ยายคะ' }], visual: 'mali hugging the ghost', camera: 'pull out', characters: ['mali', 'yai'], product: true },
+];
+let episodesInOutline = 1;
+let failClipShot = null; // every H3 attempt whose prompt contains this text fails
+let noBalance = false; // MiniMax answers 402 Payment Required
 
 async function drain(rounds = 60) {
   for (let i = 0; i < rounds; i += 1) {
@@ -59,11 +65,12 @@ async function drain(rounds = 60) {
 before(async () => {
   Object.assign(process.env, ENV);
   delete process.env.ANTHROPIC_API_KEY;
-  minimax.createMessage = async (params) => (calls.push({ path: 'ai', body: params }), {
-    model: 'MiniMax-M3',
-    stop_reason: 'tool_use',
-    content: [{ type: 'tool_use', id: 't', name: params.tools[0].name, input: SCRIPT }],
-  });
+  minimax.createMessage = async (params) => {
+    const name = params.tools[0].name;
+    calls.push({ path: 'ai', tool: name, body: params });
+    const input = name === 'submit_outline' ? outlineOf(episodesInOutline) : { shots: SHOTS };
+    return { model: 'MiniMax-M3', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't', name, input }] };
+  };
   shotstack.isConfigured = () => true;
   shotstack.render = async (edit) => {
     calls.push({ path: 'shotstack.render', body: edit });
@@ -82,8 +89,15 @@ before(async () => {
     if (u.pathname === '/v1/get_voice')
       return json({ system_voice: [{ voice_id: 'thai_female_1', voice_name: 'Thai female', description: ['Thai woman'] }, { voice_id: 'thai_male_1', voice_name: 'Thai male', description: ['Thai man'] }, { voice_id: 'thai_old_lady', voice_name: 'Thai elder female', description: ['old woman Thai'] }], base_resp: { status_code: 0 } });
     if (u.pathname === '/v1/t2a_v2') return json({ data: { audio: `https://cdn.test/a-${calls.length}.mp3` }, extra_info: { audio_length: 2000 }, base_resp: { status_code: 0 } });
-    if (u.pathname === '/v2/video_generation') return json({ task_id: `task-${calls.length}`, base_resp: { status_code: 0 } });
-    if (u.pathname.startsWith('/v2/query/video_generation/')) return json({ task: { status: 'Success', content: { url: 'https://cdn.test/clip.mp4' } }, base_resp: { status_code: 0 } });
+    if (u.pathname === '/v2/video_generation') {
+      if (noBalance) return new Response(JSON.stringify({ base_resp: { status_code: 1008, status_msg: 'insufficient balance' } }), { status: 402 });
+      const bad = failClipShot && body.content[0].text.includes(failClipShot);
+      return json({ task_id: `${bad ? 'bad' : 'task'}-${calls.length}`, base_resp: { status_code: 0 } });
+    }
+    if (u.pathname.startsWith('/v2/query/video_generation/')) {
+      if (u.pathname.includes('/bad-')) return json({ task: { status: 'Fail', message: 'moderation' }, base_resp: { status_code: 0 } });
+      return json({ task: { status: 'Success', content: { url: 'https://cdn.test/clip.mp4' } }, base_resp: { status_code: 0 } });
+    }
     if (u.host === 'cdn.test') return new Response(Buffer.from('media-bytes'), { status: 200 });
     return json({ base_resp: { status_code: 0 } });
   };
@@ -114,7 +128,7 @@ after(async () => {
 });
 
 describe('ละคร AI', () => {
-  test('catalog lists genres, styles, lengths and visual modes', async () => {
+  test('catalog lists genres, styles, lengths and series sizes; only moving clips are offered', async () => {
     const r = await manager.get('/api/drama/catalog');
     assert.equal(r.status, 200);
     assert.ok(r.body.data.genres.some((g) => g.id === 'ghost'));
@@ -123,13 +137,21 @@ describe('ละคร AI', () => {
       r.body.data.lengths.map((l) => l.sec),
       [60, 120, 180],
     );
+    assert.ok(r.body.data.episodePresets.includes(16));
+    assert.deepEqual(
+      r.body.data.visualModes.map((m) => m.id),
+      ['clips'],
+    );
   });
 
-  test('create in mixed mode → script: characters with voices, key shots become H3 clips', async () => {
-    const r = await manager.post('/api/drama', { genre: 'ghost', style: 'cinematic', lengthSec: 60, visualMode: 'mixed', premise: 'ผีบ้านริมคลอง', narratorVoiceId: 'narrator_v', music: true });
+  test('single film → outline then script: characters with voices, every shot is an H3 clip', async () => {
+    calls = [];
+    episodesInOutline = 1;
+    const r = await manager.post('/api/drama', { genre: 'ghost', style: 'cinematic', lengthSec: 60, visualMode: 'stills', premise: 'ผีบ้านริมคลอง', narratorVoiceId: 'narrator_v', music: true });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     projectId = r.body.data.id;
-    assert.equal(r.body.data.estimate.clips, 3);
+    assert.equal(r.body.data.episodesTotal, 1);
+    assert.equal(r.body.data.estimate.clips, 10, 'every planned shot is a clip');
     await manager.post(`/api/drama/${projectId}/run`, { target: 'script' });
     await drain();
     const d = (await manager.get(`/api/drama/${projectId}`)).body.data;
@@ -138,54 +160,52 @@ describe('ละคร AI', () => {
     assert.equal(d.characters.length, 2);
     assert.equal(d.characters[0].voiceId, 'thai_female_1');
     assert.equal(d.characters[1].voiceId, 'thai_old_lady');
+    assert.equal(d.episodes.length, 1);
+    assert.ok(d.shots.every((s) => s.kind === 'clip' && s.clipStatus === 'pending'));
+    // 3 shots for a 1-minute film is too few: the writer was asked once more for the full count
     assert.deepEqual(
-      d.shots.map((s) => s.kind),
-      ['still', 'clip', 'clip'],
+      calls.filter((c) => c.path === 'ai').map((c) => c.tool),
+      ['submit_outline', 'submit_episode', 'submit_episode'],
     );
     assert.equal(d.runTarget, null);
   });
 
-  test('auto: one failed storyboard image does not fail the project; clips use H3 v2 with the shot as first frame', async () => {
+  test('auto: a failed image is retried; every shot becomes an H3 clip from its first frame; the video has no stills', async () => {
     calls = [];
     imageNo = 0;
-    failImageNo = 4; // 2 portraits, cover, then shot 1 fails
-    await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
+    failImageNo = 4; // 2 portraits, cover, then shot 1's first attempt fails
+    await manager.post(`/api/drama/${projectId}/run`, { target: 'all', episode: 1 });
     await drain();
     const d = (await manager.get(`/api/drama/${projectId}`)).body.data;
     assert.equal(d.error, null, d.error);
     assert.ok(d.outputUrl, JSON.stringify({ stage: d.stageDetail, run: d.runTarget, steps: d.steps }));
     assert.ok(d.characters.every((c) => c.portraitUrl));
     assert.ok(d.coverUrl);
-    assert.equal(d.shots[0].imageStatus, 'failed');
-    assert.match(d.shots[0].error, /content blocked/);
-    assert.ok(d.shots.slice(1).every((s) => s.imageStatus === 'done' && s.clipStatus === 'done' && s.clipUrl));
-    // storyboard keeps the character's face: subject reference from the portrait
+    assert.ok(d.shots.every((s) => s.imageStatus === 'done' && s.clipStatus === 'done' && s.clipUrl));
+    assert.equal(d.shots[0].clipAttempts, 1, 'the image was made on the second try');
     const shotImages = calls.filter((c) => c.path === '/v1/image_generation').slice(3);
     assert.ok(shotImages.every((c) => c.body.subject_reference?.[0]?.image_file?.startsWith('data:image/')));
     const h3 = calls.filter((c) => c.path === '/v2/video_generation');
-    assert.equal(h3.length, 2);
+    assert.equal(h3.length, 3);
     assert.equal(h3[0].body.model, 'MiniMax-H3');
     assert.equal(h3[0].body.ratio, '9:16');
     assert.equal(h3[0].body.content[1].role, 'first_frame');
     assert.match(h3[0].body.content[1].image_url.url, /^data:image\//);
-    // narrator and characters speak with their own voices
     const tts = calls.filter((c) => c.path === '/v1/t2a_v2').map((c) => [c.body.text, c.body.voice_setting.voice_id]);
-    // clip shots are voiced first (each clip is made as long as its lines), the still shot at export
     assert.deepEqual(tts, [
+      ['คืนแรกในบ้านริมคลอง', 'narrator_v'],
       ['หนูมาแล้วหรือลูก', 'thai_old_lady'],
       ['มะลิรู้แล้วว่ายายรอเธอมาตลอด', 'narrator_v'],
       ['ยายคะ', 'thai_female_1'],
-      ['คืนแรกในบ้านริมคลอง', 'narrator_v'],
     ]);
     assert.deepEqual(
       h3.map((c) => c.body.duration),
-      [4, 5],
+      [4, 4, 5],
     );
-    assert.match(h3[0].body.content[0].text, /speaks with natural lip movement/);
-    // the failed shot has no picture, so the render uses the other two
+    assert.match(h3[1].body.content[0].text, /speaks with natural lip movement/);
     const edit = calls.find((c) => c.path === 'shotstack.render').body;
     const visuals = edit.timeline.tracks.at(-1).clips;
-    assert.ok(visuals.some((v) => v.asset.type === 'video'));
+    assert.ok(visuals.length >= 3 && visuals.every((v) => v.asset.type === 'video'), 'only moving clips, no still slides');
   });
 
   test('resume: finished work is not redone; redo one shot regenerates only that shot', async () => {
@@ -202,7 +222,7 @@ describe('ละคร AI', () => {
     const d = (await manager.get(`/api/drama/${projectId}`)).body.data;
     assert.equal(d.shots[0].imageStatus, 'done');
     assert.equal(calls.filter((c) => c.path === '/v1/image_generation').length, 1);
-    assert.equal(calls.filter((c) => c.path === '/v2/video_generation').length, 0);
+    assert.equal(calls.filter((c) => c.path === '/v2/video_generation').length, 1, 'its clip is made again too');
     assert.equal(d.outputUrl, null, 'the finished video is outdated after a redo');
   });
 
@@ -219,26 +239,118 @@ describe('ละคร AI', () => {
     assert.equal(r.body.data.shots[1].audioStatus, 'done');
   });
 
-  test('upgrade to video clips: every still becomes an H3 clip, then the video is rendered again', async () => {
+  test('a clip that keeps failing is retried 3 times, then the run stops and names the shot (no still instead)', async () => {
     const d0 = (await manager.get(`/api/drama/${projectId}`)).body.data;
-    const r = await manager.put(`/api/drama/${projectId}/settings`, {
-      genre: d0.genre,
-      style: d0.style,
-      lengthSec: d0.lengthSec,
-      visualMode: 'clips',
-      narratorVoiceId: d0.narratorVoiceId,
-      music: d0.music,
-    });
-    assert.equal(r.status, 200);
-    assert.ok(r.body.data.shots.every((s) => s.kind === 'clip'));
-    assert.equal(r.body.data.outputUrl, null, 'the old slideshow is replaced');
+    await manager.post(`/api/drama/${projectId}/redo`, { what: 'clip', itemId: d0.shots[1].id });
+    await manager.post(`/api/drama/${projectId}/cancel`);
     calls = [];
+    failClipShot = 'ghostly old woman';
+    try {
+      await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
+      await drain();
+    } finally {
+      failClipShot = null;
+    }
+    const d = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    assert.equal(calls.filter((c) => c.path === '/v2/video_generation').length, 3);
+    assert.equal(d.shots[1].clipStatus, 'failed');
+    assert.match(d.error, /ช็อต 2 สร้างวิดีโอไม่สำเร็จ/);
+    assert.equal(calls.filter((c) => c.path === 'shotstack.render').length, 0, 'not rendered without the clip');
+    assert.equal(d.outputUrl, null);
+    // "สร้างคลิปใหม่" after fixing it finishes the episode
+    await manager.post(`/api/drama/${projectId}/redo`, { what: 'clip', itemId: d0.shots[1].id });
+    await drain();
     await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
     await drain();
+    const d2 = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    assert.equal(d2.error, null, d2.error);
+    assert.ok(d2.outputUrl);
+  });
+
+  test('MiniMax 402 (no balance): the run stops at once with how to fix it; no attempt is used up', async () => {
+    const d0 = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    await manager.post(`/api/drama/${projectId}/redo`, { what: 'clip', itemId: d0.shots[0].id });
+    await manager.post(`/api/drama/${projectId}/cancel`);
+    calls = [];
+    noBalance = true;
+    try {
+      await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
+      await drain();
+    } finally {
+      noBalance = false;
+    }
     const d = (await manager.get(`/api/drama/${projectId}`)).body.data;
-    assert.equal(calls.filter((c) => c.path === '/v2/video_generation').length, 1, 'only the former still shot gets a new clip');
-    assert.ok(d.shots.every((s) => s.clipUrl));
-    assert.ok(d.outputUrl);
+    assert.equal(calls.filter((c) => c.path === '/v2/video_generation').length, 1, 'not retried');
+    assert.match(d.error, /ยอดเงินไม่พอ \(HTTP 402\)/);
+    assert.match(d.error, /platform\.minimax\.io/);
+    assert.equal(d.shots[0].clipStatus, 'pending');
+    assert.equal(d.shots[0].clipAttempts, 0);
+    assert.equal(d.runTarget, null);
+    // after topping up, auto carries on
+    await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
+    await drain();
+    const d2 = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    assert.equal(d2.error, null, d2.error);
+    assert.ok(d2.outputUrl);
+  });
+
+  test('series: 3 episodes share characters and cover; each is written from the outline and gets its own video', async () => {
+    episodesInOutline = 3;
+    const created = await manager.post('/api/drama', { genre: 'ghost', style: 'cinematic', lengthSec: 60, episodesTotal: 3, narratorVoiceId: 'narrator_v' });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const sid = created.body.data.id;
+    try {
+      assert.equal(created.body.data.episodesTotal, 3);
+      assert.equal(created.body.data.estimate.clips, 30);
+      calls = [];
+      imageNo = 0;
+      await manager.post(`/api/drama/${sid}/run`, { target: 'all', episode: 1 });
+      await drain();
+      let d = (await manager.get(`/api/drama/${sid}?episode=1`)).body.data;
+      assert.equal(d.error, null, d.error);
+      assert.deepEqual(
+        d.episodes.map((e) => [e.no, e.title, e.status]),
+        [
+          [1, 'คืนที่ 1', 'done'],
+          [2, 'คืนที่ 2', 'todo'],
+          [3, 'คืนที่ 3', 'todo'],
+        ],
+      );
+      assert.ok(d.episodes[0].outputUrl);
+      const ep1Html = JSON.stringify(calls.find((c) => c.path === 'shotstack.render').body);
+      assert.match(ep1Html, /ตอนที่ 1 คืนที่ 1/);
+      assert.match(ep1Html, /ติดตามตอนที่ 2/);
+
+      // the rest in one go: episode 2 then 3; characters and cover are not made again
+      calls = [];
+      imageNo = 0;
+      await manager.post(`/api/drama/${sid}/run`, { target: 'series' });
+      await drain(150);
+      d = (await manager.get(`/api/drama/${sid}?episode=3`)).body.data;
+      assert.equal(d.error, null, d.error);
+      assert.ok(
+        d.episodes.every((e) => e.status === 'done' && e.outputUrl),
+        JSON.stringify(d.episodes),
+      );
+      assert.equal(d.episode, 3);
+      assert.ok(d.shots.every((s) => s.episodeNo === 3));
+      assert.equal(calls.filter((c) => c.path === '/v1/image_generation').length, 6, 'only the shots of episodes 2 and 3');
+      const ep2Brief = JSON.stringify(calls.find((c) => c.tool === 'submit_episode').body.messages);
+      assert.match(ep2Brief, /ตอนที่ 2: คืนที่ 2/);
+      assert.match(ep2Brief, /ตอนที่แล้วจบที่: จุดค้างตอน 1/);
+      assert.match(JSON.stringify(calls.filter((c) => c.path === 'shotstack.render').at(-1).body), /จบบริบูรณ์/);
+      const srt = await manager.get(`/api/drama/${sid}/subtitles.srt?episode=2`);
+      assert.equal(srt.status, 200);
+      // the number of episodes is fixed once a script is written
+      const locked = await manager.put(`/api/drama/${sid}/settings`, { genre: 'ghost', style: 'cinematic', lengthSec: 60, episodesTotal: 5 });
+      assert.equal(locked.status, 400);
+      const list = (await manager.get('/api/drama')).body.data.find((x) => x.id === sid);
+      assert.equal(list.episodesDone, 3);
+      assert.equal(list.done, true);
+    } finally {
+      await db.query('DELETE FROM drama_projects WHERE id = :id', { id: sid });
+      episodesInOutline = 1;
+    }
   });
 
   test('tie-in: needs the product first; the tie-in shot is made from the product photo and shows it in the video', async () => {
@@ -246,7 +358,6 @@ describe('ละคร AI', () => {
       genre: 'drama',
       style: 'cinematic',
       lengthSec: 60,
-      visualMode: 'mixed',
       tieIn: true,
       productName: 'เซรั่มหน้าใส',
       productPitch: 'ซึมไว ไม่เหนียว หน้าฉ่ำใน 7 วัน',
@@ -269,12 +380,11 @@ describe('ละคร AI', () => {
       const d = (await manager.get(`/api/drama/${tid}`)).body.data;
       assert.equal(d.error, null, d.error);
       // the writer was told about the product and what to say
-      const brief = JSON.stringify(calls.find((c) => c.path === 'ai').body.messages);
+      const brief = JSON.stringify(calls.find((c) => c.tool === 'submit_episode').body.messages);
       assert.match(brief, /เซรั่มหน้าใส/);
       assert.match(brief, /ซึมไว ไม่เหนียว/);
       const tie = d.shots.find((x) => x.isProduct);
       assert.ok(tie, 'the tie-in shot is marked');
-      assert.equal(tie.kind, 'clip');
       const h3 = calls.filter((c) => c.path === '/v2/video_generation');
       const productClip = h3.find((c) => c.body.content.filter((x) => x.role === 'reference_image').length === 2);
       assert.ok(productClip, 'made from the shot + the product photo');
@@ -302,27 +412,51 @@ describe('ละคร AI', () => {
   });
 });
 
-test('timeline: title card, voices in order, captions, clip then still', () => {
+test('timeline: title on the first clip, voices in order, captions; a short clip keeps moving instead of freezing', () => {
   const { edit, srt, durationSec } = buildDramaEdit({
     title: 'เรื่องทดสอบ',
-    coverUrl: 'https://x/cover.jpg',
+    subtitle: 'ตอนที่ 1 คืนแรก',
+    endText: 'ติดตามตอนที่ 2',
     shots: [
-      { image: 'https://x/1.jpg', clip: null, clipSec: null, lines: [{ speaker: 'narrator', text: 'กาลครั้งหนึ่ง', url: 'https://x/a1.mp3', ms: 2000 }] },
-      { image: 'https://x/2.jpg', clip: 'https://x/2.mp4', clipSec: 2, lines: [{ speaker: 'mali', name: 'มะลิ', text: 'ยายคะ', url: 'https://x/a2.mp3', ms: 3000 }] },
+      { clip: 'https://x/1.mp4', clipSec: 4, lines: [{ speaker: 'narrator', text: 'กาลครั้งหนึ่ง', url: 'https://x/a1.mp3', ms: 2000 }] },
+      { clip: 'https://x/2.mp4', clipSec: 2, lines: [{ speaker: 'mali', name: 'มะลิ', text: 'ยายคะ', url: 'https://x/a2.mp3', ms: 3000 }] },
+      { clip: 'https://x/3.mp4', clipSec: 6, lines: [{ speaker: 'narrator', text: 'จบแล้ว', url: 'https://x/a3.mp3', ms: 4000 }] },
     ],
   });
   const tracks = edit.timeline.tracks;
   const voice = tracks.find((t) => t.clips[0]?.asset.type === 'audio').clips;
-  assert.equal(voice[0].start, 2.65);
+  assert.equal(voice[0].start, 1.2, 'the first line waits for the title');
   assert.ok(voice[1].start > voice[0].start + 2);
   const visuals = tracks.at(-1).clips;
-  assert.equal(visuals[0].asset.src, 'https://x/cover.jpg');
-  assert.deepEqual(
-    visuals.slice(1).map((v) => v.asset.type),
-    ['image', 'video', 'image'],
-  );
+  assert.ok(visuals.every((v) => v.asset.type === 'video'));
+  // shot 2 lasts ~3.6s but its clip is 2s: the clip's end plays again (trimmed), not a still
+  const second = visuals.filter((v) => v.asset.src === 'https://x/2.mp4');
+  assert.ok(second.length >= 2);
+  assert.ok(second[1].asset.trim > 0);
+  const html = JSON.stringify(tracks.flatMap((t) => t.clips).map((c) => c.asset.html ?? ''));
+  assert.match(html, /เรื่องทดสอบ/);
+  assert.match(html, /ตอนที่ 1 คืนแรก/);
+  assert.match(html, /ติดตามตอนที่ 2/);
   assert.match(srt, /มะลิ: ยายคะ/);
-  assert.ok(durationSec >= 9);
+  assert.ok(durationSec >= 10);
+});
+
+test('splitLongShot: a long narration becomes several shots that each fit one clip', () => {
+  const long = 'กาลครั้งหนึ่งนานมาแล้ว '.repeat(12).trim();
+  const parts = splitLongShot({ scene: 'x', narration: long, dialogue: [{ character: 'mali', line: 'ยายคะ' }], visual: 'v', camera: 'c', characters: [], product: true });
+  assert.ok(parts.length >= 2);
+  assert.equal(
+    parts
+      .map((p) => p.narration)
+      .filter(Boolean)
+      .join(' '),
+    long,
+  );
+  assert.ok(parts.every((p) => [p.narration, ...p.dialogue.map((d) => d.line)].join('').replace(/\s/g, '').length / 12 + 1 <= 12));
+  assert.deepEqual(parts.at(-1).dialogue, [{ character: 'mali', line: 'ยายคะ' }]);
+  assert.equal(parts.filter((p) => p.product).length, 1);
+  const short = { narration: 'สั้น', dialogue: [], visual: 'v' };
+  assert.deepEqual(splitLongShot(short), [short]);
 });
 
 test('pickVoice: Thai voices by gender, prefers an unused one', () => {

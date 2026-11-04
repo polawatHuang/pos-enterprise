@@ -21,7 +21,11 @@ export function DramaListView() {
     queryFn: () => api.get<DramaListItem[]>("/drama"),
     refetchInterval: (q) => (q.state.data?.some((d) => d.running) ? 5000 : false),
   });
-  const catalog = useQuery({ queryKey: ["drama", "catalog"], queryFn: () => api.get<DramaCatalog>("/drama/catalog"), staleTime: 60_000 });
+  const catalog = useQuery({
+    queryKey: ["drama", "catalog"],
+    queryFn: () => api.get<DramaCatalog>("/drama/catalog"),
+    staleTime: 60_000,
+  });
   const [creating, setCreating] = useState(false);
   const genreLabel = (id: string) => catalog.data?.genres.find((g) => g.id === id)?.label ?? id;
   const styleLabel = (id: string) => catalog.data?.styles.find((s) => s.id === id)?.label ?? id;
@@ -29,7 +33,13 @@ export function DramaListView() {
   const create = async () => {
     setCreating(true);
     try {
-      const p = await api.post<DramaProject>("/drama", { genre: "ghost", style: "realistic", lengthSec: 60, visualMode: "clips", music: true });
+      const p = await api.post<DramaProject>("/drama", {
+        genre: "ghost",
+        style: "realistic",
+        lengthSec: 60,
+        episodesTotal: 1,
+        music: true,
+      });
       router.push(`/drama/${p.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "สร้างโปรเจกต์ไม่สำเร็จ");
@@ -41,7 +51,7 @@ export function DramaListView() {
     <>
       <PageHeader
         title="ละคร AI"
-        description="สร้างวิดีโอละครสั้น 9:16 สำเร็จรูป ตั้งแต่บท ตัวละคร ภาพ คลิป MiniMax H3 เสียงพากย์ จนเป็นไฟล์พร้อมโพสต์"
+        description="สร้างละครสั้น 9:16 ทั้งแบบตอนเดียวจบและซีรีส์หลายตอน ทุกช็อตเป็นวิดีโอเคลื่อนไหว MiniMax H3 พร้อมเสียงพากย์ จนเป็นไฟล์พร้อมโพสต์"
         actions={
           <Button onClick={() => void create()} disabled={creating}>
             {creating ? <Loader2 className="animate-spin" /> : <Plus />} สร้างละครใหม่
@@ -61,7 +71,9 @@ export function DramaListView() {
             </li>
           ))}
         </ol>
-        <p className="mt-3 text-sm text-white/80">กด &quot;ทำออโต้&quot; ครั้งเดียว ระบบทำต่อให้จนจบ ปิดหน้าไปได้ กลับมาดูทีหลัง</p>
+        <p className="mt-3 text-sm text-white/80">
+          เลือกได้ตั้งแต่ตอนเดียวจบจนถึงซีรีส์ 30 ตอน · ทุกช็อตเป็นวิดีโอเคลื่อนไหว ไม่ใช่สไลด์ภาพ · กด &quot;ทำออโต้&quot; ครั้งเดียว ระบบทำต่อให้จนจบ
+        </p>
       </div>
 
       {list.isPending ? (
@@ -96,6 +108,11 @@ export function DramaListView() {
                 )}
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent p-3 pt-10">
                   <p className="line-clamp-2 font-semibold text-white">{d.title}</p>
+                  {d.episodesTotal > 1 && (
+                    <p className="mt-0.5 text-xs text-white/80">
+                      {d.episodesTotal} ตอนจบ · เสร็จ {d.episodesDone}/{d.episodesTotal}
+                    </p>
+                  )}
                 </div>
                 <div className="absolute left-2 top-2 flex flex-wrap gap-1">
                   {d.running ? (
@@ -104,7 +121,7 @@ export function DramaListView() {
                     </Badge>
                   ) : d.done ? (
                     <Badge tone="success" className="bg-white/90">
-                      พร้อมโพสต์
+                      {d.episodesTotal > 1 ? `ครบ ${d.episodesTotal} ตอน` : "พร้อมโพสต์"}
                     </Badge>
                   ) : d.error ? (
                     <Badge tone="danger" className="bg-white/90">
@@ -118,7 +135,8 @@ export function DramaListView() {
                   {genreLabel(d.genre)} · {styleLabel(d.style)}
                 </p>
                 <p>
-                  {Math.round(d.lengthSec / 60)} นาที · {d.shots || "–"} ช็อต · {formatRelativeTime(d.updatedAt)}
+                  {d.episodesTotal > 1 ? `${d.episodesTotal} ตอน × ` : ""}
+                  {Math.round(d.lengthSec / 60)} นาที · {formatRelativeTime(d.updatedAt)}
                 </p>
               </div>
             </Link>

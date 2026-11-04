@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS drama_style_previews, drama_shots, drama_characters, drama_projects, data_requests, trend_product_extras, trend_product_months, trend_categories, leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS drama_style_previews, drama_episodes, drama_shots, drama_characters, drama_projects, data_requests, trend_product_extras, trend_product_months, trend_categories, leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -1853,10 +1853,12 @@ CREATE TABLE drama_projects (
   substyle          VARCHAR(60)  NULL COMMENT 'genre sub-type, e.g. Thai ghost / Ayutthaya era',
   style             VARCHAR(40)  NOT NULL DEFAULT 'realistic',
   length_sec        INT NOT NULL DEFAULT 60,
-  visual_mode       ENUM('stills','mixed','clips') NOT NULL DEFAULT 'stills',
+  visual_mode       ENUM('stills','mixed','clips') NOT NULL DEFAULT 'clips',
   premise           TEXT NULL,
   narrator_voice_id VARCHAR(100) NULL,
   music             TINYINT(1) NOT NULL DEFAULT 1,
+  episodes_total    INT NOT NULL DEFAULT 1 COMMENT 'number of episodes in the series',
+  run_episode       INT NULL COMMENT 'episode the current run works on',
   tie_in            TINYINT(1)   NOT NULL DEFAULT 0,
   product_name      VARCHAR(191) NULL,
   product_pitch     TEXT NULL COMMENT 'what the characters should say about the product',
@@ -1908,7 +1910,8 @@ CREATE TABLE drama_shots (
   visual_prompt    TEXT NULL COMMENT 'English shot description',
   camera           VARCHAR(255) NULL,
   characters       VARCHAR(500) NULL COMMENT 'JSON character keys in the shot',
-  kind             ENUM('still','clip') NOT NULL DEFAULT 'still',
+  episode_no       INT NOT NULL DEFAULT 1,
+  kind             ENUM('still','clip') NOT NULL DEFAULT 'clip',
   is_product       TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'a character presents the tie-in product',
   image_key        VARCHAR(80)  NULL,
   image_status     VARCHAR(20)  NOT NULL DEFAULT 'pending',
@@ -1917,11 +1920,29 @@ CREATE TABLE drama_shots (
   clip_status      VARCHAR(20)  NOT NULL DEFAULT 'pending',
   clip_polls       INT NOT NULL DEFAULT 0,
   clip_sec         INT NULL COMMENT 'length the H3 clip was made for (s)',
+  clip_attempts    INT NOT NULL DEFAULT 0 COMMENT 'failed H3 attempts (retried automatically up to 3)',
   audio            LONGTEXT NULL COMMENT 'JSON [{speaker, text, url, ms}]',
   audio_status     VARCHAR(20)  NOT NULL DEFAULT 'pending',
   error            VARCHAR(500) NULL,
   KEY idx_drama_shot (drama_project_id, seq),
+  KEY idx_drama_shot_episode (drama_project_id, episode_no, seq),
   CONSTRAINT fk_drama_shot_project FOREIGN KEY (drama_project_id) REFERENCES drama_projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE drama_episodes (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  drama_project_id BIGINT UNSIGNED NOT NULL,
+  episode_no       INT NOT NULL,
+  title            VARCHAR(255) NULL,
+  summary          TEXT NULL COMMENT 'what happens in this episode (series outline)',
+  cliffhanger      TEXT NULL COMMENT 'how the episode ends, leading into the next',
+  render_id        VARCHAR(100) NULL,
+  output_key       VARCHAR(80) NULL,
+  output_url       VARCHAR(1000) NULL,
+  subtitle_srt     MEDIUMTEXT NULL,
+  duration_sec     INT NULL,
+  UNIQUE KEY uq_drama_episode (drama_project_id, episode_no),
+  CONSTRAINT fk_drama_episode_project FOREIGN KEY (drama_project_id) REFERENCES drama_projects(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE drama_style_previews (
@@ -1937,6 +1958,6 @@ CREATE TABLE drama_style_previews (
   CONSTRAINT fk_drama_preview_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests'), ('031_marketplace_chat'), ('032_drama'), ('033_drama_clip_length'), ('034_drama_tie_in');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests'), ('031_marketplace_chat'), ('032_drama'), ('033_drama_clip_length'), ('034_drama_tie_in'), ('035_drama_series');
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -12,6 +12,8 @@ import {
   Download,
   Film,
   ImageIcon,
+  Layers,
+  ListOrdered,
   Loader2,
   Mic,
   Music,
@@ -25,7 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiDownload } from "@/lib/api";
-import type { DramaCatalog, DramaCharacter, DramaProject, DramaShot, DramaStepKey, DramaVisualMode } from "@/lib/types";
+import type { DramaCatalog, DramaCharacter, DramaEpisode, DramaProject, DramaShot, DramaStepKey } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, Label, Skeleton, Textarea } from "@/components/ui/primitives";
@@ -68,7 +70,7 @@ type Settings = {
   substyle: string | null;
   style: string;
   lengthSec: number;
-  visualMode: DramaVisualMode;
+  episodesTotal: number;
   premise: string;
   narratorVoiceId: string;
   music: boolean;
@@ -82,7 +84,7 @@ const settingsOf = (p: DramaProject): Settings => ({
   substyle: p.substyle,
   style: p.style,
   lengthSec: p.lengthSec,
-  visualMode: p.visualMode,
+  episodesTotal: p.episodesTotal,
   premise: p.premise ?? "",
   narratorVoiceId: p.narratorVoiceId ?? "",
   music: p.music,
@@ -94,27 +96,39 @@ const settingsOf = (p: DramaProject): Settings => ({
 const errorText = (err: unknown) => (err instanceof Error ? err.message : "ทำรายการไม่สำเร็จ");
 
 export function DramaStudio({ id }: { id: number }) {
+  // null = let the server pick (the episode being made, or the first unfinished one)
+  const [ep, setEp] = useState<number | null>(null);
   const q = useQuery({
-    queryKey: ["drama", id],
-    queryFn: () => api.get<DramaProject>(`/drama/${id}`),
+    queryKey: ["drama", id, ep],
+    queryFn: () => api.get<DramaProject>(`/drama/${id}${ep ? `?episode=${ep}` : ""}`),
     refetchInterval: (query) => (query.state.data?.runTarget ? 4000 : false),
+    placeholderData: (prev) => prev,
   });
   if (!q.data) return <Skeleton className="h-[70vh] rounded-2xl" />;
-  return <Studio p={q.data} />;
+  return <Studio p={q.data} queryKey={["drama", id, ep]} onEpisode={setEp} />;
 }
 
 /** Opens at the first unfinished step; the step-01 settings are edited locally until saved. */
-function Studio({ p }: { p: DramaProject }) {
+function Studio({ p, queryKey, onEpisode }: { p: DramaProject; queryKey: unknown[]; onEpisode: (n: number) => void }) {
   const id = p.id;
+  const ep = p.episode;
+  const series = p.episodesTotal > 1;
   const qc = useQueryClient();
-  const catalog = useQuery({ queryKey: ["drama", "catalog"], queryFn: () => api.get<DramaCatalog>("/drama/catalog"), staleTime: 30_000 });
+  const catalog = useQuery({
+    queryKey: ["drama", "catalog"],
+    queryFn: () => api.get<DramaCatalog>("/drama/catalog"),
+    staleTime: 30_000,
+  });
   const [step, setStep] = useState<DramaStepKey>(() =>
-    p.shots.length ? (p.steps.find((x) => x.status !== "done" && x.key !== "setup")?.key ?? "export") : "setup",
+    p.hasOutline ? (p.steps.find((x) => x.status !== "done" && x.key !== "setup")?.key ?? "export") : "setup",
   );
   const [form, setForm] = useState<Settings>(() => settingsOf(p));
   const [busy, setBusy] = useState(false);
 
-  const set = (data: DramaProject) => qc.setQueryData(["drama", id], data);
+  const set = (data: DramaProject) => {
+    qc.setQueryData(queryKey, data);
+    if (data.episode !== ep) onEpisode(data.episode);
+  };
   const call = async (fn: () => Promise<DramaProject>, ok?: string) => {
     setBusy(true);
     try {
@@ -139,23 +153,29 @@ function Studio({ p }: { p: DramaProject }) {
         productPitch: form.productPitch || null,
       }),
     );
-  const run = (target: DramaStepKey | "all") => call(() => api.post<DramaProject>(`/drama/${id}/run`, { target }));
-  const redo = (what: "character" | "shot" | "cover" | "voices", itemId?: number) => call(() => api.post<DramaProject>(`/drama/${id}/redo`, { what, itemId }));
-  /** Every shot becomes an H3 video clip (as long as its lines), then the video is rendered again. */
-  const upgrade = async () => {
-    const next = { ...form, visualMode: "clips" as const };
-    setForm(next);
-    const ok = await call(() =>
-      api.put<DramaProject>(`/drama/${id}/settings`, {
-        ...next,
-        substyle: next.substyle || null,
-        premise: next.premise || null,
-        narratorVoiceId: next.narratorVoiceId || null,
+  const run = (target: DramaStepKey | "all" | "series") => call(() => api.post<DramaProject>(`/drama/${id}/run`, { target, episode: ep }));
+  const redo = (what: "character" | "shot" | "clip" | "cover" | "voices" | "outline", itemId?: number) =>
+    call(() =>
+      api.post<DramaProject>(`/drama/${id}/redo`, {
+        what,
+        itemId,
+        episode: ep,
       }),
     );
-    if (ok && (await run("all"))) toast.success("เริ่มสร้างวิดีโอเคลื่อนไหวทุกช็อตแล้ว ใช้เวลาประมาณ 10–30 นาที ปิดหน้านี้ได้");
+  const stop = () => call(() => api.post<DramaProject>(`/drama/${id}/cancel?episode=${ep}`), "ยกเลิกงานออโต้แล้ว งานที่สร้างเสร็จยังอยู่ในโปรเจกต์");
+  const left = p.episodes.filter((e) => e.status !== "done").length;
+  /** Every remaining episode in order (asks first: it is the expensive button). */
+  const runSeries = async () => {
+    if (step === "setup" && !(await saveSettings())) return;
+    const clipSec = p.estimate.perEpisode.clipSeconds * left;
+    if (
+      !window.confirm(
+        `ทำต่อทุกตอนที่เหลือ ${left} ตอน?\nใช้คลิปวิดีโอ MiniMax H3 ประมาณ ${Math.round(clipSec / 60)} นาที (${clipSec} วินาที) และใช้เวลาหลายชั่วโมง ปิดหน้านี้ได้`,
+      )
+    )
+      return;
+    if (await run("series")) toast.success(`เริ่มทำทุกตอนต่อเนื่องแล้ว (เหลือ ${left} ตอน)`);
   };
-  const stop = () => call(() => api.post<DramaProject>(`/drama/${id}/cancel`), "ยกเลิกงานออโต้แล้ว งานที่สร้างเสร็จยังอยู่ในโปรเจกต์");
   const statusOf = (k: DramaStepKey) => p.steps.find((s) => s.key === k)?.status ?? "todo";
   const running = Boolean(p.runTarget);
   const idx = STEPS.findIndex((s) => s.key === step);
@@ -167,26 +187,37 @@ function Studio({ p }: { p: DramaProject }) {
       return;
     }
     const nextKey = STEPS[idx + 1].key;
-    if (statusOf(nextKey) === "todo" && !running && (nextKey === "script" || p.shots.length)) await run(nextKey);
+    const ready = nextKey === "script" || (nextKey === "characters" || nextKey === "cover" ? p.hasOutline : p.shots.length > 0);
+    if (statusOf(nextKey) === "todo" && !running && ready) await run(nextKey);
     setStep(nextKey);
   };
   const auto = async () => {
     if (step === "setup" && !(await saveSettings())) return;
-    if (await run("all")) toast.success("เริ่มทำออโต้แล้ว ระบบข้ามงานที่เสร็จแล้วและทำต่อจากจุดเดิม");
+    if (await run("all"))
+      toast.success(
+        series ? `เริ่มทำตอนที่ ${ep} ออโต้แล้ว ข้ามงานที่เสร็จแล้วและทำต่อจากจุดเดิม` : "เริ่มทำออโต้แล้ว ระบบข้ามงานที่เสร็จแล้วและทำต่อจากจุดเดิม",
+      );
   };
 
   return (
-    <div className="pb-40 sm:pb-28">
+    <div className={series ? "pb-60 sm:pb-28" : "pb-40 sm:pb-28"}>
       {/* header */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Link href="/drama" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-4" /> ละครทั้งหมด
         </Link>
         <h1 className="min-w-0 flex-1 truncate text-xl font-semibold sm:text-2xl">{p.title}</h1>
-        {running && (
-          <Badge tone="primary" className="max-w-full">
-            <Loader2 className="size-3 shrink-0 animate-spin" /> <span className="truncate">{p.stageDetail ?? "กำลังทำงาน"}</span>
+        {series && (
+          <Badge tone="neutral">
+            <Layers className="size-3" /> {p.episodesTotal} ตอนจบ
           </Badge>
+        )}
+        {running && (
+          <button type="button" onClick={() => p.runEpisode && onEpisode(p.runEpisode)} className="max-w-full" title="ไปที่ตอนที่กำลังทำ">
+            <Badge tone="primary" className="max-w-full">
+              <Loader2 className="size-3 shrink-0 animate-spin" /> <span className="truncate">{p.stageDetail ?? "กำลังทำงาน"}</span>
+            </Badge>
+          </button>
         )}
       </div>
       {p.error && !running && (
@@ -230,14 +261,20 @@ function Studio({ p }: { p: DramaProject }) {
         })}
       </nav>
 
+      {series && (step === "script" || step === "storyboard" || step === "export") && p.hasOutline && (
+        <EpisodeBar episodes={p.episodes} current={ep} onPick={onEpisode} />
+      )}
+
       {step === "setup" && catalog.data && <SetupStep form={form} onChange={setForm} catalog={catalog.data} p={p} onSaved={set} />}
-      {step === "script" && <ScriptStep p={p} busy={busy} onRun={() => run("script")} onSaved={set} />}
+      {step === "script" && <ScriptStep p={p} busy={busy} onRun={() => run("script")} onRestart={() => redo("outline")} onSaved={set} />}
       {step === "characters" && (
         <CharactersStep p={p} busy={busy} catalog={catalog.data} onRun={() => run("characters")} onRedo={(cid) => redo("character", cid)} onSaved={set} />
       )}
       {step === "cover" && <CoverStep p={p} busy={busy} onRun={() => run("cover")} onRedo={() => redo("cover")} />}
-      {step === "storyboard" && <StoryboardStep p={p} busy={busy} onRun={() => run("storyboard")} onRedo={(sid) => redo("shot", sid)} onSaved={set} />}
-      {step === "export" && <ExportStep p={p} busy={busy} onRun={() => run("export")} onRevoice={() => redo("voices")} onUpgrade={() => void upgrade()} />}
+      {step === "storyboard" && (
+        <StoryboardStep p={p} busy={busy} onRun={() => run("storyboard")} onRedo={(sid) => redo("shot", sid)} onRedoClip={(sid) => redo("clip", sid)} />
+      )}
+      {step === "export" && <ExportStep p={p} busy={busy} onRun={() => run("export")} onRevoice={() => redo("voices")} onPick={onEpisode} />}
 
       {/* sticky actions */}
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/90 backdrop-blur lg:left-[var(--sidebar-width,16rem)]">
@@ -255,18 +292,72 @@ function Studio({ p }: { p: DramaProject }) {
               <Pause /> หยุดออโต้
             </Button>
           ) : (
-            <Button
-              className="h-auto w-full flex-col gap-0 bg-gradient-to-r from-rose-600 to-fuchsia-600 py-2 text-white shadow-lg hover:opacity-95 sm:w-auto sm:px-6"
-              onClick={() => void auto()}
-              disabled={busy}
-            >
-              <span className="flex items-center gap-2 text-base font-semibold">
-                <Sparkles className="size-4" /> ทำออโต้ที่ค้างต่อ
-              </span>
-              <span className="text-[11px] font-normal text-white/85">ข้ามงานที่เสร็จแล้ว ทำต่อจากจุดเดิม</span>
-            </Button>
+            <>
+              {series && left > 1 && (
+                <Button variant="outline" className="h-auto w-full flex-col gap-0 py-2 sm:w-auto" onClick={() => void runSeries()} disabled={busy}>
+                  <span className="flex items-center gap-2 font-semibold">
+                    <Layers className="size-4" /> ทำทุกตอนต่อเนื่อง
+                  </span>
+                  <span className="text-[11px] font-normal text-muted-foreground">เหลือ {left} ตอน ทำเรียงจนจบเรื่อง</span>
+                </Button>
+              )}
+              <Button
+                className="h-auto w-full flex-col gap-0 bg-gradient-to-r from-rose-600 to-fuchsia-600 py-2 text-white shadow-lg hover:opacity-95 sm:w-auto sm:px-6"
+                onClick={() => void auto()}
+                disabled={busy}
+              >
+                <span className="flex items-center gap-2 text-base font-semibold">
+                  <Sparkles className="size-4" /> {series ? `ทำตอนที่ ${ep} ออโต้` : "ทำออโต้ที่ค้างต่อ"}
+                </span>
+                <span className="text-[11px] font-normal text-white/85">ข้ามงานที่เสร็จแล้ว ทำต่อจากจุดเดิม</span>
+              </Button>
+            </>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ episode bar */
+
+const EPISODE_TONE: Record<DramaEpisode["status"], string> = {
+  todo: "bg-muted-foreground/40",
+  progress: "bg-amber-500",
+  running: "bg-primary animate-pulse",
+  failed: "bg-danger",
+  done: "bg-success",
+};
+
+/** Which episode the script / storyboard / export steps show. */
+function EpisodeBar({ episodes, current, onPick }: { episodes: DramaEpisode[]; current: number; onPick: (n: number) => void }) {
+  const done = episodes.filter((e) => e.status === "done").length;
+  return (
+    <div className="mb-5 rounded-2xl border border-border bg-card p-3">
+      <div className="mb-2 flex items-center gap-2 text-sm">
+        <ListOrdered className="size-4 text-muted-foreground" />
+        <span className="font-semibold">เลือกตอน</span>
+        <span className="text-xs text-muted-foreground">
+          เสร็จแล้ว {done}/{episodes.length} ตอน
+        </span>
+      </div>
+      <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+        {episodes.map((e) => (
+          <button
+            key={e.no}
+            type="button"
+            onClick={() => onPick(e.no)}
+            aria-current={e.no === current ? "true" : undefined}
+            title={e.title ?? undefined}
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm tabular-nums transition",
+              e.no === current ? "border-transparent bg-gradient-to-r from-rose-600 to-fuchsia-600 font-semibold text-white" : "border-border hover:bg-accent",
+            )}
+          >
+            <span className={cn("size-2 rounded-full", EPISODE_TONE[e.status])} />
+            ตอน {e.no}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -297,7 +388,10 @@ function SetupStep({
   useQuery({
     queryKey: ["drama", "catalog", "poll", form.genre],
     queryFn: async () => {
-      await qc.invalidateQueries({ queryKey: ["drama", "catalog"], exact: true });
+      await qc.invalidateQueries({
+        queryKey: ["drama", "catalog"],
+        exact: true,
+      });
       return Date.now();
     },
     enabled: pending,
@@ -306,13 +400,19 @@ function SetupStep({
   const makePreviews = async () => {
     try {
       await api.post("/drama/catalog/previews", { genre: form.genre });
-      await qc.invalidateQueries({ queryKey: ["drama", "catalog"], exact: true });
+      await qc.invalidateQueries({
+        queryKey: ["drama", "catalog"],
+        exact: true,
+      });
       toast.success("กำลังสร้างภาพตัวอย่างทีละภาพ (ประมาณ 1–2 นาที)");
     } catch (err) {
       toast.error(errorText(err));
     }
   };
   const len = catalog.lengths.find((l) => l.sec === form.lengthSec) ?? catalog.lengths[0];
+  const written = p.episodes.some((e) => e.shots > 0);
+  const clipSec = len.sec * form.episodesTotal;
+  const setEpisodes = (n: number) => set("episodesTotal", Math.max(1, Math.min(catalog.maxEpisodes, Math.round(n) || 1)));
 
   return (
     <div className="space-y-6">
@@ -410,43 +510,83 @@ function SetupStep({
         </div>
       </Section>
 
-      <Section n="03" title="ความยาวและการเคลื่อนไหว" hint="คลิปแนวตั้ง 9:16 สำหรับ TikTok / Reels / Shorts">
-        <div className="flex flex-wrap gap-2">
-          {catalog.lengths.map((l) => (
-            <button
-              key={l.sec}
-              type="button"
-              onClick={() => set("lengthSec", l.sec)}
-              className={cn(
-                "rounded-xl border px-4 py-2 text-sm",
-                form.lengthSec === l.sec ? "border-primary bg-primary-soft font-semibold text-primary" : "border-border bg-card hover:bg-accent",
-              )}
-            >
-              {l.label} <span className="text-xs text-muted-foreground">· ~{l.shots} ช็อต</span>
-            </button>
-          ))}
-        </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
-          {catalog.visualModes.map((m) => {
-            const clips = Math.round(len.shots * m.clipShare);
-            const on = form.visualMode === m.id;
-            return (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => set("visualMode", m.id)}
-                className={cn("rounded-xl border-2 p-4 text-left transition", on ? "border-rose-600 bg-rose-600/5" : "border-border bg-card hover:bg-accent")}
-              >
-                <p className="flex items-center gap-2 font-semibold">
-                  {m.id === "stills" ? <ImageIcon className="size-4" /> : <Film className="size-4" />} {m.label}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">{m.hint}</p>
-                <p className="mt-2 text-xs">
-                  ภาพ AI ~{len.shots + 5} ภาพ{clips ? ` · คลิป H3 ${clips} คลิป (~${clips * 6} วินาที)` : ""}
-                </p>
-              </button>
-            );
-          })}
+      <Section n="03" title="จำนวนตอนและความยาว" hint="ตอนเดียวจบ หรือซีรีส์หลายตอน — แต่ละตอนเป็นคลิปแนวตั้ง 9:16 แยกกัน เรื่องต่อเนื่องกัน">
+        <div className="space-y-4">
+          <div>
+            <Label className="mb-1.5 block">จำนวนตอน</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              {catalog.episodePresets.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  disabled={written}
+                  onClick={() => setEpisodes(n)}
+                  className={cn(
+                    "rounded-xl border px-4 py-2 text-sm transition disabled:opacity-50",
+                    form.episodesTotal === n ? "border-primary bg-primary-soft font-semibold text-primary" : "border-border bg-card hover:bg-accent",
+                  )}
+                >
+                  {n === 1 ? "ตอนเดียวจบ" : `${n} ตอนจบ`}
+                </button>
+              ))}
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                ระบุเอง
+                <Input
+                  type="number"
+                  min={1}
+                  max={catalog.maxEpisodes}
+                  value={form.episodesTotal}
+                  disabled={written}
+                  onChange={(e) => setEpisodes(Number(e.target.value))}
+                  className="h-9 w-20"
+                  aria-label="จำนวนตอน"
+                />
+                ตอน
+              </label>
+            </div>
+            {written && (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                เขียนบทแล้ว จึงเปลี่ยนจำนวนตอนไม่ได้ — ถ้าต้องการ ให้กด &quot;เขียนเรื่องใหม่ทั้งหมด&quot; ที่ขั้น 02
+              </p>
+            )}
+          </div>
+          <div>
+            <Label className="mb-1.5 block">ความยาว{form.episodesTotal > 1 ? "ต่อตอน" : ""}</Label>
+            <div className="flex flex-wrap gap-2">
+              {catalog.lengths.map((l) => (
+                <button
+                  key={l.sec}
+                  type="button"
+                  onClick={() => set("lengthSec", l.sec)}
+                  className={cn(
+                    "rounded-xl border px-4 py-2 text-sm",
+                    form.lengthSec === l.sec ? "border-primary bg-primary-soft font-semibold text-primary" : "border-border bg-card hover:bg-accent",
+                  )}
+                >
+                  {l.label} <span className="text-xs text-muted-foreground">· ~{l.shots} ช็อต</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-start gap-3 rounded-xl border-2 border-rose-600/40 bg-rose-600/5 p-4">
+            <Film className="mt-0.5 size-5 shrink-0 text-rose-600" />
+            <div className="min-w-0 flex-1 text-sm">
+              <p className="font-semibold">วิดีโอเคลื่อนไหวทุกช็อต — ไม่มีสไลด์ภาพนิ่ง</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                ตัวละครขยับ พูด และแสดงอารมณ์ทุกช็อตด้วย MiniMax H3 ยาวเท่าบทพูด ถ้าคลิปไหนสร้างไม่สำเร็จ ระบบลองใหม่อัตโนมัติ 3 ครั้ง และไม่เอาภาพนิ่งมาแทน
+              </p>
+              <p className="mt-2 text-xs">
+                {form.episodesTotal > 1 ? `ต่อตอน: ` : ""}คลิป H3 ~{len.shots} คลิป (~{len.sec} วินาที)
+                {form.episodesTotal > 1 && (
+                  <>
+                    {" "}
+                    · ทั้งเรื่อง {form.episodesTotal} ตอน: ~{len.shots * form.episodesTotal} คลิป (~
+                    {Math.round(clipSec / 60)} นาทีวิดีโอ)
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
         </div>
       </Section>
 
@@ -558,7 +698,11 @@ function TieInSection({
     if (!file.type.startsWith("image/")) return toast.error("เลือกไฟล์รูปภาพ");
     setUploading(true);
     try {
-      onSaved(await api.post<DramaProject>(`/drama/${p.id}/product-image`, { image: await shrinkImage(file) }));
+      onSaved(
+        await api.post<DramaProject>(`/drama/${p.id}/product-image`, {
+          image: await shrinkImage(file),
+        }),
+      );
       toast.success("อัปโหลดรูปสินค้าแล้ว");
     } catch (err) {
       toast.error(errorText(err));
@@ -710,26 +854,44 @@ function StepCta({
 
 /* -------------------------------------------------------------- 02 script */
 
-function ScriptStep({ p, busy, onRun, onSaved }: { p: DramaProject; busy: boolean; onRun: () => void; onSaved: (d: DramaProject) => void }) {
-  if (!p.shots.length) {
+function ScriptStep({
+  p,
+  busy,
+  onRun,
+  onRestart,
+  onSaved,
+}: {
+  p: DramaProject;
+  busy: boolean;
+  onRun: () => void;
+  onRestart: () => void;
+  onSaved: (d: DramaProject) => void;
+}) {
+  const series = p.episodesTotal > 1;
+  if (!p.hasOutline) {
     return (
       <StepCta
         p={p}
         step="script"
-        title="ให้ AI เขียนบทละคร"
-        hint="AI จะคิดเรื่อง ตัวละคร และแบ่งเป็นช็อตพร้อมคำบรรยาย บทพูด และคำสั่งภาพ ใช้เวลาประมาณ 1 นาที"
-        action="เขียนบทด้วย AI"
+        title={series ? `ให้ AI วางโครงเรื่อง ${p.episodesTotal} ตอน` : "ให้ AI เขียนบทละคร"}
+        hint={
+          series
+            ? `AI คิดเรื่อง ตัวละคร และเรื่องย่อของทั้ง ${p.episodesTotal} ตอนให้ต่อเนื่องกัน (มีจุดค้างท้ายทุกตอน) แล้วเขียนบทตอนที่ 1 เป็นช็อตพร้อมคำบรรยายและบทพูด`
+            : "AI จะคิดเรื่อง ตัวละคร และแบ่งเป็นช็อตพร้อมคำบรรยาย บทพูด และคำสั่งวิดีโอ ใช้เวลาประมาณ 1 นาที"
+        }
+        action={series ? "วางโครงเรื่องและเขียนตอนที่ 1" : "เขียนบทด้วย AI"}
         busy={busy}
         onRun={onRun}
       />
     );
   }
+  const e = p.episodes.find((x) => x.no === p.episode);
   return (
     <div className="space-y-4">
       <Card className="p-4">
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-xs text-muted-foreground">เรื่องย่อ</p>
+            <p className="text-xs text-muted-foreground">เรื่องย่อ{series ? `ทั้งเรื่อง (${p.episodesTotal} ตอนจบ)` : ""}</p>
             <p className="font-medium">{p.logline}</p>
           </div>
           <Button
@@ -737,19 +899,140 @@ function ScriptStep({ p, busy, onRun, onSaved }: { p: DramaProject; busy: boolea
             size="sm"
             disabled={busy || !!p.runTarget}
             onClick={() => {
-              if (window.confirm("เขียนบทใหม่ทั้งเรื่อง? ตัวละคร ภาพ และเสียงเดิมจะถูกลบ")) onRun();
+              if (window.confirm("เขียนเรื่องใหม่ทั้งหมด? โครงเรื่อง ตัวละคร บท ภาพ คลิป และเสียงเดิมทุกตอนจะถูกลบ")) onRestart();
             }}
           >
-            <RefreshCw /> เขียนบทใหม่
+            <RefreshCw /> เขียนเรื่องใหม่ทั้งหมด
           </Button>
         </div>
       </Card>
-      <div className="space-y-3">
-        {p.shots.map((s) => (
-          <ShotEditor key={`${s.id}-${s.narration}-${JSON.stringify(s.dialogue)}`} p={p} shot={s} onSaved={onSaved} />
-        ))}
-      </div>
+      {series && <OutlineCard p={p} onSaved={onSaved} />}
+      {series && (
+        <div className="flex flex-wrap items-center gap-2 pt-2">
+          <h2 className="min-w-0 flex-1 text-lg font-semibold">
+            ตอนที่ {p.episode}
+            {e?.title ? `: ${e.title}` : ""}
+          </h2>
+        </div>
+      )}
+      {!p.shots.length ? (
+        <StepCta
+          p={p}
+          step="script"
+          title={`เขียนบทตอนที่ ${p.episode}`}
+          hint={`AI เขียนบทตอนนี้ต่อจากตอนที่แล้ว ตามเรื่องย่อของตอน${e?.summary ? `: ${e.summary}` : ""}`}
+          action={`เขียนบทตอนที่ ${p.episode}`}
+          busy={busy}
+          onRun={onRun}
+        />
+      ) : (
+        <>
+          <div className="flex justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy || !!p.runTarget}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `เขียนบท${series ? `ตอนที่ ${p.episode}` : ""}ใหม่? ภาพ คลิป และเสียงของ${series ? "ตอนนี้" : "เรื่องนี้"}จะถูกลบ (ตัวละครยังอยู่)`,
+                  )
+                )
+                  onRun();
+              }}
+            >
+              <RefreshCw /> เขียนบท{series ? "ตอนนี้" : ""}ใหม่
+            </Button>
+          </div>
+          <div className="space-y-3">
+            {p.shots.map((s) => (
+              <ShotEditor key={`${s.id}-${s.narration}-${JSON.stringify(s.dialogue)}`} p={p} shot={s} onSaved={onSaved} />
+            ))}
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+/** The series outline: one summary per episode, editable before (or after) its script is written. */
+function OutlineCard({ p, onSaved }: { p: DramaProject; onSaved: (d: DramaProject) => void }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? p.episodes : p.episodes.slice(0, 4);
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <ListOrdered className="size-4 text-rose-600" />
+        <p className="flex-1 font-semibold">โครงเรื่องทั้ง {p.episodesTotal} ตอน</p>
+        <span className="text-xs text-muted-foreground">แก้เรื่องย่อของตอนที่ยังไม่ได้เขียนบท เพื่อกำหนดทิศทางได้</span>
+      </div>
+      <ol className="space-y-2">
+        {shown.map((e) => (
+          <OutlineRow key={`${e.no}-${e.title}-${e.summary}-${e.cliffhanger}`} p={p} e={e} onSaved={onSaved} />
+        ))}
+      </ol>
+      {p.episodes.length > 4 && (
+        <Button variant="ghost" size="sm" className="mt-2 w-full" onClick={() => setOpen(!open)}>
+          {open ? "ย่อรายการ" : `ดูทั้งหมด ${p.episodes.length} ตอน`}
+        </Button>
+      )}
+    </Card>
+  );
+}
+
+function OutlineRow({ p, e, onSaved }: { p: DramaProject; e: DramaEpisode; onSaved: (d: DramaProject) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(e.title ?? "");
+  const [summary, setSummary] = useState(e.summary ?? "");
+  const [cliffhanger, setCliffhanger] = useState(e.cliffhanger ?? "");
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    try {
+      const d = await api.put<DramaProject>(`/drama/${p.id}/episodes/${e.no}`, {
+        title: title || undefined,
+        summary: summary || null,
+        cliffhanger: cliffhanger || null,
+      });
+      onSaved({ ...d, episode: p.episode, shots: p.shots, steps: p.steps });
+      setEditing(false);
+      toast.success(`บันทึกตอนที่ ${e.no} แล้ว`);
+    } catch (err) {
+      toast.error(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <li className={cn("rounded-xl border p-3", e.no === p.episode ? "border-rose-500/50 bg-rose-600/5" : "border-border")}>
+      {editing ? (
+        <div className="space-y-2">
+          <Input value={title} maxLength={255} onChange={(ev) => setTitle(ev.target.value)} aria-label={`ชื่อตอนที่ ${e.no}`} />
+          <Textarea rows={3} value={summary} maxLength={3000} onChange={(ev) => setSummary(ev.target.value)} placeholder="เรื่องย่อของตอน" />
+          <Textarea rows={2} value={cliffhanger} maxLength={1500} onChange={(ev) => setCliffhanger(ev.target.value)} placeholder="จบตอนด้วย…" />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+              ยกเลิก
+            </Button>
+            <Button size="sm" onClick={() => void save()} disabled={saving}>
+              {saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึก
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-start gap-3">
+          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-xs font-bold tabular-nums">{e.no}</span>
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">{e.title}</p>
+            {e.summary && <p className="text-sm text-muted-foreground">{e.summary}</p>}
+            {e.cliffhanger && <p className="mt-1 text-xs text-rose-600">จบตอน: {e.cliffhanger}</p>}
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setEditing(true)} disabled={!!p.runTarget}>
+            แก้
+          </Button>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -761,7 +1044,12 @@ function ShotEditor({ p, shot, onSaved }: { p: DramaProject; shot: DramaShot; on
   const save = async () => {
     setSaving(true);
     try {
-      onSaved(await api.put<DramaProject>(`/drama/${p.id}/shots/${shot.id}`, { narration: narration || null, dialogue }));
+      onSaved(
+        await api.put<DramaProject>(`/drama/${p.id}/shots/${shot.id}`, {
+          narration: narration || null,
+          dialogue,
+        }),
+      );
       toast.success(`บันทึกช็อต ${shot.seq} แล้ว`);
     } catch (err) {
       toast.error(errorText(err));
@@ -780,7 +1068,9 @@ function ShotEditor({ p, shot, onSaved }: { p: DramaProject; shot: DramaShot; on
             <ShoppingBag className="size-3" /> ไทอินสินค้า
           </Badge>
         )}
-        <Badge tone={shot.kind === "clip" ? "primary" : "neutral"}>{shot.kind === "clip" ? "คลิป H3" : "ภาพนิ่ง"}</Badge>
+        <Badge tone="primary">
+          <Film className="size-3" /> วิดีโอ H3
+        </Badge>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-1">
@@ -836,7 +1126,7 @@ function CharactersStep({
   onRedo: (id: number) => void;
   onSaved: (d: DramaProject) => void;
 }) {
-  if (!p.shots.length) return <NeedScript />;
+  if (!p.hasOutline) return <NeedScript />;
   const anyPortrait = p.characters.some((c) => c.portraitUrl);
   return (
     <div className="space-y-4">
@@ -877,7 +1167,11 @@ function CharacterCard({
 }) {
   const saveVoice = async (voiceId: string) => {
     try {
-      onSaved(await api.put<DramaProject>(`/drama/${p.id}/characters/${c.id}`, { voiceId: voiceId || null }));
+      onSaved(
+        await api.put<DramaProject>(`/drama/${p.id}/characters/${c.id}`, {
+          voiceId: voiceId || null,
+        }),
+      );
       toast.success(`เปลี่ยนเสียง ${c.name} แล้ว`);
     } catch (err) {
       toast.error(errorText(err));
@@ -920,19 +1214,23 @@ function CharacterCard({
   );
 }
 
-const NeedScript = () => <Card className="p-8 text-center text-sm text-muted-foreground">ต้องมีบทก่อน — ไปที่ขั้น 02 บทบรรยาย แล้วให้ AI เขียนบท</Card>;
+const NeedScript = ({ episode }: { episode?: number }) => (
+  <Card className="p-8 text-center text-sm text-muted-foreground">
+    {episode ? `ตอนที่ ${episode} ยังไม่มีบท` : "ต้องมีบทก่อน"} — ไปที่ขั้น 02 บทบรรยาย แล้วให้ AI เขียนบท
+  </Card>
+);
 
 /* --------------------------------------------------------------- 04 cover */
 
 function CoverStep({ p, busy, onRun, onRedo }: { p: DramaProject; busy: boolean; onRun: () => void; onRedo: () => void }) {
-  if (!p.shots.length) return <NeedScript />;
+  if (!p.hasOutline) return <NeedScript />;
   if (!p.coverUrl) {
     return (
       <StepCta
         p={p}
         step="cover"
         title="สร้างภาพปกละคร"
-        hint="ภาพปกแนวโปสเตอร์หนังพร้อมตัวละครหลัก ใช้เป็นฉากเปิดของวิดีโอและภาพหน้าปกโพสต์"
+        hint={`ภาพปกแนวโปสเตอร์หนังพร้อมตัวละครหลัก ใช้เป็นภาพหน้าปกโพสต์${p.episodesTotal > 1 ? "ของทุกตอน" : ""}`}
         action="สร้างปก"
         busy={busy}
         onRun={onRun}
@@ -962,51 +1260,55 @@ function StoryboardStep({
   busy,
   onRun,
   onRedo,
-  onSaved,
+  onRedoClip,
 }: {
   p: DramaProject;
   busy: boolean;
   onRun: () => void;
   onRedo: (id: number) => void;
-  onSaved: (d: DramaProject) => void;
+  onRedoClip: (id: number) => void;
 }) {
-  if (!p.shots.length) return <NeedScript />;
-  const done = p.shots.filter((s) => s.imageStatus === "done").length;
-  const clips = p.shots.filter((s) => s.kind === "clip");
-  const toggle = async (s: DramaShot) => {
-    try {
-      onSaved(await api.put<DramaProject>(`/drama/${p.id}/shots/${s.id}`, { kind: s.kind === "clip" ? "still" : "clip" }));
-    } catch (err) {
-      toast.error(errorText(err));
-    }
-  };
+  if (!p.shots.length) return <NeedScript episode={p.episodesTotal > 1 ? p.episode : undefined} />;
+  const images = p.shots.filter((s) => s.imageStatus === "done").length;
+  const clips = p.shots.filter((s) => s.clipStatus === "done" && s.clipUrl).length;
+  const failed = p.shots.filter((s) => s.imageStatus === "failed" || s.clipStatus === "failed");
   return (
     <div className="space-y-4">
       <Card className="flex flex-wrap items-center gap-3 p-4">
         <div className="min-w-0 flex-1">
           <p className="font-semibold">
-            ภาพ {done}/{p.shots.length} ช็อต · คลิป H3 {clips.filter((s) => s.clipStatus === "done").length}/{clips.length}
+            {p.episodesTotal > 1 ? `ตอนที่ ${p.episode} · ` : ""}วิดีโอ H3 {clips}/{p.shots.length} ช็อต
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              (ภาพตั้งต้น {images}/{p.shots.length})
+            </span>
           </p>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
             <div
               className="h-full rounded-full bg-gradient-to-r from-rose-600 to-fuchsia-600 transition-all"
-              style={{ width: `${(done / Math.max(1, p.shots.length)) * 100}%` }}
+              style={{
+                width: `${(clips / Math.max(1, p.shots.length)) * 100}%`,
+              }}
             />
           </div>
         </div>
         {p.runningStep !== "storyboard" && (
           <Button onClick={onRun} disabled={busy || !!p.runTarget} className="bg-gradient-to-r from-rose-600 to-fuchsia-600 text-white">
-            <Sparkles /> {done ? "สร้างช็อตที่เหลือ" : "สร้างสตอรี่บอร์ด"}
+            <Sparkles /> {clips || images ? "สร้างช็อตที่เหลือ" : "สร้างสตอรี่บอร์ด"}
           </Button>
         )}
       </Card>
+      {failed.length > 0 && !p.runTarget && (
+        <div role="alert" className="rounded-xl border border-danger/30 bg-danger-soft p-3 text-sm text-danger">
+          ช็อต {failed.map((s) => s.seq).join(", ")} สร้างวิดีโอไม่สำเร็จหลังลอง 3 ครั้ง — แก้คำบรรยายภาพที่ขั้น 02 หรือกด &quot;สร้างคลิปใหม่&quot; ที่ช็อตนั้น
+          (วิดีโอจะไม่ใช้ภาพนิ่งแทน)
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {p.shots.map((s) => {
-          const working =
-            p.runningStep === "storyboard" &&
-            (s.imageStatus === "pending" || s.clipStatus === "processing" || (s.kind === "clip" && s.clipStatus === "pending"));
+          const bad = s.imageStatus === "failed" || s.clipStatus === "failed";
+          const working = p.runningStep === "storyboard" && !bad && !(s.clipStatus === "done" && s.clipUrl);
           return (
-            <div key={s.id} className="overflow-hidden rounded-xl border border-border bg-card">
+            <div key={s.id} className={cn("overflow-hidden rounded-xl border bg-card", bad ? "border-danger/60" : "border-border")}>
               <div className="relative aspect-[9/16] bg-gradient-to-br from-slate-700 to-slate-950">
                 {s.clipUrl ? (
                   <video
@@ -1021,11 +1323,14 @@ function StoryboardStep({
                   />
                 ) : s.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={s.imageUrl} alt="" className="size-full object-cover" />
+                  <img src={s.imageUrl} alt="" className="size-full object-cover opacity-60" />
                 ) : null}
                 {working && (
-                  <div className="absolute inset-0 grid place-items-center bg-black/40">
-                    <Loader2 className="size-7 animate-spin text-white" />
+                  <div className="absolute inset-0 grid place-items-center bg-black/40 text-center text-[11px] text-white">
+                    <span className="flex flex-col items-center gap-1">
+                      <Loader2 className="size-7 animate-spin" />
+                      {s.imageStatus === "done" ? "กำลังทำวิดีโอ" : "กำลังทำภาพตั้งต้น"}
+                    </span>
                   </div>
                 )}
                 <span className="absolute left-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 text-xs font-bold text-white tabular-nums">{s.seq}</span>
@@ -1034,22 +1339,23 @@ function StoryboardStep({
                     <ShoppingBag className="size-3" /> ไทอิน
                   </span>
                 )}
-                <button
-                  type="button"
-                  onClick={() => void toggle(s)}
-                  disabled={!!p.runTarget}
+                <span
                   className={cn(
                     "absolute right-2 top-2 rounded-md px-1.5 py-0.5 text-[11px] font-semibold",
-                    s.kind === "clip" ? "bg-rose-600 text-white" : "bg-white/85 text-slate-900",
+                    s.clipUrl && s.clipStatus === "done" ? "bg-success text-white" : bad ? "bg-danger text-white" : "bg-white/85 text-slate-900",
                   )}
-                  title="สลับคลิป / ภาพนิ่ง"
                 >
-                  {s.kind === "clip" ? "คลิป H3" : "ภาพนิ่ง"}
-                </button>
+                  {s.clipUrl && s.clipStatus === "done" ? "วิดีโอ ✓" : bad ? "ไม่สำเร็จ" : s.clipStatus === "processing" ? "กำลังทำ" : "รอวิดีโอ"}
+                </span>
               </div>
               <div className="space-y-1.5 p-2">
                 <p className="line-clamp-2 text-xs text-muted-foreground">{s.narration || s.dialogue[0]?.line || s.scene}</p>
-                {(s.imageStatus === "failed" || s.clipStatus === "failed") && <p className="line-clamp-2 text-[11px] text-danger">{s.error}</p>}
+                {s.error && (bad || s.clipAttempts > 0) && <p className="line-clamp-3 text-[11px] text-danger">{s.error}</p>}
+                {bad && s.imageStatus === "done" && (
+                  <Button variant="outline" size="sm" className="h-7 w-full text-xs" disabled={busy || !!p.runTarget} onClick={() => onRedoClip(s.id)}>
+                    <Film /> สร้างคลิปใหม่
+                  </Button>
+                )}
                 <Button variant="ghost" size="sm" className="h-7 w-full text-xs" disabled={busy || !!p.runTarget} onClick={() => onRedo(s.id)}>
                   <RefreshCw /> สร้างช็อตนี้ใหม่
                 </Button>
@@ -1064,71 +1370,75 @@ function StoryboardStep({
 
 /* -------------------------------------------------------------- 06 export */
 
+const minutes = (sec: number | null) => (sec ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` : "–");
+
 function ExportStep({
   p,
   busy,
   onRun,
   onRevoice,
-  onUpgrade,
+  onPick,
 }: {
   p: DramaProject;
   busy: boolean;
   onRun: () => void;
   onRevoice: () => void;
-  onUpgrade: () => void;
+  onPick: (n: number) => void;
 }) {
-  if (!p.shots.length) return <NeedScript />;
-  const voiced = p.shots.filter((s) => s.audioStatus === "done").length;
-  const stills = p.shots.filter((s) => s.kind === "still").length;
-  const upgradeCard =
-    stills > 0 && !p.runTarget ? (
-      <Card className="flex flex-wrap items-center gap-3 border-rose-500/40 bg-gradient-to-r from-rose-600/10 to-fuchsia-600/10 p-4">
-        <Film className="size-8 shrink-0 text-rose-600" />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold">อัปเกรดเป็นวิดีโอเคลื่อนไหวทุกช็อต</p>
-          <p className="text-sm text-muted-foreground">
-            ตอนนี้มี {stills} ช็อตที่เป็นภาพนิ่ง ให้ MiniMax H3 ทำให้ตัวละครขยับ พูด และแสดงอารมณ์ยาวเท่าบทพูด แล้วรวมวิดีโอใหม่ (ภาพและเสียงเดิมใช้ต่อ)
-          </p>
-        </div>
-        <Button onClick={onUpgrade} disabled={busy} className="bg-gradient-to-r from-rose-600 to-fuchsia-600 text-white">
-          <Sparkles /> อัปเกรดเป็นวิดีโอ
-        </Button>
-      </Card>
-    ) : null;
-  if (!p.outputUrl) {
+  const series = p.episodesTotal > 1;
+  const e = p.episodes.find((x) => x.no === p.episode);
+  const table = series ? <EpisodeTable p={p} onPick={onPick} /> : null;
+  if (!p.shots.length) {
     return (
       <div className="space-y-4">
-        {upgradeCard}
-        <StepCta
-          p={p}
-          step="export"
-          title="พากย์เสียงและรวมเป็นวิดีโอ"
-          hint={`ผู้บรรยายและตัวละครพากย์ทีละช็อต (${voiced}/${p.shots.length}) แล้วรวมภาพ คลิป คำบรรยาย และเพลงเป็นไฟล์ MP4 แนวตั้ง`}
-          action="พากย์เสียงและรวมวิดีโอ"
-          busy={busy}
-          onRun={onRun}
-        />
+        <NeedScript episode={series ? p.episode : undefined} />
+        {table}
       </div>
     );
   }
+  const voiced = p.shots.filter((s) => s.audioStatus === "done").length;
+  if (!p.outputUrl) {
+    return (
+      <div className="space-y-4">
+        <StepCta
+          p={p}
+          step="export"
+          title={series ? `พากย์เสียงและรวมตอนที่ ${p.episode}` : "พากย์เสียงและรวมเป็นวิดีโอ"}
+          hint={`ผู้บรรยายและตัวละครพากย์ทีละช็อต (${voiced}/${p.shots.length}) แล้วรวมคลิปวิดีโอทุกช็อต คำบรรยาย และเพลงเป็นไฟล์ MP4 แนวตั้ง`}
+          action={series ? `รวมตอนที่ ${p.episode}` : "พากย์เสียงและรวมวิดีโอ"}
+          busy={busy}
+          onRun={onRun}
+        />
+        {table}
+      </div>
+    );
+  }
+  const name = series ? `${p.title} ตอนที่ ${p.episode}` : p.title;
   return (
     <div className="space-y-4">
-      {upgradeCard}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_1fr]">
         <div className="mx-auto w-full max-w-xs self-start overflow-hidden rounded-2xl bg-black shadow-2xl">
-          <video src={p.outputUrl} poster={p.coverUrl ?? undefined} controls playsInline className="aspect-[9/16] w-full object-contain" />
+          <video key={p.outputUrl} src={p.outputUrl} poster={p.coverUrl ?? undefined} controls playsInline className="aspect-[9/16] w-full object-contain" />
         </div>
         <div className="space-y-4">
           <Card className="space-y-3 p-4">
-            <p className="text-lg font-semibold">{p.title}</p>
+            <p className="text-lg font-semibold">
+              {p.title}
+              {series && (
+                <span className="ml-2 text-base font-normal text-muted-foreground">
+                  ตอนที่ {p.episode}/{p.episodesTotal}
+                  {e?.title ? ` · ${e.title}` : ""}
+                </span>
+              )}
+            </p>
             <p className="text-sm text-muted-foreground">
-              {p.durationSec ? `${Math.floor(p.durationSec / 60)}:${String(p.durationSec % 60).padStart(2, "0")} นาที · ` : ""}
-              {p.shots.length} ช็อต · 9:16
+              {p.durationSec ? `${minutes(p.durationSec)} นาที · ` : ""}
+              {p.shots.length} ช็อตวิดีโอ · 9:16
             </p>
             <div className="flex flex-wrap gap-2">
               <a
                 href={p.outputUrl}
-                download={`${p.title}.mp4`}
+                download={`${name}.mp4`}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground"
@@ -1136,7 +1446,16 @@ function ExportStep({
                 <Download className="size-4" /> ดาวน์โหลด MP4
               </a>
               {p.hasSubtitles && (
-                <Button variant="outline" onClick={() => void apiDownload(`/drama/${p.id}/subtitles.srt`, undefined, `drama-${p.id}.srt`)}>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    void apiDownload(
+                      `/drama/${p.id}/subtitles.srt?episode=${p.episode}`,
+                      undefined,
+                      series ? `drama-${p.id}-ep${p.episode}.srt` : `drama-${p.id}.srt`,
+                    )
+                  }
+                >
                   <Download /> คำบรรยาย .srt
                 </Button>
               )}
@@ -1149,7 +1468,7 @@ function ExportStep({
             <div className="flex items-center gap-2">
               <p className="flex-1 font-semibold">เสียงพากย์</p>
               <Button variant="outline" size="sm" onClick={onRevoice} disabled={busy || !!p.runTarget}>
-                <RefreshCw /> พากย์ใหม่ทั้งเรื่อง
+                <RefreshCw /> พากย์ใหม่ทั้ง{series ? "ตอน" : "เรื่อง"}
               </Button>
             </div>
             <ul className="max-h-72 space-y-1.5 overflow-y-auto text-sm">
@@ -1174,6 +1493,74 @@ function ExportStep({
           </Card>
         </div>
       </div>
+      {table}
     </div>
+  );
+}
+
+const STATUS_LABEL: Record<
+  DramaEpisode["status"],
+  {
+    text: string;
+    tone: "neutral" | "warning" | "primary" | "danger" | "success";
+  }
+> = {
+  todo: { text: "ยังไม่เริ่ม", tone: "neutral" },
+  progress: { text: "กำลังทำ", tone: "warning" },
+  running: { text: "กำลังสร้าง", tone: "primary" },
+  failed: { text: "ติดปัญหา", tone: "danger" },
+  done: { text: "เสร็จแล้ว", tone: "success" },
+};
+
+/** Every episode of the series with its video. */
+function EpisodeTable({ p, onPick }: { p: DramaProject; onPick: (n: number) => void }) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-border p-4">
+        <Layers className="size-4 text-rose-600" />
+        <p className="flex-1 font-semibold">ทุกตอน</p>
+        <span className="text-xs text-muted-foreground">
+          เสร็จ {p.episodes.filter((e) => e.status === "done").length}/{p.episodesTotal}
+        </span>
+      </div>
+      <ul className="divide-y divide-border">
+        {p.episodes.map((e) => {
+          const st = STATUS_LABEL[e.status];
+          return (
+            <li key={e.no} className={cn("flex flex-wrap items-center gap-3 px-4 py-3", e.no === p.episode && "bg-rose-600/5")}>
+              <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-sm font-bold tabular-nums">{e.no}</span>
+              <button type="button" onClick={() => onPick(e.no)} className="min-w-[9rem] flex-1 text-left">
+                <p className="truncate font-medium hover:underline">{e.title ?? `ตอนที่ ${e.no}`}</p>
+                <p className="text-xs text-muted-foreground">
+                  {e.shots ? `วิดีโอ ${e.clipsDone}/${e.shots} ช็อต` : "ยังไม่มีบท"}
+                  {e.durationSec ? ` · ${minutes(e.durationSec)} นาที` : ""}
+                </p>
+              </button>
+              <Badge tone={st.tone}>{st.text}</Badge>
+              {e.outputUrl && (
+                <a
+                  href={e.outputUrl}
+                  download={`${p.title} ตอนที่ ${e.no}.mp4`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium hover:bg-accent"
+                >
+                  <Download className="size-3.5" /> MP4
+                </a>
+              )}
+              {e.hasSubtitles && e.outputUrl && (
+                <button
+                  type="button"
+                  onClick={() => void apiDownload(`/drama/${p.id}/subtitles.srt?episode=${e.no}`, undefined, `drama-${p.id}-ep${e.no}.srt`)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium hover:bg-accent"
+                >
+                  .srt
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
   );
 }
