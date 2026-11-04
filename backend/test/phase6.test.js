@@ -3,6 +3,7 @@
 // Phase 6 integration tests: AI video projects (script → voice → clips → composition).
 // MiniMax (chat + media), Shotstack, ElevenLabs and R2 are mocked. Requires schema + seed + migrations.
 process.env.NODE_ENV = 'test';
+process.env.MINIMAX_CLIP_MODEL = 'MiniMax-H3'; // these tests check the H3 (v2) path; drama.test.js covers the Hailuo Fast default
 
 const crypto = require('node:crypto');
 const { test, before, after, describe } = require('node:test');

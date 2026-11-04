@@ -2,6 +2,7 @@
 
 // AI Video upgrade: own footage (signed URLs), word-by-word captions, fast cuts, hook variants, cover intro.
 process.env.NODE_ENV = 'test';
+process.env.MINIMAX_CLIP_MODEL = 'MiniMax-H3'; // these tests check the H3 (v2) path; drama.test.js covers the Hailuo Fast default
 
 const fs = require('node:fs');
 const os = require('node:os');

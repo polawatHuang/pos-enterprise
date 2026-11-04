@@ -51,7 +51,7 @@ export function DramaListView() {
     <>
       <PageHeader
         title="ละคร AI"
-        description="สร้างละครสั้น 9:16 ทั้งแบบตอนเดียวจบและซีรีส์หลายตอน ทุกช็อตเป็นวิดีโอเคลื่อนไหว MiniMax H3 พร้อมเสียงพากย์ จนเป็นไฟล์พร้อมโพสต์"
+        description="สร้างละครสั้น 9:16 ทั้งแบบตอนเดียวจบและซีรีส์หลายตอน ทุกช็อตเป็นวิดีโอเคลื่อนไหว AI พร้อมเสียงพากย์ จนเป็นไฟล์พร้อมโพสต์"
         actions={
           <Button onClick={() => void create()} disabled={creating}>
             {creating ? <Loader2 className="animate-spin" /> : <Plus />} สร้างละครใหม่

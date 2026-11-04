@@ -16,7 +16,7 @@ const adapter = defineAdapter(
     category: 'video',
     usedBy: ['video', 'covers'],
     phase: 6,
-    purpose: 'เสียงพากย์ (speech) ภาพ AI และคลิปวิดีโอ MiniMax H3 (ทั้ง AI Video และละคร AI) ใช้ key เดียวกับ MiniMax chat หรือ MINIMAX_MEDIA_API_KEY',
+    purpose: 'เสียงพากย์ (speech) ภาพ AI และคลิปวิดีโอ AI (ค่าเริ่มต้น Hailuo 2.3 Fast ราคาถูกสุด หรือ MiniMax H3 ผ่าน MINIMAX_CLIP_MODEL) ใช้ key เดียวกับ MiniMax chat หรือ MINIMAX_MEDIA_API_KEY',
     applyUrl: 'https://platform.minimax.io/',
     env: [
       { name: 'MINIMAX_API_KEY' },
@@ -31,7 +31,10 @@ const adapter = defineAdapter(
       { name: 'MINIMAX_VIDEO_MODEL', optional: true, default: 'MiniMax-Hailuo-2.3' },
       { name: 'MINIMAX_IMAGE_MODEL', optional: true, default: 'image-01' },
       { name: 'MINIMAX_GROUP_ID', optional: true },
-      // Every video feature (AI Video, ละคร AI): video generation v2, MiniMax H3. The name stays for settings already saved.
+      // Model for every AI video clip (AI Video, ละคร AI). Hailuo 2.3 Fast (768P, 6 or 10 s, from a first frame) is
+      // the cheapest; set MiniMax-H3 for the best motion (≈2.5× the price, video generation v2)
+      { name: 'MINIMAX_CLIP_MODEL', optional: true, default: 'MiniMax-Hailuo-2.3-Fast' },
+      // H3 settings (used when MINIMAX_CLIP_MODEL is an H3 model). The names stay for settings already saved.
       { name: 'MINIMAX_DRAMA_VIDEO_MODEL', optional: true, default: 'MiniMax-H3' },
       { name: 'MINIMAX_DRAMA_RESOLUTION', optional: true, default: '768P' },
     ],
@@ -163,12 +166,12 @@ const adapter = defineAdapter(
     },
 
     /** Start a 6s clip. With an image the clip follows its aspect ratio (use a portrait image for 9:16). */
-    async createVideo({ prompt, imageUrl = null, duration = 6, resolution = '768P' }) {
+    async createVideo({ prompt, imageUrl = null, duration = 6, resolution = '768P', model = null }) {
       const env = adapter.requireConfig();
       const r = await adapter.call('/v1/video_generation', {
         method: 'POST',
         body: {
-          model: env.MINIMAX_VIDEO_MODEL || 'MiniMax-Hailuo-2.3',
+          model: model || env.MINIMAX_VIDEO_MODEL || 'MiniMax-Hailuo-2.3',
           prompt: String(prompt).slice(0, 2000),
           duration,
           resolution,
@@ -185,7 +188,7 @@ const adapter = defineAdapter(
       const r = await adapter.call(`/v1/query/video_generation?task_id=${encodeURIComponent(taskId)}`);
       const s = String(r?.status ?? '');
       if (s === 'Success') return { status: 'ready', fileId: String(r.file_id) };
-      if (s === 'Fail') return { status: 'failed' };
+      if (s === 'Fail') return { status: 'failed', error: r?.error_message || r?.base_resp?.status_msg || null };
       return { status: 'processing' }; // Preparing / Queueing / Processing
     },
 
@@ -193,7 +196,7 @@ const adapter = defineAdapter(
      * Video generation v2 (MiniMax H3): text + optional first-frame or reference images
      * (URLs or data URLs). Duration 4–15 s, ratio e.g. "9:16".
      */
-    async createVideoV2({ prompt, firstFrame = null, references = [], duration = 6, ratio = '9:16' }) {
+    async createVideoV2({ prompt, firstFrame = null, references = [], duration = 6, ratio = '9:16', model = null }) {
       const env = adapter.requireConfig();
       const content = [{ type: 'text', text: String(prompt).slice(0, 2000) }];
       if (firstFrame) content.push({ type: 'image_url', image_url: { url: firstFrame }, role: 'first_frame' });
@@ -202,7 +205,7 @@ const adapter = defineAdapter(
         method: 'POST',
         timeoutMs: 120_000,
         body: {
-          model: env.MINIMAX_DRAMA_VIDEO_MODEL || 'MiniMax-H3',
+          model: model || env.MINIMAX_DRAMA_VIDEO_MODEL || 'MiniMax-H3',
           content,
           duration: Math.max(4, Math.min(15, Math.round(duration))),
           resolution: env.MINIMAX_DRAMA_RESOLUTION || '768P',
@@ -224,6 +227,46 @@ const adapter = defineAdapter(
       if (/fail|error|cancel/.test(s)) return { status: 'failed', error: task.error?.message ?? task.message ?? 'MiniMax สร้างคลิปไม่สำเร็จ' };
       if (!url && task.file_id) return { status: 'ready', url: await adapter.fileUrl(task.file_id) };
       return { status: 'processing' };
+    },
+
+    /** The model AI clips are made with (MINIMAX_CLIP_MODEL); H3 models use video generation v2. */
+    clipModel() {
+      const env = adapter.requireConfig();
+      return env.MINIMAX_CLIP_MODEL || 'MiniMax-Hailuo-2.3-Fast';
+    },
+    clipUsesV2: () => /(^|-)H3|Hailuo-3/i.test(adapter.clipModel()),
+    /** Whether the clip model can take reference images (product photo) besides the first frame. */
+    clipTakesReferences: () => adapter.clipUsesV2(),
+
+    /**
+     * Start one AI clip with the configured clip model. Returns a task id tagged with the API it
+     * belongs to ("v1:" Hailuo / "v2:" H3) and the seconds the clip will last.
+     * Hailuo 2.3 Fast makes 6 or 10 s clips at 768P from a first frame only; without a picture the
+     * standard Hailuo 2.3 (text to video) is used for that clip.
+     */
+    async startClip({ prompt, firstFrame = null, references = [], duration = 6, ratio = '9:16' }) {
+      const model = adapter.clipModel();
+      if (adapter.clipUsesV2()) {
+        const seconds = Math.max(4, Math.min(15, Math.round(duration)));
+        const { taskId } = await adapter.createVideoV2({ prompt, firstFrame, references, duration: seconds, ratio, model });
+        return { taskId: `v2:${taskId}`, seconds };
+      }
+      const seconds = duration > 6 ? 10 : 6;
+      const image = firstFrame || references[0] || null;
+      const v1Model = image ? model : /fast/i.test(model) ? 'MiniMax-Hailuo-2.3' : model;
+      const { taskId } = await adapter.createVideo({ prompt, imageUrl: image, duration: seconds, resolution: '768P', model: v1Model });
+      return { taskId: `v1:${taskId}`, seconds };
+    },
+
+    /** Poll a clip from startClip (an id without a tag is an H3 task from before the tags). */
+    async pollClip(tagged) {
+      const id = String(tagged);
+      if (id.startsWith('v1:')) {
+        const q = await adapter.queryVideo(id.slice(3));
+        if (q.status === 'ready') return { status: 'ready', url: await adapter.fileUrl(q.fileId) };
+        return q.status === 'failed' ? { status: 'failed', error: q.error || 'MiniMax สร้างคลิปไม่สำเร็จ' } : { status: 'processing' };
+      }
+      return adapter.queryVideoV2(id.startsWith('v2:') ? id.slice(3) : id);
     },
 
     async fileUrl(fileId) {

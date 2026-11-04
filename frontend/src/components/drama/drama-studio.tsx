@@ -170,7 +170,7 @@ function Studio({ p, queryKey, onEpisode }: { p: DramaProject; queryKey: unknown
     const clipSec = p.estimate.perEpisode.clipSeconds * left;
     if (
       !window.confirm(
-        `ทำต่อทุกตอนที่เหลือ ${left} ตอน?\nใช้คลิปวิดีโอ MiniMax H3 ประมาณ ${Math.round(clipSec / 60)} นาที (${clipSec} วินาที) และใช้เวลาหลายชั่วโมง ปิดหน้านี้ได้`,
+        `ทำต่อทุกตอนที่เหลือ ${left} ตอน?\nใช้คลิปวิดีโอ AI (MiniMax) ประมาณ ${Math.round(clipSec / 60)} นาที (${clipSec} วินาที) และใช้เวลาหลายชั่วโมง ปิดหน้านี้ได้`,
       )
     )
       return;
@@ -573,10 +573,11 @@ function SetupStep({
             <div className="min-w-0 flex-1 text-sm">
               <p className="font-semibold">วิดีโอเคลื่อนไหวทุกช็อต — ไม่มีสไลด์ภาพนิ่ง</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                ตัวละครขยับ พูด และแสดงอารมณ์ทุกช็อตด้วย MiniMax H3 ยาวเท่าบทพูด ถ้าคลิปไหนสร้างไม่สำเร็จ ระบบลองใหม่อัตโนมัติ 3 ครั้ง และไม่เอาภาพนิ่งมาแทน
+                ตัวละครขยับ พูด และแสดงอารมณ์ทุกช็อตด้วยวิดีโอ AI ของ MiniMax (ค่าเริ่มต้น Hailuo 2.3 Fast ราคาถูกสุด) ยาวเท่าบทพูด ถ้าคลิปไหนสร้างไม่สำเร็จ
+                ระบบลองใหม่อัตโนมัติ 3 ครั้ง และไม่เอาภาพนิ่งมาแทน
               </p>
               <p className="mt-2 text-xs">
-                {form.episodesTotal > 1 ? `ต่อตอน: ` : ""}คลิป H3 ~{len.shots} คลิป (~{len.sec} วินาที)
+                {form.episodesTotal > 1 ? `ต่อตอน: ` : ""}คลิปวิดีโอ ~{len.shots} คลิป (~{len.sec} วินาที)
                 {form.episodesTotal > 1 && (
                   <>
                     {" "}
@@ -1069,7 +1070,7 @@ function ShotEditor({ p, shot, onSaved }: { p: DramaProject; shot: DramaShot; on
           </Badge>
         )}
         <Badge tone="primary">
-          <Film className="size-3" /> วิดีโอ H3
+          <Film className="size-3" /> วิดีโอ AI
         </Badge>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
@@ -1277,7 +1278,7 @@ function StoryboardStep({
       <Card className="flex flex-wrap items-center gap-3 p-4">
         <div className="min-w-0 flex-1">
           <p className="font-semibold">
-            {p.episodesTotal > 1 ? `ตอนที่ ${p.episode} · ` : ""}วิดีโอ H3 {clips}/{p.shots.length} ช็อต
+            {p.episodesTotal > 1 ? `ตอนที่ ${p.episode} · ` : ""}วิดีโอ {clips}/{p.shots.length} ช็อต
             <span className="ml-2 text-xs font-normal text-muted-foreground">
               (ภาพตั้งต้น {images}/{p.shots.length})
             </span>

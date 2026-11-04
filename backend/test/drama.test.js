@@ -21,7 +21,7 @@ const { buildDramaEdit } = require('../src/modules/drama/timeline');
 const { pickVoice, splitLongShot } = require('../src/modules/drama/drama.service');
 
 const app = createApp();
-const ENV = { MINIMAX_API_KEY: 'mm-key', AI_PROVIDER: 'minimax' };
+const ENV = { MINIMAX_API_KEY: 'mm-key', AI_PROVIDER: 'minimax', MINIMAX_CLIP_MODEL: 'MiniMax-H3' }; // the default Hailuo Fast path has its own test
 const saved = Object.fromEntries([...Object.keys(ENV), 'ANTHROPIC_API_KEY'].map((k) => [k, process.env[k]]));
 const originals = { fetch: global.fetch, create: minimax.createMessage, render: shotstack.render, getRender: shotstack.getRender, isConfigured: shotstack.isConfigured };
 let calls = [];
@@ -105,6 +105,10 @@ before(async () => {
       if (u.pathname.includes('/bad-')) return json({ task: { status: 'Fail', message: 'internal error' }, base_resp: { status_code: 0 } });
       return json({ task: { status: 'Success', content: { url: 'https://cdn.test/clip.mp4' } }, base_resp: { status_code: 0 } });
     }
+    // Hailuo (video generation v1)
+    if (u.pathname === '/v1/video_generation') return json({ task_id: `h-${calls.length}`, base_resp: { status_code: 0 } });
+    if (u.pathname === '/v1/query/video_generation') return json({ status: 'Success', file_id: `f-${u.searchParams.get('task_id')}`, base_resp: { status_code: 0 } });
+    if (u.pathname === '/v1/files/retrieve') return json({ file: { download_url: 'https://cdn.test/hailuo.mp4' }, base_resp: { status_code: 0 } });
     if (u.host === 'cdn.test') return new Response(Buffer.from('media-bytes'), { status: 200 });
     return json({ base_resp: { status_code: 0 } });
   };
@@ -377,6 +381,30 @@ describe('ละคร AI', () => {
     calls = [];
     await require('../src/integrations/minimax-media').synthesize('ทดสอบ', { voiceId: 'v1' });
     assert.equal(calls.find((c) => c.path === '/v1/t2a_v2').auth, 'Bearer mm-key');
+  });
+
+  test('default clip model: Hailuo 2.3 Fast 768P from the shot picture, 6 or 10 s clips (the cheapest)', async () => {
+    delete process.env.MINIMAX_CLIP_MODEL;
+    const created = await manager.post('/api/drama', { genre: 'ghost', style: 'cinematic', lengthSec: 60, narratorVoiceId: 'narrator_v' });
+    const fid = created.body.data.id;
+    try {
+      calls = [];
+      imageNo = 0;
+      await manager.post(`/api/drama/${fid}/run`, { target: 'all' });
+      await drain();
+      const d = (await manager.get(`/api/drama/${fid}`)).body.data;
+      assert.equal(d.error, null, d.error);
+      assert.ok(d.outputUrl);
+      assert.equal(calls.filter((c) => c.path === '/v2/video_generation').length, 0, 'no H3');
+      const hailuo = calls.filter((c) => c.path === '/v1/video_generation').map((c) => c.body);
+      assert.equal(hailuo.length, 3);
+      assert.ok(hailuo.every((b) => b.model === 'MiniMax-Hailuo-2.3-Fast' && b.resolution === '768P' && [6, 10].includes(b.duration)));
+      assert.ok(hailuo.every((b) => b.first_frame_image.startsWith('data:image/')));
+      assert.ok(d.shots.every((s) => s.clipUrl));
+    } finally {
+      process.env.MINIMAX_CLIP_MODEL = 'MiniMax-H3';
+      await db.query('DELETE FROM drama_projects WHERE id = :id', { id: fid });
+    }
   });
 
   test('series: 3 episodes share characters and cover; each is written from the outline and gets its own video', async () => {
