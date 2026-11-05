@@ -78,7 +78,9 @@ const SYSTEM = `คุณเป็นครีเอเตอร์คลิป�
 - ห้ามเคลมเกินจริงหรือผิดกฎหมายโฆษณาไทย (เช่น รักษาหาย ขาวถาวร ลดน้ำหนักได้ X กิโล) ห้ามอ้างรีวิว/ตัวเลขที่ไม่มีในข้อมูล
 - ปิดท้ายด้วย CTA ให้กดลิงก์/ตะกร้า
 - ความยาวรวมของฉาก (durationSec) ใกล้เคียงความยาวที่ขอ (คิดจากบทพากย์ไทยประมาณ 4 คำต่อวินาที)
-- visual เป็นภาษาอังกฤษ บรรยายภาพที่ถ่ายได้จริง ไม่มีตัวหนังสือในภาพ`;
+- visual เป็นภาษาอังกฤษ บรรยายภาพที่ถ่ายได้จริง ไม่มีตัวหนังสือในภาพ
+- visual ของแต่ละฉากต้องตรงกับสิ่งที่บทพากย์ฉากนั้นพูดถึง (พูดถึงปัญหา = เห็นปัญหา, พูดถึงสินค้า = เห็นสินค้าถูกใช้จริง) และอ่านเข้าใจได้เอง: ระบุคน การกระทำ สถานที่ แสง และมุมกล้องทุกครั้ง
+- ใช้มุมกล้องหลากหลายแบบครีเอเตอร์จริง (close-up มือใช้สินค้า, หน้าคนพูดกับกล้อง, ภาพก่อน/หลัง) ให้ภาพเปลี่ยนทุกฉาก ไม่ซ้ำกัน`;
 
 /** Facts about the product (or trend item) that the script may use. */
 async function productFacts(orgId, { productId, trendId }) {
@@ -227,4 +229,42 @@ function normalizeScene(s, footageCount = 0) {
   };
 }
 
-module.exports = { generateScript, productFacts, normalizeScene, SCRIPT_SCHEMA, TONES, ANGLES };
+const SCENE_SCHEMA = { type: 'object', additionalProperties: false, required: ['scene'], properties: { scene: SCRIPT_SCHEMA.properties.scenes.items } };
+
+/**
+ * "ให้ AI แก้ฉากนี้": rewrite one scene from the user's direction, in the context of the other scenes.
+ * keepVoiceover keeps the user's voice-over and caption word for word (only the picture changes).
+ */
+async function rewriteScene({ facts, scenes, index, instruction = '', keepVoiceover = true }) {
+  const s = scenes[index];
+  const line = (x, i) => `ฉาก ${i + 1}: พากย์ "${x.voiceover}" | บนจอ "${x.caption ?? ''}" | visual: ${x.visual ?? ''}`;
+  const { data } = await ai.extractStructured({
+    system: SYSTEM,
+    schema: SCENE_SCHEMA,
+    toolName: 'submit_scene',
+    toolDescription: 'ส่งฉากที่แก้แล้ว',
+    maxTokens: 1500,
+    content: [
+      {
+        type: 'text',
+        text: [
+          `ข้อมูลสินค้า: ${JSON.stringify(facts ?? {})}`,
+          `สคริปต์ทั้งคลิป:\n${scenes.map(line).join('\n')}`,
+          `แก้เฉพาะฉากที่ ${index + 1}${index === 0 ? ' (hook)' : index === scenes.length - 1 ? ' (CTA)' : ''}`,
+          instruction ? `ผู้ใช้ต้องการ: ${instruction}` : 'ผู้ใช้บอกว่าภาพฉากนี้ไม่เข้ากับบทพากย์ — เขียน visual ใหม่ให้ตรงกับสิ่งที่พูดและต่อเนื่องกับฉากรอบข้าง',
+          keepVoiceover
+            ? `ห้ามเปลี่ยนบทพากย์และข้อความบนจอ — ใช้ตามนี้ทุกตัวอักษร: voiceover="${s.voiceover}" caption="${s.caption ?? ''}"`
+            : 'ปรับบทพากย์และข้อความบนจอได้ถ้าจำเป็น',
+        ].join('\n'),
+      },
+    ],
+  });
+  const out = normalizeScene({ ...s, ...(data?.scene ?? {}), media: s.media }, 99);
+  if (!out.visual) {
+    const { AppError } = require('../../core/errors');
+    throw new AppError(502, 'AI_BAD_OUTPUT', 'AI ไม่ได้ส่งฉากกลับมา กรุณาลองใหม่');
+  }
+  return keepVoiceover ? { ...out, voiceover: s.voiceover, caption: s.caption ?? '', durationSec: s.durationSec ?? out.durationSec } : out;
+}
+
+module.exports = { rewriteScene, generateScript, productFacts, normalizeScene, SCRIPT_SCHEMA, TONES, ANGLES };

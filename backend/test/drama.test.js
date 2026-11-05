@@ -49,6 +49,7 @@ const SHOTS = [
   { scene: 'ความจริง', narration: 'มะลิรู้แล้วว่ายายรอเธอมาตลอด', dialogue: [{ character: 'mali', line: 'ยายคะ' }], visual: 'mali hugging the ghost', camera: 'pull out', characters: ['mali', 'yai'], product: true },
 ];
 let episodesInOutline = 1;
+let duringVoice = null; // runs once while a line is being voiced (the user edits meanwhile)
 let failClipShot = null; // every H3 attempt whose prompt contains this text fails
 let noBalance = false; // MiniMax answers 402 Payment Required
 let moderate = null; // { text, times }: H3 tasks whose prompt contains text are refused by moderation, the first `times` times
@@ -69,7 +70,12 @@ before(async () => {
   minimax.createMessage = async (params) => {
     const name = params.tools[0].name;
     calls.push({ path: 'ai', tool: name, body: params });
-    const input = name === 'submit_outline' ? outlineOf(episodesInOutline) : { shots: SHOTS };
+    const input =
+      name === 'submit_outline'
+        ? outlineOf(episodesInOutline)
+        : name === 'submit_shot'
+          ? { shot: { ...SHOTS[1], scene: 'ฉากที่ AI แก้', narration: 'AI อยากเปลี่ยนคำบรรยาย', dialogue: [{ character: 'yai', line: 'AI เปลี่ยนบท' }], visual: 'rewritten: mali opens the creaking door at night', characters: ['mali'] } }
+          : { shots: SHOTS };
     return { model: 'MiniMax-M3', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't', name, input }] };
   };
   shotstack.isConfigured = () => true;
@@ -89,6 +95,11 @@ before(async () => {
     }
     if (u.pathname === '/v1/get_voice')
       return json({ system_voice: [{ voice_id: 'thai_female_1', voice_name: 'Thai female', description: ['Thai woman'] }, { voice_id: 'thai_male_1', voice_name: 'Thai male', description: ['Thai man'] }, { voice_id: 'thai_old_lady', voice_name: 'Thai elder female', description: ['old woman Thai'] }], base_resp: { status_code: 0 } });
+    if (u.pathname === '/v1/t2a_v2' && duringVoice) {
+      const fn = duringVoice;
+      duringVoice = null;
+      await fn(body);
+    }
     if (u.pathname === '/v1/t2a_v2') return json({ data: { audio: `https://cdn.test/a-${calls.length}.mp3` }, extra_info: { audio_length: 2000 }, base_resp: { status_code: 0 } });
     if (u.pathname === '/v2/video_generation') {
       if (noBalance) return new Response(JSON.stringify({ base_resp: { status_code: 1008, status_msg: 'insufficient balance' } }), { status: 402 });
@@ -118,6 +129,7 @@ before(async () => {
     get: (url) => request(app).get(url).set('Cookie', cookie),
     post: (url, body) => request(app).post(url).set('Cookie', cookie).send(body ?? {}),
     put: (url, body) => request(app).put(url).set('Cookie', cookie).send(body),
+    del: (url) => request(app).delete(url).set('Cookie', cookie),
   };
 });
 
@@ -272,6 +284,93 @@ describe('ละคร AI', () => {
     assert.equal(r.status, 200);
     assert.equal(r.body.data.shots[2].audioStatus, 'pending');
     assert.equal(r.body.data.shots[1].audioStatus, 'done');
+  });
+
+  test('edited lines are kept: an edit made while the shot is being voiced is voiced again, never reverted', async () => {
+    const d0 = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    const shot = d0.shots[1];
+    // clearing a line drops it (autosave mid-edit never fails); unknown speakers are dropped
+    let r = await manager.put(`/api/drama/${projectId}/shots/${shot.id}`, {
+      dialogue: [{ character: 'yai', line: 'ยายรอหนูมานานแล้ว' }, { character: 'mali', line: '' }, { character: 'nobody', line: 'x' }],
+    });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.data.shots[1].dialogue, [{ character: 'yai', line: 'ยายรอหนูมานานแล้ว' }]);
+    // the user edits the same line again while its voice is being made
+    duringVoice = async () => {
+      await manager.put(`/api/drama/${projectId}/shots/${shot.id}`, { dialogue: [{ character: 'yai', line: 'บทที่ผู้ใช้แก้ล่าสุด' }] });
+    };
+    await manager.post(`/api/drama/${projectId}/run`, { target: 'export' });
+    await drain();
+    const d = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    assert.deepEqual(d.shots[1].dialogue, [{ character: 'yai', line: 'บทที่ผู้ใช้แก้ล่าสุด' }]);
+    assert.equal(d.shots[1].audioStatus, 'done');
+    assert.deepEqual(
+      d.shots[1].audio.map((a) => a.text),
+      ['บทที่ผู้ใช้แก้ล่าสุด'],
+      'the voice is the latest edit, not the line from before',
+    );
+  });
+
+  test('storyboard editing: edit the picture prompt, AI rewrites a shot keeping the user lines, add / move / delete shots', async () => {
+    let d = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    const n = d.shots.length;
+    const target = d.shots[1];
+    // edit the storyboard directly; "regenerate" remakes only this shot's picture and clip
+    calls = [];
+    let r = await manager.put(`/api/drama/${projectId}/shots/${target.id}`, { scene: 'ประตูลั่น', visualPrompt: 'mali at the creaking door, candle light', camera: 'close-up', characters: ['mali'], regenerate: true });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.data.shots[1].visualPrompt, 'mali at the creaking door, candle light');
+    assert.equal(r.body.data.shots[1].scene, 'ประตูลั่น');
+    assert.deepEqual(r.body.data.shots[1].characters, ['mali']);
+    assert.equal(r.body.data.runShotId, target.id);
+    await drain();
+    assert.equal(calls.filter((c) => c.path === '/v1/image_generation').length, 1);
+    assert.match(calls.find((c) => c.path === '/v1/image_generation').body.prompt, /creaking door, candle light/);
+
+    // AI rewrites the shot from a Thai direction, the user's lines stay word for word
+    const before = (await manager.get(`/api/drama/${projectId}`)).body.data.shots[1];
+    r = await manager.post(`/api/drama/${projectId}/shots/${target.id}/rewrite`, { instruction: 'ให้มะลิเปิดประตูตอนกลางคืน' });
+    assert.equal(r.status, 200);
+    const s = r.body.data.shots[1];
+    assert.equal(s.visualPrompt, 'rewritten: mali opens the creaking door at night');
+    assert.deepEqual(s.dialogue, before.dialogue, 'keepLines: dialogue untouched');
+    assert.equal(s.narration, before.narration);
+    const ask = calls.findLast((c) => c.tool === 'submit_shot').body.messages[0].content[0].text;
+    assert.match(ask, /ให้มะลิเปิดประตูตอนกลางคืน/);
+    assert.match(ask, /ห้ามเปลี่ยนคำบรรยายและบทพูด/);
+
+    // add a shot after shot 1 (AI writes it from the direction), move it, delete it
+    r = await manager.post(`/api/drama/${projectId}/shots`, { episode: 1, after: d.shots[0].id, instruction: 'ภาพบ้านจากมุมสูง' });
+    assert.equal(r.status, 201);
+    d = r.body.data;
+    assert.equal(d.shots.length, n + 1);
+    assert.deepEqual(d.shots.map((x) => x.seq), Array.from({ length: n + 1 }, (_, i) => i + 1));
+    const added = d.shots[1];
+    assert.equal(added.imageStatus, 'pending');
+    assert.equal(added.visualPrompt, 'rewritten: mali opens the creaking door at night');
+    assert.equal(d.outputUrl, null, 'the finished video is outdated');
+    r = await manager.post(`/api/drama/${projectId}/shots/${added.id}/move`, { by: 1 });
+    assert.equal(r.body.data.shots[2].id, added.id);
+    // structural edits wait for the run to stop
+    await manager.post(`/api/drama/${projectId}/run`, { target: 'storyboard' });
+    assert.equal((await manager.del(`/api/drama/${projectId}/shots/${added.id}`)).status, 409);
+    await manager.post(`/api/drama/${projectId}/cancel`);
+    r = await manager.del(`/api/drama/${projectId}/shots/${added.id}`);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.data.shots.length, n);
+    assert.deepEqual(r.body.data.shots.map((x) => x.seq), Array.from({ length: n }, (_, i) => i + 1));
+    // put shot 2 back as it was written and finish the storyboard again for the tests below
+    await manager.put(`/api/drama/${projectId}/shots/${target.id}`, {
+      scene: SHOTS[1].scene,
+      dialogue: SHOTS[1].dialogue,
+      visualPrompt: SHOTS[1].visual,
+      camera: SHOTS[1].camera,
+      characters: SHOTS[1].characters,
+      regenerate: true,
+    });
+    await drain();
+    await manager.post(`/api/drama/${projectId}/run`, { target: 'all' });
+    await drain();
   });
 
   test('a clip that keeps failing is retried 3 times, then the run stops and names the shot (no still instead)', async () => {

@@ -31,6 +31,8 @@ import { Badge, Card, CardContent, CardHeader, CardTitle, Input, Label, NativeSe
 import { CAPTION_STYLES, IN_PROGRESS, steps, VIDEO_STATUS, VISUAL_MODES } from "./labels";
 import { MediaPanel } from "./media-panel";
 import { MinimaxVoicePicker } from "./voice-picker";
+import { flushDrafts, useAutosave } from "@/lib/use-autosave";
+import { SaveState } from "@/components/drama/shot-editor";
 import { useVideoMeta } from "./videos-view";
 
 export function VideoDetailView({ id }: { id: number }) {
@@ -62,7 +64,40 @@ export function VideoDetailView({ id }: { id: number }) {
   }
   if (!detail.data) return <Skeleton className="h-96" />;
   // Re-mount the editor whenever the server copy changes outside the editor (AI rewrite, generation)
-  return <Editor key={`${detail.data.id}-${detail.data.updatedAt}-${detail.data.status}`} v={detail.data} />;
+  // A new run (status) starts the editor over; other server changes (AI rewrite, hook) flow in while nothing is unsaved
+  return <Editor key={`${detail.data.id}-${detail.data.status}`} v={detail.data} />;
+}
+
+/** What the editor saves, trimmed like the server keeps it (compared to tell whether it is saved). */
+function payloadOf(f: {
+  title: string;
+  scenes: VideoScene[];
+  postCaption: string;
+  hashtags: string;
+  visualMode: VideoVisualMode;
+  captionStyle: CaptionStyle;
+  coverId: number | null;
+  voiceProvider: VideoDetail["voiceProvider"];
+  voiceId: string;
+}) {
+  return {
+    title: f.title.trim(),
+    scenes: f.scenes.map((s) => ({
+      voiceover: s.voiceover.trim(),
+      caption: (s.caption ?? "").trim(),
+      visual: (s.visual ?? "").trim(),
+      showProduct: Boolean(s.showProduct),
+      durationSec: Number(s.durationSec) || 4,
+      media: s.media ?? null,
+    })),
+    postCaption: f.postCaption.trim() || null,
+    hashtags: f.hashtags.trim() || null,
+    visualMode: f.visualMode,
+    captionStyle: f.captionStyle,
+    coverId: f.coverId ?? null,
+    voiceProvider: f.voiceProvider,
+    voiceId: f.voiceId.trim() || null,
+  };
 }
 
 function Editor({ v }: { v: VideoDetail }) {
@@ -76,7 +111,10 @@ function Editor({ v }: { v: VideoDetail }) {
   const [visualMode, setVisualMode] = useState<VideoVisualMode>(v.visualMode);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(v.captionStyle);
   const [coverId, setCoverId] = useState<number | null>(v.coverId);
-  const covers = useQuery({ queryKey: ["covers"], queryFn: () => api.get<CoverProject[]>("/covers") });
+  const covers = useQuery({
+    queryKey: ["covers"],
+    queryFn: () => api.get<CoverProject[]>("/covers"),
+  });
   const portraitCovers = (covers.data ?? []).filter((c) => c.orientation === "portrait" && c.status === "ready");
   const [voiceProvider, setVoiceProvider] = useState(v.voiceProvider);
   const [voiceId, setVoiceId] = useState(v.voiceId ?? "");
@@ -105,6 +143,8 @@ function Editor({ v }: { v: VideoDetail }) {
   const run = async (key: string, fn: () => Promise<unknown>, ok?: string) => {
     setBusy(key);
     try {
+      // what the user typed is saved first, so AI work never starts from (or overwrites) older text
+      await flushDrafts();
       await fn();
       if (ok) toast.success(ok);
       await refresh();
@@ -115,18 +155,82 @@ function Editor({ v }: { v: VideoDetail }) {
       setBusy(null);
     }
   };
-  const save = () =>
-    api.put(`/videos/${v.id}`, {
-      title,
-      scenes: scenes.map((s) => ({ ...s, durationSec: Number(s.durationSec) || 4 })),
-      postCaption: postCaption || null,
-      hashtags: hashtags || null,
-      visualMode,
-      captionStyle,
-      coverId,
-      voiceProvider,
-      voiceId: voiceId || null,
-    });
+  const form = payloadOf({
+    title,
+    scenes,
+    postCaption,
+    hashtags,
+    visualMode,
+    captionStyle,
+    coverId,
+    voiceProvider,
+    voiceId,
+  });
+  const serverForm = payloadOf({
+    ...v,
+    postCaption: v.postCaption ?? "",
+    hashtags: v.hashtags ?? "",
+    voiceId: v.voiceId ?? "",
+  });
+  const saveForm = async (body: typeof form) => {
+    await api.put(`/videos/${v.id}`, body);
+    await refresh();
+  };
+  const save = () => saveForm(form);
+  // Autosave while nothing has been generated yet (a save after that clears the finished voices / video,
+  // so then the user presses บันทึก or สร้างวิดีโอใหม่ themselves)
+  const generated = Boolean(v.outputUrl) || v.assets.some((a) => a.status === "ready");
+  const valid = Boolean(title.trim()) && scenes.length > 0 && scenes.every((s) => s.voiceover.trim());
+  const autosave = useAutosave({
+    value: form,
+    saved: serverForm,
+    save: saveForm,
+    enabled: !locked && !generated && valid,
+    onError: (err) => toast.error(`บันทึกอัตโนมัติไม่สำเร็จ: ${err instanceof Error ? err.message : ""}`),
+  });
+  // a newer server copy (AI rewrite, new hook) replaces the form only when nothing here is unsaved
+  const serverKey = JSON.stringify(serverForm);
+  const lastServer = useRef(serverKey);
+  const formKey = useRef(JSON.stringify(form));
+  useEffect(() => {
+    formKey.current = JSON.stringify(form);
+  });
+  useEffect(() => {
+    const prev = lastServer.current;
+    lastServer.current = serverKey;
+    if (prev === serverKey || formKey.current !== prev) return;
+    setTitle(v.title);
+    setScenes(v.scenes);
+    setPostCaption(v.postCaption ?? "");
+    setHashtags(v.hashtags ?? "");
+    setVisualMode(v.visualMode);
+    setCaptionStyle(v.captionStyle);
+    setCoverId(v.coverId);
+    setVoiceProvider(v.voiceProvider);
+    setVoiceId(v.voiceId ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverKey]);
+
+  /* "ให้ AI แก้ฉากนี้": the rewritten scene goes into the editor (and is saved like any edit) */
+  const [aiScene, setAiScene] = useState<number | null>(null);
+  const [aiWhat, setAiWhat] = useState("");
+  const [aiKeep, setAiKeep] = useState(true);
+  const rewriteScene = (i: number) =>
+    run(
+      `scene${i}`,
+      async () => {
+        const r = await api.post<{ scene: VideoScene }>(`/videos/${v.id}/scenes/rewrite`, {
+          scenes: form.scenes,
+          index: i,
+          instruction: aiWhat.trim(),
+          keepVoiceover: aiKeep,
+        });
+        update(i, { ...r.scene, media: scenes[i].media ?? null });
+        setAiScene(null);
+        setAiWhat("");
+      },
+      "AI แก้ฉากแล้ว",
+    );
   const update = (i: number, patch: Partial<VideoScene>) => setScenes((list) => list.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const move = (i: number, d: -1 | 1) =>
     setScenes((list) => {
@@ -143,9 +247,9 @@ function Editor({ v }: { v: VideoDetail }) {
   const composeBlock = !hasParts
     ? null
     : v.scenes.some((_, i) => !voicedScenes.has(i))
-      ? "เสียงพากย์ยังไม่ครบทุกฉาก ต้องกด \"สร้างวิดีโอใหม่\""
+      ? 'เสียงพากย์ยังไม่ครบทุกฉาก ต้องกด "สร้างวิดีโอใหม่"'
       : textChanged
-        ? "แก้บทพากย์หลังสร้างเสียงแล้ว ต้องกด \"สร้างวิดีโอใหม่\" (หรือรีโหลดหน้าเพื่อยกเลิกการแก้)"
+        ? 'แก้บทพากย์หลังสร้างเสียงแล้ว ต้องกด "สร้างวิดีโอใหม่" (หรือรีโหลดหน้าเพื่อยกเลิกการแก้)'
         : caps && !caps.compose.configured
           ? "shotstack"
           : "";
@@ -200,6 +304,9 @@ function Editor({ v }: { v: VideoDetail }) {
           >
             {busy === "ai" ? <Loader2 className="animate-spin" /> : <Wand2 />} เขียนใหม่ด้วย AI
           </Button>
+          <span className="self-center">
+            <SaveState status={autosave.status} />
+          </span>
           <Button variant="outline" disabled={locked || !dirty || busy !== null} onClick={() => void run("save", save, "บันทึกแล้ว")}>
             {busy === "save" ? <Loader2 className="animate-spin" /> : <Save />} บันทึก
           </Button>
@@ -272,7 +379,13 @@ function Editor({ v }: { v: VideoDetail }) {
               <div className="flex flex-col gap-1.5 sm:col-span-2">
                 <Label htmlFor="vp">เสียงพากย์</Label>
                 <div className="flex gap-2">
-                  <NativeSelect id="vp" value={voiceProvider} onChange={(e) => setVoiceProvider(e.target.value as typeof voiceProvider)} disabled={locked} className="w-auto self-start">
+                  <NativeSelect
+                    id="vp"
+                    value={voiceProvider}
+                    onChange={(e) => setVoiceProvider(e.target.value as typeof voiceProvider)}
+                    disabled={locked}
+                    className="w-auto self-start"
+                  >
                     <option value="minimax">MiniMax</option>
                     <option value="elevenlabs">ElevenLabs</option>
                   </NativeSelect>
@@ -310,7 +423,13 @@ function Editor({ v }: { v: VideoDetail }) {
                 {v.hooks.map((h, i) => {
                   const current = scenes[0]?.voiceover === h.voiceover;
                   return (
-                    <div key={i} className={cn("flex flex-wrap items-center gap-2 rounded-lg border p-2.5 text-sm", current ? "border-primary bg-primary-soft/40" : "border-border")}>
+                    <div
+                      key={i}
+                      className={cn(
+                        "flex flex-wrap items-center gap-2 rounded-lg border p-2.5 text-sm",
+                        current ? "border-primary bg-primary-soft/40" : "border-border",
+                      )}
+                    >
                       <Badge tone={current ? "primary" : "neutral"}>{h.angle || `แบบ ${i + 1}`}</Badge>
                       <span className="min-w-0 flex-1">
                         &quot;{h.voiceover}&quot; <span className="text-xs text-muted-foreground">· {h.caption}</span>
@@ -323,7 +442,16 @@ function Editor({ v }: { v: VideoDetail }) {
                             size="sm"
                             variant="outline"
                             disabled={locked || busy !== null}
-                            onClick={() => void run(`hook${i}`, () => api.post(`/videos/${v.id}/hook`, { index: i }), "เปลี่ยน hook แล้ว")}
+                            onClick={() =>
+                              void run(
+                                `hook${i}`,
+                                () =>
+                                  api.post(`/videos/${v.id}/hook`, {
+                                    index: i,
+                                  }),
+                                "เปลี่ยน hook แล้ว",
+                              )
+                            }
                           >
                             ใช้ hook นี้
                           </Button>
@@ -332,10 +460,14 @@ function Editor({ v }: { v: VideoDetail }) {
                             variant="ghost"
                             disabled={busy !== null}
                             onClick={() =>
-                              void run(`var${i}`, async () => {
-                                const r = await api.post<{ id: number }>(`/videos/${v.id}/variant`, { hookIndex: i });
-                                router.push(`/videos/${r.id}`);
-                              }, "สร้างอีกเวอร์ชันแล้ว — ใช้ทดสอบว่า hook ไหนได้ผลดีกว่า")
+                              void run(
+                                `var${i}`,
+                                async () => {
+                                  const r = await api.post<{ id: number }>(`/videos/${v.id}/variant`, { hookIndex: i });
+                                  router.push(`/videos/${r.id}`);
+                                },
+                                "สร้างอีกเวอร์ชันแล้ว — ใช้ทดสอบว่า hook ไหนได้ผลดีกว่า",
+                              )
                             }
                           >
                             ทำอีกเวอร์ชัน
@@ -372,7 +504,13 @@ function Editor({ v }: { v: VideoDetail }) {
                   <Button size="sm" variant="ghost" disabled={locked || i === scenes.length - 1} onClick={() => move(i, 1)} aria-label="เลื่อนลง">
                     <ArrowDown />
                   </Button>
-                  <Button size="sm" variant="ghost" disabled={locked || scenes.length <= 1} onClick={() => setScenes(scenes.filter((_, j) => j !== i))} aria-label="ลบฉาก">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={locked || scenes.length <= 1}
+                    onClick={() => setScenes(scenes.filter((_, j) => j !== i))}
+                    aria-label="ลบฉาก"
+                  >
                     <Trash2 />
                   </Button>
                 </div>
@@ -382,7 +520,14 @@ function Editor({ v }: { v: VideoDetail }) {
                   <Label htmlFor={`vo-${i}`} className="flex items-center gap-1">
                     <Mic className="size-3.5" /> บทพากย์
                   </Label>
-                  <Textarea id={`vo-${i}`} value={s.voiceover} onChange={(e) => update(i, { voiceover: e.target.value })} disabled={locked} rows={2} maxLength={500} />
+                  <Textarea
+                    id={`vo-${i}`}
+                    value={s.voiceover}
+                    onChange={(e) => update(i, { voiceover: e.target.value })}
+                    disabled={locked}
+                    rows={2}
+                    maxLength={500}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor={`cap-${i}`}>ข้อความบนจอ</Label>
@@ -390,9 +535,49 @@ function Editor({ v }: { v: VideoDetail }) {
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor={`vis-${i}`}>ภาพ (prompt ภาษาอังกฤษ)</Label>
-                  <Input id={`vis-${i}`} value={s.visual} onChange={(e) => update(i, { visual: e.target.value })} disabled={locked || visualMode === "product_images"} maxLength={600} />
+                  <Input
+                    id={`vis-${i}`}
+                    value={s.visual}
+                    onChange={(e) => update(i, { visual: e.target.value })}
+                    disabled={locked || visualMode === "product_images"}
+                    maxLength={600}
+                  />
                 </div>
               </div>
+              {aiScene === i ? (
+                <div className="mt-3 space-y-2 rounded-lg bg-muted/50 p-3">
+                  <Label htmlFor={`ai-${i}`} className="text-xs">
+                    อยากให้ฉากนี้เป็นภาพอะไร (ภาษาไทยได้)
+                  </Label>
+                  <Textarea
+                    id={`ai-${i}`}
+                    rows={2}
+                    value={aiWhat}
+                    maxLength={1000}
+                    onChange={(e) => setAiWhat(e.target.value)}
+                    placeholder="เช่น มือหยิบเสื้อออกจากกล่อง แสงธรรมชาติ — เว้นว่าง = ให้ภาพตรงกับบทพากย์"
+                  />
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={aiKeep} onChange={(e) => setAiKeep(e.target.checked)} className="size-4 accent-primary" />
+                    ใช้บทพากย์และข้อความบนจอของฉันตามเดิม (AI แก้เฉพาะภาพ)
+                  </label>
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => setAiScene(null)}>
+                      ยกเลิก
+                    </Button>
+                    <Button size="sm" disabled={busy !== null || !s.voiceover.trim()} onClick={() => void rewriteScene(i)}>
+                      {busy === `scene${i}` ? <Loader2 className="animate-spin" /> : <Sparkles />} ให้ AI แก้
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                !locked &&
+                visualMode !== "product_images" && (
+                  <Button size="sm" variant="ghost" className="mt-2 h-7 text-xs" onClick={() => setAiScene(i)} disabled={busy !== null || !s.voiceover.trim()}>
+                    <Sparkles /> ให้ AI แก้ภาพฉากนี้
+                  </Button>
+                )
+              )}
               {visualMode === "my_footage" && (
                 <div className="mt-2 flex items-center gap-2 text-xs">
                   <Label htmlFor={`med-${i}`} className="text-xs text-muted-foreground">
@@ -401,7 +586,11 @@ function Editor({ v }: { v: VideoDetail }) {
                   <NativeSelect
                     id={`med-${i}`}
                     value={s.media ?? ""}
-                    onChange={(e) => update(i, { media: e.target.value ? Number(e.target.value) : null })}
+                    onChange={(e) =>
+                      update(i, {
+                        media: e.target.value ? Number(e.target.value) : null,
+                      })
+                    }
                     disabled={locked}
                     className="h-8 w-auto text-xs"
                   >
@@ -418,7 +607,13 @@ function Editor({ v }: { v: VideoDetail }) {
               )}
               {visualMode !== "product_images" && (
                 <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <input type="checkbox" checked={s.showProduct} onChange={(e) => update(i, { showProduct: e.target.checked })} disabled={locked} className="size-4 accent-primary" />
+                  <input
+                    type="checkbox"
+                    checked={s.showProduct}
+                    onChange={(e) => update(i, { showProduct: e.target.checked })}
+                    disabled={locked}
+                    className="size-4 accent-primary"
+                  />
                   {visualMode === "my_footage" ? "ฉากนี้โชว์สินค้า (ถ้าไม่มีภาพ ใช้รูปสินค้าจริงแทนภาพ AI)" : "ใช้รูปสินค้าเป็นเฟรมแรกของคลิปนี้"}
                 </label>
               )}
@@ -428,7 +623,18 @@ function Editor({ v }: { v: VideoDetail }) {
             <Button
               variant="outline"
               className="w-full"
-              onClick={() => setScenes([...scenes, { voiceover: "", caption: "", visual: "", showProduct: false, durationSec: 4 }])}
+              onClick={() =>
+                setScenes([
+                  ...scenes,
+                  {
+                    voiceover: "",
+                    caption: "",
+                    visual: "",
+                    showProduct: false,
+                    durationSec: 4,
+                  },
+                ])
+              }
             >
               <Plus /> เพิ่มฉาก
             </Button>
@@ -525,16 +731,49 @@ function Readiness({
 }) {
   const rows = [
     ...(needsPublic && caps.publicMedia
-      ? [{ label: "ลิงก์ภาพฉาก/ปกให้ระบบตัดต่อ", ok: caps.publicMedia.configured, missing: caps.publicMedia.missing, required: visualMode === "my_footage", note: "โดเมน HTTPS ของ backend" }]
+      ? [
+          {
+            label: "ลิงก์ภาพฉาก/ปกให้ระบบตัดต่อ",
+            ok: caps.publicMedia.configured,
+            missing: caps.publicMedia.missing,
+            required: visualMode === "my_footage",
+            note: "โดเมน HTTPS ของ backend",
+          },
+        ]
       : []),
     caps.voice[voiceProvider].configured
-      ? { label: "เสียงพากย์", ok: hasVoice, missing: [], required: true, problem: "ยังไม่ได้เลือกเสียง (เลือกที่ช่องเสียงพากย์ทางซ้าย)" }
-      : { label: "เสียงพากย์", ok: false, missing: caps.voice[voiceProvider].missing, required: true },
-    ...(visualMode === "ai_clips" ? [{ label: "คลิป AI (MiniMax Hailuo)", ok: caps.clips.configured, missing: caps.clips.missing, required: true }] : []),
+      ? {
+          label: "เสียงพากย์",
+          ok: hasVoice,
+          missing: [],
+          required: true,
+          problem: "ยังไม่ได้เลือกเสียง (เลือกที่ช่องเสียงพากย์ทางซ้าย)",
+        }
+      : {
+          label: "เสียงพากย์",
+          ok: false,
+          missing: caps.voice[voiceProvider].missing,
+          required: true,
+        },
+    ...(visualMode === "ai_clips"
+      ? [
+          {
+            label: "คลิป AI (MiniMax Hailuo)",
+            ok: caps.clips.configured,
+            missing: caps.clips.missing,
+            required: true,
+          },
+        ]
+      : []),
     ...(visualMode === "my_footage"
       ? [
           caps.sceneClips?.provider === "minimax"
-            ? { label: "ภาพ → คลิป AI (MiniMax Hailuo)", ok: caps.sceneClips.configured, missing: caps.sceneClips.missing, required: true }
+            ? {
+                label: "ภาพ → คลิป AI (MiniMax Hailuo)",
+                ok: caps.sceneClips.configured,
+                missing: caps.sceneClips.missing,
+                required: true,
+              }
             : {
                 label: "ภาพ → คลิป AI (Shotstack)",
                 ok: caps.sceneClips?.configured ?? caps.compose.configured,
@@ -544,14 +783,30 @@ function Readiness({
               },
         ]
       : []),
-    { label: "ประกอบคลิป (Shotstack)", ok: caps.compose.configured, missing: caps.compose.missing, required: false, note: "ถ้าไม่มี จะได้ชิ้นส่วนไปตัดต่อเอง" },
-    { label: "เก็บไฟล์ถาวร (R2)", ok: caps.storage.configured, missing: caps.storage.missing, required: false, note: "ถ้าไม่มี ลิงก์ไฟล์หมดอายุใน ~24 ชม." },
+    {
+      label: "ประกอบคลิป (Shotstack)",
+      ok: caps.compose.configured,
+      missing: caps.compose.missing,
+      required: false,
+      note: "ถ้าไม่มี จะได้ชิ้นส่วนไปตัดต่อเอง",
+    },
+    {
+      label: "เก็บไฟล์ถาวร (R2)",
+      ok: caps.storage.configured,
+      missing: caps.storage.missing,
+      required: false,
+      note: "ถ้าไม่มี ลิงก์ไฟล์หมดอายุใน ~24 ชม.",
+    },
   ];
   return (
     <ul className="space-y-1.5 text-xs">
       {rows.map((r) => (
         <li key={r.label} className="flex items-start gap-2">
-          {r.ok ? <Check className="mt-0.5 size-3.5 shrink-0 text-success" /> : <AlertTriangle className={cn("mt-0.5 size-3.5 shrink-0", r.required ? "text-danger" : "text-warning")} />}
+          {r.ok ? (
+            <Check className="mt-0.5 size-3.5 shrink-0 text-success" />
+          ) : (
+            <AlertTriangle className={cn("mt-0.5 size-3.5 shrink-0", r.required ? "text-danger" : "text-warning")} />
+          )}
           <span>
             <span className="font-medium">{r.label}</span>
             {!r.ok && (
@@ -602,8 +857,8 @@ function Progress({ v, visualMode }: { v: VideoDetail; visualMode: VideoVisualMo
           <div className="flex gap-1.5 rounded-lg bg-warning-soft px-2.5 py-2 text-xs text-warning">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
             <span>
-              ตัวประมวลผลงานเบื้องหลังไม่ทำงาน — งานรอมา {Math.round(v.queue.waitingSec / 60)} นาทีแล้ว ยังไม่มีใครเริ่ม ให้ตรวจ Plesk → Scheduled Tasks ว่ามีงานเรียก{" "}
-              <code className="font-mono">/internal/cron/tick</code> ทุก 1 นาที และรันสำเร็จ (คู่มือ DEPLOY_PLESK ขั้นที่ 5)
+              ตัวประมวลผลงานเบื้องหลังไม่ทำงาน — งานรอมา {Math.round(v.queue.waitingSec / 60)} นาทีแล้ว ยังไม่มีใครเริ่ม ให้ตรวจ Plesk → Scheduled Tasks
+              ว่ามีงานเรียก <code className="font-mono">/internal/cron/tick</code> ทุก 1 นาที และรันสำเร็จ (คู่มือ DEPLOY_PLESK ขั้นที่ 5)
             </span>
           </div>
         )}
@@ -687,7 +942,11 @@ function Outputs({ v }: { v: VideoDetail }) {
           <Button
             variant="outline"
             className="w-full"
-            onClick={() => void apiDownload(`/videos/${v.id}/subtitles.srt`, undefined, `video-${v.id}.srt`).catch((e) => toast.error(e instanceof Error ? e.message : "ดาวน์โหลดไม่สำเร็จ"))}
+            onClick={() =>
+              void apiDownload(`/videos/${v.id}/subtitles.srt`, undefined, `video-${v.id}.srt`).catch((e) =>
+                toast.error(e instanceof Error ? e.message : "ดาวน์โหลดไม่สำเร็จ"),
+              )
+            }
           >
             <Download /> ไฟล์ซับ (.srt)
           </Button>
