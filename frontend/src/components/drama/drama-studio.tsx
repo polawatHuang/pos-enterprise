@@ -18,6 +18,7 @@ import {
   Mic,
   Music,
   Pause,
+  Pencil,
   RefreshCw,
   Save,
   Sparkles,
@@ -27,11 +28,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiDownload } from "@/lib/api";
-import type { DramaCatalog, DramaCharacter, DramaEpisode, DramaProject, DramaShot, DramaStepKey } from "@/lib/types";
+import type { DramaCatalog, DramaCharacter, DramaEpisode, DramaProject, DramaStepKey } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, Label, Skeleton, Textarea } from "@/components/ui/primitives";
+import { Dialog, DialogContent } from "@/components/ui/overlays";
 import { MinimaxVoicePicker } from "@/components/videos/voice-picker";
+import { flushDrafts } from "@/lib/use-autosave";
+import { ShotEditor } from "./shot-editor";
 
 const STEPS: { key: DramaStepKey; label: string; icon: typeof Film }[] = [
   { key: "setup", label: "ตั้งค่าเรื่อง", icon: Wand2 },
@@ -132,6 +136,8 @@ function Studio({ p, queryKey, onEpisode }: { p: DramaProject; queryKey: unknown
   const call = async (fn: () => Promise<DramaProject>, ok?: string) => {
     setBusy(true);
     try {
+      // edited lines are saved before AI work starts, so it never runs on (and voices) the old text
+      await flushDrafts();
       set(await fn());
       if (ok) toast.success(ok);
       return true;
@@ -236,7 +242,10 @@ function Studio({ p, queryKey, onEpisode }: { p: DramaProject; queryKey: unknown
             <button
               key={s.key}
               type="button"
-              onClick={() => setStep(s.key)}
+              onClick={() => {
+                flushDrafts().catch(() => {});
+                setStep(s.key);
+              }}
               aria-current={active ? "step" : undefined}
               className={cn(
                 "flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition",
@@ -272,7 +281,14 @@ function Studio({ p, queryKey, onEpisode }: { p: DramaProject; queryKey: unknown
       )}
       {step === "cover" && <CoverStep p={p} busy={busy} onRun={() => run("cover")} onRedo={() => redo("cover")} />}
       {step === "storyboard" && (
-        <StoryboardStep p={p} busy={busy} onRun={() => run("storyboard")} onRedo={(sid) => redo("shot", sid)} onRedoClip={(sid) => redo("clip", sid)} />
+        <StoryboardStep
+          p={p}
+          busy={busy}
+          onRun={() => run("storyboard")}
+          onRedo={(sid) => redo("shot", sid)}
+          onRedoClip={(sid) => redo("clip", sid)}
+          onSaved={set}
+        />
       )}
       {step === "export" && <ExportStep p={p} busy={busy} onRun={() => run("export")} onRevoice={() => redo("voices")} onPick={onEpisode} />}
 
@@ -947,7 +963,7 @@ function ScriptStep({
           </div>
           <div className="space-y-3">
             {p.shots.map((s) => (
-              <ShotEditor key={`${s.id}-${s.narration}-${JSON.stringify(s.dialogue)}`} p={p} shot={s} onSaved={onSaved} />
+              <ShotEditor key={s.id} p={p} shot={s} onSaved={onSaved} storyboard={false} />
             ))}
           </div>
         </>
@@ -1034,79 +1050,6 @@ function OutlineRow({ p, e, onSaved }: { p: DramaProject; e: DramaEpisode; onSav
         </div>
       )}
     </li>
-  );
-}
-
-function ShotEditor({ p, shot, onSaved }: { p: DramaProject; shot: DramaShot; onSaved: (d: DramaProject) => void }) {
-  const [narration, setNarration] = useState(shot.narration ?? "");
-  const [dialogue, setDialogue] = useState(shot.dialogue);
-  const [saving, setSaving] = useState(false);
-  const dirty = narration !== (shot.narration ?? "") || JSON.stringify(dialogue) !== JSON.stringify(shot.dialogue);
-  const save = async () => {
-    setSaving(true);
-    try {
-      onSaved(
-        await api.put<DramaProject>(`/drama/${p.id}/shots/${shot.id}`, {
-          narration: narration || null,
-          dialogue,
-        }),
-      );
-      toast.success(`บันทึกช็อต ${shot.seq} แล้ว`);
-    } catch (err) {
-      toast.error(errorText(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-  const nameOf = (key: string) => p.characters.find((c) => c.key === key)?.name ?? key;
-  return (
-    <Card className="p-4">
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <span className="grid size-7 place-items-center rounded-lg bg-muted text-xs font-bold tabular-nums">{shot.seq}</span>
-        <p className="min-w-0 flex-1 truncate font-medium">{shot.scene}</p>
-        {shot.isProduct && (
-          <Badge tone="warning">
-            <ShoppingBag className="size-3" /> ไทอินสินค้า
-          </Badge>
-        )}
-        <Badge tone="primary">
-          <Film className="size-3" /> วิดีโอ AI
-        </Badge>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">ผู้บรรยาย</Label>
-          <Textarea rows={2} value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="(ไม่มีคำบรรยาย)" />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">บทพูดตัวละคร</Label>
-          {dialogue.length ? (
-            dialogue.map((d, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <span className="shrink-0 rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">
-                  {nameOf(d.character)}
-                </span>
-                <Input value={d.line} onChange={(e) => setDialogue(dialogue.map((x, j) => (j === i ? { ...x, line: e.target.value } : x)))} className="h-9" />
-              </div>
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">— ไม่มีบทพูด —</p>
-          )}
-        </div>
-      </div>
-      <details className="mt-2 text-xs text-muted-foreground">
-        <summary className="cursor-pointer select-none">คำสั่งภาพ (ภาษาอังกฤษ)</summary>
-        <p className="mt-1 whitespace-pre-wrap">{shot.visualPrompt}</p>
-        {shot.camera && <p className="mt-1">กล้อง: {shot.camera}</p>}
-      </details>
-      {dirty && (
-        <div className="mt-3 flex justify-end">
-          <Button size="sm" onClick={() => void save()} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกช็อตนี้
-          </Button>
-        </div>
-      )}
-    </Card>
   );
 }
 
@@ -1262,13 +1205,17 @@ function StoryboardStep({
   onRun,
   onRedo,
   onRedoClip,
+  onSaved,
 }: {
   p: DramaProject;
   busy: boolean;
   onRun: () => void;
   onRedo: (id: number) => void;
   onRedoClip: (id: number) => void;
+  onSaved: (d: DramaProject) => void;
 }) {
+  const [editing, setEditing] = useState<number | null>(null);
+  const editShot = p.shots.find((s) => s.id === editing) ?? null;
   if (!p.shots.length) return <NeedScript episode={p.episodesTotal > 1 ? p.episode : undefined} />;
   const images = p.shots.filter((s) => s.imageStatus === "done").length;
   const clips = p.shots.filter((s) => s.clipStatus === "done" && s.clipUrl).length;
@@ -1357,6 +1304,9 @@ function StoryboardStep({
                     <Film /> สร้างคลิปใหม่
                   </Button>
                 )}
+                <Button variant="outline" size="sm" className="h-7 w-full text-xs" onClick={() => setEditing(s.id)}>
+                  <Pencil /> แก้สตอรี่บอร์ด
+                </Button>
                 <Button variant="ghost" size="sm" className="h-7 w-full text-xs" disabled={busy || !!p.runTarget} onClick={() => onRedo(s.id)}>
                   <RefreshCw /> สร้างช็อตนี้ใหม่
                 </Button>
@@ -1365,6 +1315,49 @@ function StoryboardStep({
           );
         })}
       </div>
+      <Dialog
+        open={editShot !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            flushDrafts().catch(() => {});
+            setEditing(null);
+          }
+        }}
+      >
+        {editShot && (
+          <DialogContent
+            title={`แก้สตอรี่บอร์ด ช็อต ${editShot.seq}`}
+            description="แก้บทพูด ภาพ กล้อง และตัวละครในช็อต บันทึกอัตโนมัติ — แก้ภาพแล้วกด สร้างช็อตนี้ใหม่ หรือให้ AI แก้ช็อตตามที่บอก"
+            className="max-w-3xl"
+          >
+            <div className="mb-3 flex gap-3">
+              {(editShot.clipUrl || editShot.imageUrl) && (
+                <div className="w-28 shrink-0 overflow-hidden rounded-lg bg-black">
+                  {editShot.clipUrl ? (
+                    <video
+                      src={editShot.clipUrl}
+                      poster={editShot.imageUrl ?? undefined}
+                      muted
+                      loop
+                      playsInline
+                      autoPlay
+                      className="aspect-[9/16] w-full object-cover"
+                    />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={editShot.imageUrl ?? ""} alt="" className="aspect-[9/16] w-full object-cover" />
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                ภาพไม่เข้ากับเรื่อง? กด <b>ให้ AI แก้ช็อตนี้</b> แล้วบอกเป็นภาษาไทยว่าอยากให้เป็นภาพอะไร AI จะเขียนคำสั่งภาพใหม่ให้ต่อเนื่องกับช็อตก่อนและหลัง
+                โดยใช้บทพูดของคุณตามเดิม
+              </p>
+            </div>
+            <ShotEditor key={editShot.id} p={p} shot={editShot} onSaved={onSaved} compact />
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

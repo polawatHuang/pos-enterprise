@@ -6,7 +6,7 @@ const db = require('../../db/pool');
 const { validate } = require('../../core/http');
 const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
-const { notFound, badRequest } = require('../../core/errors');
+const { notFound, badRequest, conflict } = require('../../core/errors');
 const { enqueue } = require('../../jobs/queue');
 const minimaxMedia = require('../../integrations/minimax-media');
 const media = require('../video/media');
@@ -287,33 +287,180 @@ router.put('/:id/settings', validate({ params: idParam, query: epQuery, body: se
   res.json({ data: present(await drama.load(p.id), req.valid.query.episode) });
 });
 
+const dialogueLine = z.object({ character: z.string().max(40), line: z.string().trim().max(500) });
 const shotBody = z.object({
+  scene: z.string().trim().max(255).nullish(),
   narration: z.string().trim().max(1000).nullish(),
-  dialogue: z.array(z.object({ character: z.string().max(40), line: z.string().trim().min(1).max(500) })).max(4).optional(),
+  // empty lines are dropped (clearing a line removes it), so an autosave mid-edit never fails
+  dialogue: z.array(dialogueLine).max(6).optional(),
   visualPrompt: z.string().trim().max(2000).optional(),
   camera: z.string().trim().max(255).nullish(),
+  characters: z.array(z.string().max(40)).max(8).optional(),
+  /** also remake this shot's picture and clip from the edited storyboard ("บันทึกและสร้างช็อตนี้ใหม่") */
+  regenerate: z.boolean().optional(),
 });
+const shotParams = idParam.extend({ sid: z.coerce.number().int().positive() });
 
-router.put('/:id/shots/:sid', validate({ params: idParam.extend({ sid: z.coerce.number().int().positive() }), body: shotBody }), async (req, res) => {
-  const p = await own(req);
-  const s = p.shots.find((x) => x.id === req.valid.params.sid);
+function findShot(p, sid) {
+  const s = p.shots.find((x) => x.id === sid);
   if (!s) throw notFound('ไม่พบช็อต');
-  const b = req.valid.body;
-  const textChanged =
-    (b.narration !== undefined && (b.narration || null) !== s.narration) || (b.dialogue !== undefined && JSON.stringify(b.dialogue) !== JSON.stringify(s.dialogue));
+  return s;
+}
+
+/** Storyboard changes that move shots around wait until the run stops (the run walks shots in order). */
+function requireIdle(p) {
+  if (p.run_target) throw conflict('กำลังทำออโต้อยู่ — กด "หยุดออโต้" ก่อนเพิ่ม ลบ หรือย้ายช็อต');
+}
+
+/** Save a shot's fields; changed lines are voiced again, a changed picture prompt is used when the shot is remade. */
+async function saveShot(p, s, b, keys) {
+  const dialogue = b.dialogue === undefined ? s.dialogue : b.dialogue.filter((d) => d.line && keys.has(d.character)).slice(0, 4);
+  const narration = b.narration === undefined ? s.narration : b.narration || null;
+  const textChanged = (narration || null) !== (s.narration || null) || JSON.stringify(dialogue) !== JSON.stringify(s.dialogue);
   await db.query(
-    `UPDATE drama_shots SET narration = :narration, dialogue = :dialogue, visual_prompt = :visual, camera = :camera,
+    `UPDATE drama_shots SET scene_title = :scene, narration = :narration, dialogue = :dialogue, visual_prompt = :visual, camera = :camera, characters = :chars,
             audio_status = IF(:textChanged, 'pending', audio_status) WHERE id = :sid`,
     {
       sid: s.id,
-      narration: b.narration === undefined ? s.narration : b.narration || null,
-      dialogue: JSON.stringify(b.dialogue ?? s.dialogue),
+      scene: b.scene === undefined ? s.scene_title : b.scene || null,
+      narration,
+      dialogue: JSON.stringify(dialogue),
       visual: b.visualPrompt ?? s.visual_prompt,
       camera: b.camera === undefined ? s.camera : b.camera || null,
+      chars: JSON.stringify(b.characters === undefined ? s.characters : b.characters.filter((k) => keys.has(k))),
       textChanged: textChanged ? 1 : 0,
     },
   );
   if (textChanged) await drama.outdated(p.id, s.episode_no);
+}
+
+/** Remake one shot's picture and clip now (the other shots are left alone). */
+async function remakeShot(req, p, s) {
+  requireIdle(p);
+  await drama.redo(p, 'shot', s.id, s.episode_no);
+  await drama.start(p.id, drama.shotTarget(s.id), s.episode_no);
+  audit(req, 'drama.redo', 'drama_project', p.id, { what: 'shot', episode: s.episode_no });
+}
+
+router.put('/:id/shots/:sid', validate({ params: shotParams, body: shotBody }), async (req, res) => {
+  const p = await own(req);
+  const s = findShot(p, req.valid.params.sid);
+  const b = req.valid.body;
+  if (b.regenerate) requireIdle(p);
+  await saveShot(p, s, b, new Set(p.characters.map((c) => c.char_key)));
+  if (b.regenerate) await remakeShot(req, await drama.load(p.id), s);
+  res.json({ data: present(await drama.load(p.id), s.episode_no) });
+});
+
+/**
+ * "ให้ AI แก้ช็อตนี้": AI rewrites one shot from the user's direction (Thai is fine) in the story's
+ * context, and saves it. keepLines (default) keeps the user's narration and dialogue word for word.
+ */
+router.post(
+  '/:id/shots/:sid/rewrite',
+  validate({ params: shotParams, body: z.object({ instruction: z.string().trim().max(1000).default(''), keepLines: z.boolean().default(true), regenerate: z.boolean().default(false) }) }),
+  async (req, res) => {
+    const p = await own(req);
+    const s = findShot(p, req.valid.params.sid);
+    const b = req.valid.body;
+    if (b.regenerate) requireIdle(p);
+    const out = await drama.rewriteShot(p, s, b);
+    await saveShot(p, s, { scene: out.scene, narration: out.narration, dialogue: out.dialogue, visualPrompt: out.visual, camera: out.camera, characters: out.characters }, new Set(p.characters.map((c) => c.char_key)));
+    if (b.regenerate) await remakeShot(req, await drama.load(p.id), s);
+    audit(req, 'drama.shot_rewrite', 'drama_project', p.id, { shot: s.id });
+    res.json({ data: present(await drama.load(p.id), s.episode_no) });
+  },
+);
+
+/** Add a shot after `after` (a shot id; none = at the start). Without a picture prompt, AI writes the shot from `instruction`. */
+router.post(
+  '/:id/shots',
+  validate({
+    params: idParam,
+    body: z.object({
+      episode: z.number().int().positive(),
+      after: z.number().int().positive().nullish(),
+      instruction: z.string().trim().max(1000).default(''),
+      narration: z.string().trim().max(1000).nullish(),
+      dialogue: z.array(dialogueLine).max(6).optional(),
+      visualPrompt: z.string().trim().max(2000).optional(),
+      characters: z.array(z.string().max(40)).max(8).optional(),
+    }),
+  }),
+  async (req, res) => {
+    const p = await own(req);
+    requireIdle(p);
+    const b = req.valid.body;
+    const ep = Math.min(b.episode, p.episodes_total);
+    const shots = drama.shotsOf(p, ep);
+    if (!shots.length) throw badRequest(`ต้องมีบทของตอนที่ ${ep} ก่อน`);
+    if (shots.length >= 40) throw badRequest('ตอนนี้มีช็อตครบ 40 ช็อตแล้ว');
+    const after = b.after ? findShot(p, b.after) : null;
+    if (after && after.episode_no !== ep) throw badRequest('ช็อตอยู่คนละตอน');
+    if (!b.visualPrompt && !b.instruction && !b.narration && !b.dialogue?.length) throw badRequest('บอกว่าช็อตใหม่เป็นภาพอะไร หรือใส่คำบรรยาย/บทพูด');
+    const seq = (after?.seq ?? 0) + 1;
+    const keys = new Set(p.characters.map((c) => c.char_key));
+    await db.query('UPDATE drama_shots SET seq = seq + 1 WHERE drama_project_id = :id AND episode_no = :ep AND seq >= :seq', { id: p.id, ep, seq });
+    const r = await db.query(
+      `INSERT INTO drama_shots (drama_project_id, episode_no, seq, scene_title, narration, dialogue, visual_prompt, camera, characters, kind, clip_status)
+       VALUES (:id, :ep, :seq, :scene, :narration, :dialogue, :visual, :camera, :chars, 'clip', 'pending')`,
+      {
+        id: p.id,
+        ep,
+        seq,
+        scene: after?.scene_title ?? null,
+        narration: b.narration || null,
+        dialogue: JSON.stringify((b.dialogue ?? []).filter((d) => d.line && keys.has(d.character)).slice(0, 4)),
+        visual: b.visualPrompt || b.instruction || '',
+        camera: after?.camera ?? null,
+        chars: JSON.stringify((b.characters ?? after?.characters ?? []).filter((k) => keys.has(k))),
+      },
+    );
+    await drama.outdated(p.id, ep);
+    if (!b.visualPrompt) {
+      // AI writes the new shot in context; the user's own lines (if any) stay as they are
+      const fresh = await drama.load(p.id);
+      const s = findShot(fresh, r.insertId);
+      const keepLines = Boolean(b.narration || b.dialogue?.length);
+      try {
+        const out = await drama.rewriteShot(fresh, s, { instruction: b.instruction || 'เขียนช็อตเชื่อมที่ต่อเนื่องกับช็อตก่อนและหลัง', keepLines });
+        await saveShot(fresh, s, { scene: out.scene, narration: out.narration, dialogue: out.dialogue, visualPrompt: out.visual, camera: out.camera, characters: out.characters }, keys);
+      } catch (err) {
+        // the shot stays with the user's words as its prompt; they can edit it or press "ให้ AI แก้ช็อตนี้"
+        await db.query('UPDATE drama_shots SET error = :e WHERE id = :sid', { sid: s.id, e: `AI เขียนช็อตไม่สำเร็จ: ${String(err?.message ?? err).slice(0, 400)}` });
+      }
+    }
+    audit(req, 'drama.shot_add', 'drama_project', p.id, { episode: ep, seq });
+    res.status(201).json({ data: present(await drama.load(p.id), ep) });
+  },
+);
+
+router.delete('/:id/shots/:sid', validate({ params: shotParams }), async (req, res) => {
+  const p = await own(req);
+  requireIdle(p);
+  const s = findShot(p, req.valid.params.sid);
+  if (drama.shotsOf(p, s.episode_no).length <= 1) throw badRequest('ต้องเหลืออย่างน้อย 1 ช็อต');
+  await db.query('DELETE FROM drama_shots WHERE id = :sid', { sid: s.id });
+  await db.query('UPDATE drama_shots SET seq = seq - 1 WHERE drama_project_id = :id AND episode_no = :ep AND seq > :seq', { id: p.id, ep: s.episode_no, seq: s.seq });
+  await drama.outdated(p.id, s.episode_no);
+  for (const k of [s.image_key, s.clip_key, ...s.audio.map((a) => a.key)].filter(Boolean)) media.removeFile(k);
+  audit(req, 'drama.shot_delete', 'drama_project', p.id, { episode: s.episode_no, seq: s.seq });
+  res.json({ data: present(await drama.load(p.id), s.episode_no) });
+});
+
+/** Move a shot one place earlier (-1) or later (+1) in its episode. */
+router.post('/:id/shots/:sid/move', validate({ params: shotParams, body: z.object({ by: z.union([z.literal(-1), z.literal(1)]) }) }), async (req, res) => {
+  const p = await own(req);
+  requireIdle(p);
+  const s = findShot(p, req.valid.params.sid);
+  const other = drama.shotsOf(p, s.episode_no).find((x) => x.seq === s.seq + req.valid.body.by);
+  if (other) {
+    await db.tx(async (conn) => {
+      await conn.query('UPDATE drama_shots SET seq = :seq WHERE id = :sid', { sid: s.id, seq: other.seq });
+      await conn.query('UPDATE drama_shots SET seq = :seq WHERE id = :sid', { sid: other.id, seq: s.seq });
+    });
+    await drama.outdated(p.id, s.episode_no);
+  }
   res.json({ data: present(await drama.load(p.id), s.episode_no) });
 });
 

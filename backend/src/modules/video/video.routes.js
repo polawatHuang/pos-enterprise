@@ -13,7 +13,7 @@ const minimaxMedia = require('../../integrations/minimax-media');
 const elevenlabs = require('../../integrations/elevenlabs');
 const shotstack = require('../../integrations/shotstack');
 const r2 = require('../../integrations/r2');
-const { generateScript, productFacts, normalizeScene, TONES, ANGLES } = require('./script');
+const { generateScript, productFacts, normalizeScene, rewriteScene, TONES, ANGLES } = require('./script');
 const media = require('./media');
 const env = require('../../config/env');
 const { VOICE_PROVIDERS, missingSceneImages, sceneAi } = require('./pipeline');
@@ -277,6 +277,33 @@ const sceneSchema = z.object({
   media: z.number().int().min(1).max(media.MAX_FILES).nullable().optional(),
 });
 
+/**
+ * "ให้ AI แก้ฉากนี้": AI rewrites one scene of the editor's current script (not saved here: the
+ * editor shows it and saves it like any edit). keepVoiceover keeps the user's words.
+ */
+router.post(
+  '/:id/scenes/rewrite',
+  validate({
+    params: idParam,
+    body: z.object({
+      scenes: z.array(sceneSchema.extend({ voiceover: z.string().trim().max(500) })).min(1).max(8),
+      index: z.number().int().min(0).max(7),
+      instruction: z.string().trim().max(1000).default(''),
+      keepVoiceover: z.boolean().default(true),
+    }),
+  }),
+  async (req, res) => {
+    const v = await getProject(req.user.orgId, req.valid.params.id);
+    ai.requireConfig();
+    const b = req.valid.body;
+    if (b.index >= b.scenes.length) throw badRequest('ไม่พบฉากนี้');
+    const facts = await productFacts(req.user.orgId, { productId: v.product_id, trendId: v.trending_product_id });
+    const scene = await rewriteScene({ facts: facts?.facts, scenes: b.scenes, index: b.index, instruction: b.instruction, keepVoiceover: b.keepVoiceover });
+    audit(req, 'video.scene_rewrite', 'video_project', v.id, { scene: b.index + 1 });
+    res.json({ data: { scene } });
+  },
+);
+
 /** Manual edits. Any change invalidates generated media (voice must match the words). */
 router.put(
   '/:id',
@@ -313,8 +340,21 @@ router.put(
     const looksChanged = captionStyle !== (v.caption_style ?? 'pop') || (coverId ?? null) !== (v.cover_id ?? null);
     const scriptChanged = JSON.stringify(old?.scenes ?? []) !== JSON.stringify(scenes);
     const voiceChanged = (v.voice_provider ?? 'minimax') !== b.voiceProvider || (v.voice_id ?? null) !== (b.voiceId || null);
-    if (scriptChanged) await db.query('DELETE FROM video_assets WHERE video_project_id = :id', { id: v.id });
-    else if (voiceChanged) await db.query("DELETE FROM video_assets WHERE video_project_id = :id AND kind IN ('voice','final')", { id: v.id });
+    if (scriptChanged) {
+      // Only the scenes whose picture changed lose their clip / picture: editing one scene does not pay
+      // for every clip again. Voices are made again for all scenes (cheap); a new scene order or count
+      // starts the media over.
+      const before = old?.scenes ?? [];
+      const changed =
+        before.length === scenes.length
+          ? scenes.flatMap((sc, i) => (sc.visual !== before[i].visual || sc.showProduct !== before[i].showProduct || (sc.media ?? null) !== (before[i].media ?? null) ? [i] : []))
+          : null;
+      if (!changed) await db.query('DELETE FROM video_assets WHERE video_project_id = :id', { id: v.id });
+      else {
+        await db.query("DELETE FROM video_assets WHERE video_project_id = :id AND (kind IN ('voice','final') OR scene_index IS NULL)", { id: v.id });
+        for (const i of changed) await db.query('DELETE FROM video_assets WHERE video_project_id = :id AND scene_index = :i', { id: v.id, i });
+      }
+    } else if (voiceChanged) await db.query("DELETE FROM video_assets WHERE video_project_id = :id AND kind IN ('voice','final')", { id: v.id });
     const reset = scriptChanged || voiceChanged || looksChanged || v.visual_mode !== b.visualMode;
     await db.query(
       `UPDATE video_projects SET title = :title, script_json = :json, script = :plain, post_caption = :caption, hashtags = :tags,
