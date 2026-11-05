@@ -330,9 +330,19 @@ const EPISODE_SCHEMA = {
   properties: { shots: { type: 'array', items: SHOT_SCHEMA } },
 };
 
-const WRITER_SYSTEM = `คุณเป็นนักเขียนบทละครสั้นแนวตั้ง (ซีรีส์ TikTok / Reels) ภาษาไทย เล่าเรื่องให้ติดตามตั้งแต่ 3 วินาทีแรก
-- ผู้บรรยายเล่าเรื่อง ตัวละครพูดสั้น ๆ เป็นธรรมชาติ ภาษาไทยที่คนดูทั่วไปเข้าใจ
-- ทุกช็อตเป็นวิดีโอเคลื่อนไหว: visual ต้องบรรยายการกระทำและการเคลื่อนไหว ไม่ใช่ภาพนิ่ง
+const WRITER_SYSTEM = `คุณเป็นนักเขียนบทละครสั้นแนวตั้ง (ซีรีส์ TikTok / Reels / ReelShort) ภาษาไทย มือหนึ่ง เขียนให้คนดูหยุดนิ้วตั้งแต่ 3 วินาทีแรกและดูจนจบ
+จังหวะเรื่อง (สำคัญที่สุด):
+- ช็อตแรกคือ hook: เปิดกลางเหตุการณ์ที่ตึงที่สุด (ความลับ การหักหลัง การเผชิญหน้า ภาพที่ชวนสงสัย) ห้ามเปิดด้วยการแนะนำตัวละครหรือบรรยายฉากเฉย ๆ
+- ทุก 2-3 ช็อตต้องมีอะไรเปลี่ยน: ข้อมูลใหม่ อารมณ์พลิก หรือการตัดสินใจ — ไม่มีช็อตเติมเวลา
+- ให้ตัวละครพูดและแสดงมากกว่าผู้บรรยายเล่า (show, don't tell) ผู้บรรยายใช้เฉพาะเชื่อมเรื่องหรือเปิดปม
+- บทพูดสั้น คม มีอารมณ์ชัด เป็นภาษาพูดไทยจริง มีประโยคเด็ดที่คนอยากคอมเมนต์หรือแชร์
+- ช็อตท้ายจบด้วยหักมุมหรือจุดค้างที่ทำให้อยากดูต่อ
+ภาพ (visual) ต้องตรงกับเนื้อเรื่องของช็อตนั้นเสมอ:
+- ทุกช็อตเป็นวิดีโอเคลื่อนไหว: บรรยายการกระทำ ท่าทาง และสีหน้าที่ตรงกับคำบรรยาย/บทพูดของช็อตนั้น ไม่ใช่ภาพนิ่ง
+- visual ของแต่ละช็อตต้องอ่านเข้าใจได้เอง (โมเดลภาพไม่เห็นช็อตอื่น): ระบุสถานที่ เวลา (กลางวัน/กลางคืน) ใครอยู่ในภาพ ทำอะไร อารมณ์อะไร ทุกครั้ง
+- ช็อตในฉากเดียวกันใช้สถานที่ แสง และเสื้อผ้าเดิม เปลี่ยนแค่มุมกล้องและการกระทำ
+- ใช้มุมกล้องหลากหลายแบบภาพยนตร์ (close-up สีหน้าตอนพูดประโยคสำคัญ, wide shot เปิดฉาก, over-the-shoulder ตอนคุยกัน)
+รูปแบบ:
 - แต่ละช็อตพูดจบใน 4-10 วินาที (คำบรรยาย + บทพูดรวมกันไม่เกินประมาณ 100 ตัวอักษร)
 - visual / look / camera เป็นภาษาอังกฤษ บรรยายหน้าตาตัวละครให้เหมือนกันทุกช็อตทุกตอน
 - ห้ามเนื้อหาลามก ความรุนแรงเกินเหตุ หรือหมิ่นสถาบัน`;
@@ -544,6 +554,56 @@ async function writeEpisode(p, unit) {
   });
 }
 
+const SHOT_REWRITE_SCHEMA = { type: 'object', additionalProperties: false, required: ['shot'], properties: { shot: SHOT_SCHEMA } };
+
+/**
+ * "ให้ AI แก้ช็อตนี้": rewrite one shot of the storyboard from the user's direction, in the context of
+ * the story and the shots around it. With keepLines the user's narration and dialogue stay exactly
+ * as they are (only the picture, camera and who is in it change). Returns the new fields; saving them
+ * is up to the caller.
+ */
+async function rewriteShot(p, s, { instruction = '', keepLines = true } = {}) {
+  const shots = shotsOf(p, s.episode_no);
+  const i = shots.findIndex((x) => x.id === s.id);
+  const line = (x) => `#${x.seq} [${x.scene_title ?? ''}] ${x.narration ?? ''} ${x.dialogue.map((d) => `${d.character}: ${d.line}`).join(' / ')} — visual: ${x.visual_prompt ?? ''}`;
+  const e = episodeOf(p, s.episode_no);
+  const brief = [
+    ...storyBrief(p),
+    `เรื่อง: ${p.title}${p.logline ? ` — ${p.logline}` : ''}`,
+    e?.summary ? `ตอนนี้: ${e.summary}` : '',
+    `ตัวละคร (ใช้ key เหล่านี้เท่านั้น): ${p.characters.map((c) => `${c.char_key} = ${c.name} (${c.role ?? ''}) look: ${c.look_prompt ?? ''}`).join('; ')}`,
+    `ช็อตก่อนหน้า: ${shots.slice(Math.max(0, i - 2), i).map(line).join('\n') || '(ไม่มี — นี่คือช็อตแรก ต้องเป็น hook)'}`,
+    `ช็อตที่ต้องแก้: ${line(s)}`,
+    `ช็อตถัดไป: ${shots.slice(i + 1, i + 3).map(line).join('\n') || '(ไม่มี — นี่คือช็อตท้าย)'}`,
+    instruction ? `ผู้ใช้ต้องการ: ${instruction}` : 'ผู้ใช้บอกว่าภาพช็อตนี้ไม่เข้ากับเนื้อเรื่อง — เขียน visual ใหม่ให้ตรงกับคำบรรยาย บทพูด และฉากรอบข้าง',
+    keepLines
+      ? `ห้ามเปลี่ยนคำบรรยายและบทพูด — ใช้ตามนี้ทุกตัวอักษร: narration="${s.narration ?? ''}" dialogue=${JSON.stringify(s.dialogue)}`
+      : 'ปรับคำบรรยายและบทพูดได้ถ้าจำเป็น ให้สั้นและต่อเนื่องกับช็อตรอบข้าง',
+    p.tie_in && s.is_product ? `ช็อตนี้เป็นช็อตไทอินสินค้า "${p.product_name || 'สินค้า'}" — product=true` : 'product=false',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const { data } = await ai.extractStructured({
+    system: WRITER_SYSTEM,
+    schema: SHOT_REWRITE_SCHEMA,
+    toolName: 'submit_shot',
+    toolDescription: 'ส่งช็อตที่แก้แล้ว',
+    maxTokens: 2000,
+    content: [{ type: 'text', text: brief }],
+  });
+  const out = data?.shot;
+  if (!out?.visual) throw new Error('AI ไม่ได้ส่งช็อตกลับมา ลองใหม่อีกครั้ง');
+  const keys = new Set(p.characters.map((c) => c.char_key));
+  return {
+    scene: String(out.scene || s.scene_title || '').slice(0, 255) || null,
+    visual: String(out.visual).slice(0, 2000),
+    camera: out.camera ? String(out.camera).slice(0, 255) : s.camera,
+    characters: (out.characters ?? []).filter((k) => keys.has(k)),
+    narration: keepLines ? s.narration : out.narration || null,
+    dialogue: keepLines ? s.dialogue : (out.dialogue ?? []).filter((d) => keys.has(d.character) && d.line).slice(0, 4),
+  };
+}
+
 /* --------------------------------------------------------- images & clips */
 
 const styled = (p, text) => `${text}. ${catalog.styleOf(p.style).prompt}. ${catalog.genreOf(p.genre).tone}. No text, letters, captions or watermark.`;
@@ -716,6 +776,9 @@ async function blocked(p, unit) {
 
 /* ----------------------------------------------------------------- export */
 
+/** Whether a stored shot row still has the narration and dialogue that `s` was loaded with. */
+const sameLines = (row, s) => (row.narration || null) === (s.narration || null) && JSON.stringify(parse(row.dialogue, [])) === JSON.stringify(s.dialogue ?? []);
+
 async function voice(p, unit) {
   const s = p.shots.find((x) => x.id === unit.id);
   await detail(p.id, `${p.episodes_total > 1 ? `ตอนที่ ${s.episode_no}: ` : ''}กำลังพากย์เสียงช็อต ${s.seq}/${shotsOf(p, s.episode_no).length}`);
@@ -733,6 +796,10 @@ async function voice(p, unit) {
         const r = await minimaxMedia.synthesize(l.text, { voiceId: l.voiceId || undefined });
         audio.push({ speaker: l.speaker, name: l.name ?? null, text: l.text, key: await download(r.url, 'audio/mpeg', 20 * 1024 * 1024), ms: r.durationMs });
       }
+      // the user may have edited the lines while they were being voiced: keep the voices only if the text is still the same
+      // (otherwise the shot stays pending and is voiced again from the edited lines)
+      const now = await db.one('SELECT narration, dialogue FROM drama_shots WHERE id = :id', { id: s.id });
+      if (!now || !sameLines(now, s)) return;
       await db.query("UPDATE drama_shots SET audio = :audio, audio_status = 'done' WHERE id = :id", { id: s.id, audio: JSON.stringify(audio) });
     },
     (e) => db.query("UPDATE drama_shots SET audio_status = 'failed', error = :e WHERE id = :id", { id: s.id, e: `เสียง: ${e}` }),
@@ -890,6 +957,8 @@ module.exports = {
   run,
   redo,
   outdated,
+  rewriteShot,
+  sameLines,
   previewStep,
   fileUrl,
   saveFile,

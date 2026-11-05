@@ -259,6 +259,36 @@ describe('projects and scripts', () => {
     assert.equal(Number(n.n), 0);
     assert.equal((await marketer.put(`/api/videos/${p.id}`, { ...body, scenes: [] })).status, 400);
   });
+
+  test('editing one scene keeps the other scenes clips; AI rewrites one scene keeping the user words', async () => {
+    mockScript();
+    const p = await newProject();
+    for (const i of [0, 1, 2]) {
+      await db.query("INSERT INTO video_assets (video_project_id, kind, scene_index, status, external_url) VALUES (:id, 'broll', :i, 'ready', 'clip'), (:id, 'voice', :i, 'ready', 'v')", { id: p.id, i });
+    }
+    const scenes = p.scenes.map((sc) => ({ ...sc }));
+    scenes[1].visual = 'close-up of hands folding the cotton shirt';
+    const body = { title: p.title, scenes, postCaption: null, hashtags: null, visualMode: 'ai_clips', voiceProvider: 'minimax', voiceId: null };
+    const res = await marketer.put(`/api/videos/${p.id}`, body);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const left = await db.query('SELECT kind, scene_index FROM video_assets WHERE video_project_id = :id ORDER BY scene_index', { id: p.id });
+    assert.deepEqual(left.map((a) => `${a.kind}${a.scene_index}`), ['broll0', 'broll2'], 'only scene 2 loses its clip; voices are made again');
+
+    const seen = [];
+    minimax.createMessage = async (params) => {
+      seen.push(params);
+      const scene = { voiceover: 'AI อยากเปลี่ยนบท', caption: 'AI', visual: 'woman wearing the oversized shirt in a sunny cafe', showProduct: true, durationSec: 5 };
+      return { model: 'MiniMax-M3', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't1', name: 'submit_scene', input: { scene } }] };
+    };
+    const r = await marketer.post(`/api/videos/${p.id}/scenes/rewrite`, { scenes, index: 1, instruction: 'ให้เห็นคนใส่เสื้อในคาเฟ่' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.data.scene.visual, 'woman wearing the oversized shirt in a sunny cafe');
+    assert.equal(r.body.data.scene.voiceover, scenes[1].voiceover, 'the user voice-over stays');
+    assert.equal(r.body.data.scene.caption, scenes[1].caption);
+    assert.match(seen[0].messages[0].content[0].text, /ให้เห็นคนใส่เสื้อในคาเฟ่/);
+    const saved = await db.one('SELECT script_json FROM video_projects WHERE id = :id', { id: p.id });
+    assert.doesNotMatch(String(saved.script_json), /sunny cafe/, 'not saved until the editor saves it');
+  });
 });
 
 describe('generation pipeline', () => {
