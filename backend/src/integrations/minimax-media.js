@@ -9,6 +9,9 @@ const { AppError } = require('../core/errors');
  * Docs: https://platform.minimax.io/docs/api-reference/speech-t2a-http
  *       https://platform.minimax.io/docs/api-reference/video-generation-intro
  */
+/** MiniMax T2A emotions (speech-2.6). */
+const EMOTIONS = ['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'calm', 'fluent'];
+
 const adapter = defineAdapter(
   {
     id: 'minimax_media',
@@ -117,7 +120,11 @@ const adapter = defineAdapter(
      * Text → speech. Asks for a hosted URL (valid ~24h; copy it to R2 to keep it).
      * @returns {{url:string, durationMs:number|null}}
      */
-    async synthesize(text, { voiceId, speed = 1 } = {}) {
+    /**
+     * emotion: one of MiniMax's tones (happy, sad, angry, fearful, disgusted, surprised, calm, fluent); omitted = neutral.
+     * Pause tags like <#0.3#> in the text are read as pauses.
+     */
+    async synthesize(text, { voiceId, speed = 1, emotion = null, pitch = 0 } = {}) {
       const env = adapter.requireConfig();
       const voice = voiceId || env.MINIMAX_VOICE_ID;
       if (!voice) throw new AppError(400, 'BAD_REQUEST', 'ยังไม่ได้เลือกเสียงพากย์ (voice id) — ตั้ง MINIMAX_VOICE_ID หรือเลือกในโปรเจกต์');
@@ -129,7 +136,7 @@ const adapter = defineAdapter(
           stream: false,
           language_boost: env.MINIMAX_TTS_LANGUAGE || 'auto',
           output_format: 'url',
-          voice_setting: { voice_id: voice, speed, vol: 1, pitch: 0 },
+          voice_setting: { voice_id: voice, speed, vol: 1, pitch, ...(emotion && EMOTIONS.includes(emotion) ? { emotion } : {}) },
           audio_setting: { sample_rate: 32000, bitrate: 128000, format: 'mp3', channel: 1 },
         },
       });

@@ -45,7 +45,7 @@ const outlineOf = (n) => ({
 });
 const SHOTS = [
   { scene: 'ย้ายบ้าน', narration: 'คืนแรกในบ้านริมคลอง', dialogue: [], visual: 'old Thai house by a canal at night', camera: 'slow push in', characters: ['mali'], product: false },
-  { scene: 'เสียงเรียก', narration: '', dialogue: [{ character: 'yai', line: 'หนูมาแล้วหรือลูก' }], visual: 'ghostly old woman in doorway', camera: 'handheld', characters: ['yai'], product: false },
+  { scene: 'เสียงเรียก', narration: '', dialogue: [{ character: 'yai', line: 'หนูมาแล้วหรือลูก', emotion: 'sad' }], narration_emotion: 'fearful', visual: 'ghostly old woman in doorway', camera: 'handheld', characters: ['yai'], product: false },
   { scene: 'ความจริง', narration: 'มะลิรู้แล้วว่ายายรอเธอมาตลอด', dialogue: [{ character: 'mali', line: 'ยายคะ' }], visual: 'mali hugging the ghost', camera: 'pull out', characters: ['mali', 'yai'], product: true },
 ];
 let episodesInOutline = 1;
@@ -226,7 +226,13 @@ describe('ละคร AI', () => {
     assert.equal(h3[0].body.ratio, '9:16');
     assert.equal(h3[0].body.content[1].role, 'first_frame');
     assert.match(h3[0].body.content[1].image_url.url, /^data:image\//);
-    const tts = calls.filter((c) => c.path === '/v1/t2a_v2').map((c) => [c.body.text, c.body.voice_setting.voice_id]);
+    // voices carry the scene's tone: the line's emotion, the narrator a touch brisk with pauses
+    const yai = calls.find((c) => c.path === '/v1/t2a_v2' && c.body.text === 'หนูมาแล้วหรือลูก');
+    assert.equal(yai.body.voice_setting.emotion, 'sad');
+    const narr = calls.find((c) => c.path === '/v1/t2a_v2' && c.body.voice_setting.voice_id === 'narrator_v');
+    assert.equal(narr.body.voice_setting.speed, 1.05);
+    assert.equal(narr.body.voice_setting.emotion, 'calm');
+    const tts = calls.filter((c) => c.path === '/v1/t2a_v2').map((c) => [c.body.text.replace(/<#[\d.]+#>/g, ''), c.body.voice_setting.voice_id]);
     assert.deepEqual(tts, [
       ['คืนแรกในบ้านริมคลอง', 'narrator_v'],
       ['หนูมาแล้วหรือลูก', 'thai_old_lady'],
@@ -719,4 +725,22 @@ test('cleanShot: a camera direction in the narration is not voiced; "cut to" bec
   assert.deepEqual(parts[1].dialogue, []);
   const plain = { narration: 'เธอไม่เคยลืมวันนั้น', dialogue: [], visual: 'A girl by the window at dusk' };
   assert.deepEqual(cleanShot(plain), [plain]);
+});
+
+test('timeline: phrase captions sit at the bottom, still (no zoom), the speaker named before the line; the title on top', () => {
+  const { edit } = buildDramaEdit({
+    title: 'เรื่องทดสอบ',
+    subtitle: 'ตอนที่ 1',
+    shots: [
+      { clip: 'https://x/1.mp4', clipSec: 6, lines: [{ speaker: 'narrator', text: 'กาลครั้งหนึ่งนานมาแล้ว', url: 'https://x/a1.mp3', ms: 2000 }] },
+      { clip: 'https://x/2.mp4', clipSec: 6, lines: [{ speaker: 'mali', name: 'มะลิ', text: 'ยายคะ หนูกลับมาแล้ว', url: 'https://x/a2.mp3', ms: 2500 }] },
+    ],
+  });
+  const clips = edit.timeline.tracks.flatMap((t) => t.clips);
+  const captions = clips.filter((c) => c.asset.type === 'html' && /font-size: 62px/.test(c.asset.css));
+  assert.ok(captions.length >= 2);
+  assert.ok(captions.every((c) => c.position === 'bottom' && !c.transition));
+  assert.ok(captions.some((c) => c.asset.html.includes('<span class="n">มะลิ</span>')));
+  const title = clips.find((c) => c.asset.html?.includes('เรื่องทดสอบ'));
+  assert.equal(title.position, 'top');
 });

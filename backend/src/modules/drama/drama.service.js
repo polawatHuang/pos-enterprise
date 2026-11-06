@@ -288,7 +288,11 @@ const CHARACTER_SCHEMA = {
     gender: { type: 'string', enum: ['male', 'female', 'other'] },
     age: { type: 'string', enum: ['child', 'young', 'adult', 'elder'] },
     description: { type: 'string', description: 'นิสัยและเบื้องหลังภาษาไทย 1 ประโยค' },
-    look: { type: 'string', description: 'English: face, hair, age, clothing, distinctive features — consistent across shots' },
+    look: {
+      type: 'string',
+      description:
+        'English, starting with the exact age and gender, e.g. "17-year-old Thai girl, …": face, hair, body, clothing, distinctive features — the same in every shot. One age per character',
+    },
   },
 };
 
@@ -317,12 +321,16 @@ const OUTLINE_SCHEMA = {
   },
 };
 
+/** Tones the AI may give a line (MiniMax TTS emotions). */
+const VOICE_EMOTIONS = ['calm', 'sad', 'happy', 'angry', 'fearful', 'surprised', 'disgusted'];
+
 const SHOT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['scene', 'narration', 'dialogue', 'visual', 'camera', 'characters', 'product'],
+  required: ['scene', 'narration', 'narration_emotion', 'dialogue', 'visual', 'camera', 'characters', 'product'],
   properties: {
     scene: { type: 'string', description: 'ชื่อฉากสั้น ๆ ภาษาไทย' },
+    narration_emotion: { type: 'string', enum: VOICE_EMOTIONS, description: 'โทนเสียงผู้บรรยายในช็อตนี้ (calm ถ้าไม่แน่ใจ)' },
     narration: {
       type: 'string',
       description: 'สิ่งที่ผู้บรรยาย "พูดออกเสียง" เล่าเรื่องหรือความรู้สึก ภาษาไทยแบบพูด 1-2 ประโยคสั้น ห้ามเป็นคำสั่งกล้องหรือบรรยายภาพ (เช่น "เปิดด้วย…", "ภาพตัดไป…") — เว้นว่างได้',
@@ -333,8 +341,12 @@ const SHOT_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['character', 'line'],
-        properties: { character: { type: 'string', description: 'key ของตัวละคร' }, line: { type: 'string', description: 'บทพูดภาษาไทยสั้น ๆ' } },
+        required: ['character', 'line', 'emotion'],
+        properties: {
+          character: { type: 'string', description: 'key ของตัวละคร' },
+          line: { type: 'string', description: 'บทพูดภาษาไทยสั้น ๆ' },
+          emotion: { type: 'string', enum: VOICE_EMOTIONS, description: 'อารมณ์ของน้ำเสียงตอนพูดประโยคนี้' },
+        },
       },
     },
     visual: {
@@ -366,7 +378,12 @@ const WRITER_SYSTEM = `คุณเป็นนักเขียนบทละ
 - visual ของแต่ละช็อตต้องอ่านเข้าใจได้เอง (โมเดลภาพไม่เห็นช็อตอื่น): ระบุสถานที่ เวลา (กลางวัน/กลางคืน) ใครอยู่ในภาพ ทำอะไร อารมณ์อะไร ทุกครั้ง
 - ช็อตในฉากเดียวกันใช้สถานที่ แสง และเสื้อผ้าเดิม เปลี่ยนแค่มุมกล้องและการกระทำ
 - ใช้มุมกล้องหลากหลายแบบภาพยนตร์ (close-up สีหน้าตอนพูดประโยคสำคัญ, wide shot เปิดฉาก, over-the-shoulder ตอนคุยกัน)
+ตัวละครและเสียง:
+- ตัวละครหนึ่งตัว = อายุเดียวตลอดเรื่อง (look ขึ้นต้นด้วยอายุเป็นตัวเลขและเพศ) ถ้าเรื่องข้ามช่วงเวลา (ตอนเด็ก → ตอนโต) ให้สร้างเป็นตัวละครแยก key ตามช่วงอายุ เช่น ton_kid และ ton_teen; พ่อแม่ ครู คนแก่ ต้องเป็นผู้ใหญ่เสมอ
+- ใส่ emotion ให้ทุกบทพูดและ narration_emotion ให้ผู้บรรยาย ตามอารมณ์จริงของช็อต (เศร้า โกรธ ตกใจ ดีใจ) ผู้บรรยายส่วนใหญ่ calm หรือ sad แบบเล่าเรื่องชวนติดตาม
 รูปแบบ:
+- ช็อตแรกต้องเป็นบทพูดของตัวละครหรือเหตุการณ์ที่ตึงที่สุดของตอน ห้ามเปิดด้วยผู้บรรยายเล่าความหลัง
+- อย่างน้อยครึ่งหนึ่งของช็อตต้องมีบทพูดตัวละคร ผู้บรรยายไม่เกิน 1 ประโยคสั้นต่อช็อต
 - narration คือคำที่ผู้บรรยายพูดออกเสียงให้คนดูฟัง (เล่าเรื่อง ความคิด ความรู้สึก) ห้ามเขียนคำสั่งกล้องหรือบรรยายภาพลงไป เช่น "เปิดด้วยมือที่กำลังเขียน…", "ภาพตัดไป…", "กล้องซูม…" — สิ่งที่เห็นในภาพให้อยู่ใน visual; ช็อตที่ไม่ต้องมีเสียงบรรยายให้เว้นว่าง
 - 1 ช็อต = 1 ภาพต่อเนื่อง (คลิปเดียวจากภาพเฟรมแรกภาพเดียว) ห้ามมี "cut to", "intercut" หรือหลายฉากใน visual เดียว ถ้าต้องตัดภาพให้แยกเป็นช็อตใหม่
 - แต่ละช็อตพูดจบใน 4-10 วินาที (คำบรรยาย + บทพูดรวมกันไม่เกินประมาณ 100 ตัวอักษร)
@@ -380,10 +397,12 @@ function pickVoice(voices, c, used) {
   const thai = voices.filter((v) => /thai|ไทย/.test(text(v)));
   const pool = thai.length ? thai : voices;
   const want = c.gender === 'female' ? /female|woman|girl|lady|หญิง/ : c.gender === 'male' ? /\bmale\b|\bman\b|boy|gentleman|ชาย/ : /./;
-  const elder = c.age === 'elder' ? /old|elder|grand|senior|แก่|ชรา/ : null;
-  const ranked = pool
-    .filter((v) => want.test(text(v)) && !(c.gender === 'male' && /female|woman/.test(text(v))))
-    .sort((a, b) => (elder ? Number(elder.test(text(b))) - Number(elder.test(text(a))) : 0));
+  const AGE_WORDS = { elder: /old|elder|grand|senior|แก่|ชรา/, child: /child|kid|little|เด็ก/, young: /young|teen|girl|boy|youth|วัยรุ่น/ };
+  const fit = AGE_WORDS[c.age] ?? null;
+  // grown-ups should not get a child's voice
+  const childish = /child|kid|little|เด็ก/;
+  const score = (v) => (fit ? Number(fit.test(text(v))) * 2 : 0) - (c.age === 'adult' || c.age === 'elder' ? Number(childish.test(text(v))) : 0);
+  const ranked = pool.filter((v) => want.test(text(v)) && !(c.gender === 'male' && /female|woman/.test(text(v)))).sort((a, b) => score(b) - score(a));
   return (ranked.find((v) => !used.has(v.id)) ?? ranked[0] ?? pool.find((v) => !used.has(v.id)) ?? pool[0]).id;
 }
 
@@ -577,11 +596,21 @@ async function writeEpisode(p, unit) {
     const again = await ask(`\n\nรอบที่แล้วได้แค่ ${shots.length} ช็อต ไม่พอ — ต้องมี ${len.shots} ช็อต แต่ละช็อตสั้น`);
     if (again.length > shots.length) shots = again;
   }
+  // a drama is told by its characters: too little dialogue reads as a narrated slideshow — ask once more
+  const spoken = (list) => list.filter((x) => (x.dialogue ?? []).some((d) => d.line)).length;
+  if (shots.length && spoken(shots) < Math.ceil(shots.length * 0.4)) {
+    const again = await ask(
+      `\n\nรอบที่แล้วมีบทพูดตัวละครแค่ ${spoken(shots)} จาก ${shots.length} ช็อต น้อยเกินไป — ให้ตัวละครพูดอย่างน้อยครึ่งหนึ่งของช็อต และเปิดตอนด้วยบทพูดหรือเหตุการณ์ที่ตึงที่สุด ผู้บรรยายพูดให้น้อยลง`,
+    );
+    if (again.length >= Math.ceil(len.shots * 0.6) && spoken(again) > spoken(shots)) shots = again;
+  }
   if (!shots.length) throw new Error('AI ไม่ได้ส่งช็อตกลับมา ลองเขียนบทใหม่');
   const keys = new Set(p.characters.map((c) => c.char_key));
   const clean = shots.slice(0, len.shots + 8).map((s) => ({
     ...s,
-    dialogue: (s.dialogue ?? []).filter((d) => keys.has(d.character) && d.line),
+    dialogue: (s.dialogue ?? [])
+      .filter((d) => keys.has(d.character) && d.line)
+      .map((d) => ({ character: d.character, line: d.line, ...(VOICE_EMOTIONS.includes(d.emotion) ? { emotion: d.emotion } : {}) })),
     characters: (s.characters ?? []).filter((k) => keys.has(k)),
   }));
   const planned = clean.flatMap(cleanShot).flatMap(splitLongShot);
@@ -589,14 +618,15 @@ async function writeEpisode(p, unit) {
     await conn.query('DELETE FROM drama_shots WHERE drama_project_id = :id AND episode_no = :ep', { id: p.id, ep });
     for (const [i, s] of planned.entries()) {
       await conn.query(
-        `INSERT INTO drama_shots (drama_project_id, episode_no, seq, scene_title, narration, dialogue, visual_prompt, camera, characters, kind, clip_status, is_product)
-         VALUES (:id, :ep, :seq, :scene, :narration, :dialogue, :visual, :camera, :chars, 'clip', 'pending', :isProduct)`,
+        `INSERT INTO drama_shots (drama_project_id, episode_no, seq, scene_title, narration, narration_emotion, dialogue, visual_prompt, camera, characters, kind, clip_status, is_product)
+         VALUES (:id, :ep, :seq, :scene, :narration, :narrationEmotion, :dialogue, :visual, :camera, :chars, 'clip', 'pending', :isProduct)`,
         {
           id: p.id,
           ep,
           seq: i + 1,
           scene: s.scene,
           narration: s.narration || null,
+          narrationEmotion: VOICE_EMOTIONS.includes(s.narration_emotion) ? s.narration_emotion : null,
           dialogue: JSON.stringify(s.dialogue),
           visual: s.visual,
           camera: s.camera,
@@ -668,7 +698,10 @@ async function portrait(p, unit) {
   await detail(p.id, `กำลังวาดตัวละคร ${c.name}`);
   await itemTry(
     async () => {
-      const img = await minimaxMedia.generateImage({ prompt: styled(p, `Character portrait, upper body, facing camera: ${c.look_prompt || c.description}`), aspectRatio: '3:4' });
+      const img = await minimaxMedia.generateImage({
+        prompt: styled(p, `Character reference portrait of ONE person, upper body, facing camera, plain background: ${c.look_prompt || c.description}. Exactly this age`),
+        aspectRatio: '3:4',
+      });
       const key = saveFile(img.buffer, img.mime);
       await db.query("UPDATE drama_characters SET portrait_key = :key, status = 'done', error = NULL WHERE id = :id", { id: c.id, key });
     },
@@ -717,12 +750,11 @@ async function shotImage(p, unit) {
   const shots = shotsOf(p, s.episode_no);
   const done = shots.filter((x) => x.image_status === 'done').length;
   await detail(p.id, `${p.episodes_total > 1 ? `ตอนที่ ${s.episode_no}: ` : ''}กำลังสร้างภาพช็อต ${s.seq}/${shots.length} (เสร็จ ${done})`);
-  const lead = s.characters.map((k) => p.characters.find((c) => c.char_key === k)).find((c) => c?.portrait_key);
-  const looks = s.characters
-    .map((k) => p.characters.find((c) => c.char_key === k))
-    .filter(Boolean)
-    .map((c) => `${c.name}: ${c.look_prompt}`)
-    .join('; ');
+  // the face kept is the speaker's (the person the shot is about), else the first one in the picture
+  const byKey = (k) => p.characters.find((c) => c.char_key === k);
+  const lead = [...s.dialogue.map((d) => d.character), ...s.characters].map(byKey).find((c) => c?.portrait_key);
+  const cast = s.characters.map(byKey).filter(Boolean);
+  const looks = cast.length ? `exactly ${cast.length} ${cast.length === 1 ? 'person' : 'people'}: ${cast.map((c) => `${c.name} — ${c.look_prompt}`).join('; ')}` : '';
   const soft = gentle(s);
   const product = s.is_product ? `. The character clearly holds and shows the product "${p.product_name || 'product'}" to the camera` : '';
   await itemTry(
@@ -731,7 +763,7 @@ async function shotImage(p, unit) {
         prompt: soft
           ? // refused before: the same moment told plainly, without the genre's dark tone or the characters' long descriptions
             `${String(s.visual_prompt ?? '').slice(0, 300)}${product}. Calm, family-friendly everyday scene, adults fully clothed, soft natural light, ${catalog.styleOf(p.style).prompt}. Vertical 9:16 frame. No text`
-          : styled(p, `${s.visual_prompt}${looks ? `. Characters — ${looks}` : ''}${product}. Vertical 9:16 frame`),
+          : styled(p, `${s.visual_prompt}${looks ? `. In the picture, ${looks}. Keep each person's age exactly as described` : ''}${product}. Vertical 9:16 frame`),
         aspectRatio: '9:16',
         subjectImage: lead ? dataUrl(lead.portrait_key) : null,
       });
@@ -834,21 +866,26 @@ async function blocked(p, unit) {
 /** Whether a stored shot row still has the narration and dialogue that `s` was loaded with. */
 const sameLines = (row, s) => (row.narration || null) === (s.narration || null) && JSON.stringify(parse(row.dialogue, [])) === JSON.stringify(s.dialogue ?? []);
 
+/** Storytelling pace for short vertical dramas: a touch brisk, never rushed. */
+const NARRATOR_SPEED = 1.05;
+/** Breathing room for the narrator: short pauses after "…" and full stops (MiniMax pause tags; captions keep the plain text). */
+const spokenText = (text, narrator) => (narrator ? String(text).replace(/(…|\.\.\.)\s*/g, '…<#0.4#>').replace(/([.!?])\s+/g, '$1<#0.3#>') : String(text));
+
 async function voice(p, unit) {
   const s = p.shots.find((x) => x.id === unit.id);
   await detail(p.id, `${p.episodes_total > 1 ? `ตอนที่ ${s.episode_no}: ` : ''}กำลังพากย์เสียงช็อต ${s.seq}/${shotsOf(p, s.episode_no).length}`);
   const lines = [
-    ...(s.narration ? [{ speaker: 'narrator', text: s.narration, voiceId: p.narrator_voice_id }] : []),
+    ...(s.narration ? [{ speaker: 'narrator', text: s.narration, voiceId: p.narrator_voice_id, emotion: s.narration_emotion || 'calm', speed: NARRATOR_SPEED }] : []),
     ...s.dialogue.map((d) => {
       const c = p.characters.find((x) => x.char_key === d.character);
-      return { speaker: d.character, name: c?.name ?? null, text: d.line, voiceId: c?.voice_id || p.narrator_voice_id };
+      return { speaker: d.character, name: c?.name ?? null, text: d.line, voiceId: c?.voice_id || p.narrator_voice_id, emotion: d.emotion ?? null, speed: 1 };
     }),
   ];
   await itemTry(
     async () => {
       const audio = [];
       for (const l of lines) {
-        const r = await minimaxMedia.synthesize(l.text, { voiceId: l.voiceId || undefined });
+        const r = await minimaxMedia.synthesize(spokenText(l.text, l.speaker === 'narrator'), { voiceId: l.voiceId || undefined, emotion: l.emotion, speed: l.speed });
         audio.push({ speaker: l.speaker, name: l.name ?? null, text: l.text, key: await download(r.url, 'audio/mpeg', 20 * 1024 * 1024), ms: r.durationMs });
       }
       // the user may have edited the lines while they were being voiced: keep the voices only if the text is still the same
