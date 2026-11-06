@@ -18,7 +18,7 @@ const { runDue } = require('../src/jobs/runner');
 const minimax = require('../src/integrations/minimax');
 const shotstack = require('../src/integrations/shotstack');
 const { buildDramaEdit } = require('../src/modules/drama/timeline');
-const { pickVoice, splitLongShot } = require('../src/modules/drama/drama.service');
+const { pickVoice, splitLongShot, cleanShot } = require('../src/modules/drama/drama.service');
 
 const app = createApp();
 const ENV = { MINIMAX_API_KEY: 'mm-key', AI_PROVIDER: 'minimax', MINIMAX_CLIP_MODEL: 'MiniMax-H3' }; // the default Hailuo Fast path has its own test
@@ -680,4 +680,25 @@ test('pickVoice: Thai voices by gender, prefers an unused one', () => {
   assert.equal(pickVoice(voices, { gender: 'male' }, new Set()), 'th_m');
   assert.equal(pickVoice(voices, { gender: 'female' }, new Set()), 'th_f');
   assert.equal(pickVoice([], { gender: 'female' }, new Set()), null);
+});
+
+test('cleanShot: a camera direction in the narration is not voiced; "cut to" becomes one shot per picture', () => {
+  const [a] = cleanShot({ scene: 'x', narration: 'เปิดด้วยมือที่กำลังเขียน…และมือที่กำลังสั่น', dialogue: [], visual: 'Close-up of hands', characters: [], product: false });
+  assert.equal(a.narration, '');
+  assert.match(a.visual, /Close-up of hands\. Scene: เปิดด้วยมือที่กำลังเขียน/);
+  const parts = cleanShot({
+    scene: 'x',
+    narration: 'ข้อความสั้น ๆ ที่อาจเปลี่ยนทุกอย่าง',
+    dialogue: [{ character: 'ton', line: 'ส่งแล้ว' }],
+    visual: "Extreme close-up of a girl's hands typing on a pink phone. Cut to a window-side silhouette of a boy, phone trembling in his hand",
+    characters: ['ton'],
+    product: false,
+  });
+  assert.equal(parts.length, 2);
+  assert.match(parts[0].visual, /^Extreme close-up of a girl's hands typing on a pink phone$/);
+  assert.match(parts[1].visual, /^A window-side silhouette of a boy/);
+  assert.equal(parts[0].narration, 'ข้อความสั้น ๆ ที่อาจเปลี่ยนทุกอย่าง');
+  assert.deepEqual(parts[1].dialogue, []);
+  const plain = { narration: 'เธอไม่เคยลืมวันนั้น', dialogue: [], visual: 'A girl by the window at dusk' };
+  assert.deepEqual(cleanShot(plain), [plain]);
 });

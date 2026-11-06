@@ -305,7 +305,10 @@ const SHOT_SCHEMA = {
   required: ['scene', 'narration', 'dialogue', 'visual', 'camera', 'characters', 'product'],
   properties: {
     scene: { type: 'string', description: 'ชื่อฉากสั้น ๆ ภาษาไทย' },
-    narration: { type: 'string', description: 'คำบรรยายของผู้เล่าเรื่อง ภาษาไทยแบบพูด 1-2 ประโยคสั้น (เว้นว่างได้ถ้ามีบทพูด)' },
+    narration: {
+      type: 'string',
+      description: 'สิ่งที่ผู้บรรยาย "พูดออกเสียง" เล่าเรื่องหรือความรู้สึก ภาษาไทยแบบพูด 1-2 ประโยคสั้น ห้ามเป็นคำสั่งกล้องหรือบรรยายภาพ (เช่น "เปิดด้วย…", "ภาพตัดไป…") — เว้นว่างได้',
+    },
     dialogue: {
       type: 'array',
       description: 'บทพูดของตัวละครในช็อตนี้ 0-2 ประโยค',
@@ -316,7 +319,10 @@ const SHOT_SCHEMA = {
         properties: { character: { type: 'string', description: 'key ของตัวละคร' }, line: { type: 'string', description: 'บทพูดภาษาไทยสั้น ๆ' } },
       },
     },
-    visual: { type: 'string', description: 'English video prompt: who (by look), action and movement, setting, time, mood. No text in image.' },
+    visual: {
+      type: 'string',
+      description: 'English video prompt for ONE continuous shot: who (by look), action and movement, setting, time, mood. No "cut to" / several scenes — a cut is a new shot. No text in image.',
+    },
     camera: { type: 'string', description: 'English camera/motion for video: e.g. slow push in, handheld, pan left' },
     characters: { type: 'array', items: { type: 'string' }, description: 'key ของตัวละครที่อยู่ในภาพ (ตัวหลักก่อน)' },
     product: { type: 'boolean', description: 'true เฉพาะช็อตที่ตัวละครหยิบ/ใช้/พูดถึงสินค้าที่ไทอิน (false ถ้าไม่มีไทอิน)' },
@@ -343,6 +349,8 @@ const WRITER_SYSTEM = `คุณเป็นนักเขียนบทละ
 - ช็อตในฉากเดียวกันใช้สถานที่ แสง และเสื้อผ้าเดิม เปลี่ยนแค่มุมกล้องและการกระทำ
 - ใช้มุมกล้องหลากหลายแบบภาพยนตร์ (close-up สีหน้าตอนพูดประโยคสำคัญ, wide shot เปิดฉาก, over-the-shoulder ตอนคุยกัน)
 รูปแบบ:
+- narration คือคำที่ผู้บรรยายพูดออกเสียงให้คนดูฟัง (เล่าเรื่อง ความคิด ความรู้สึก) ห้ามเขียนคำสั่งกล้องหรือบรรยายภาพลงไป เช่น "เปิดด้วยมือที่กำลังเขียน…", "ภาพตัดไป…", "กล้องซูม…" — สิ่งที่เห็นในภาพให้อยู่ใน visual; ช็อตที่ไม่ต้องมีเสียงบรรยายให้เว้นว่าง
+- 1 ช็อต = 1 ภาพต่อเนื่อง (คลิปเดียวจากภาพเฟรมแรกภาพเดียว) ห้ามมี "cut to", "intercut" หรือหลายฉากใน visual เดียว ถ้าต้องตัดภาพให้แยกเป็นช็อตใหม่
 - แต่ละช็อตพูดจบใน 4-10 วินาที (คำบรรยาย + บทพูดรวมกันไม่เกินประมาณ 100 ตัวอักษร)
 - visual / look / camera เป็นภาษาอังกฤษ บรรยายหน้าตาตัวละครให้เหมือนกันทุกช็อตทุกตอน
 - ห้ามเนื้อหาลามก ความรุนแรงเกินเหตุ หรือหมิ่นสถาบัน`;
@@ -476,6 +484,35 @@ function splitLongShot(s) {
   }));
 }
 
+/** Narration that is really a camera direction ("เปิดด้วยมือ…", "ภาพตัดไป…") — read aloud it sounds like a shooting script. */
+const DIRECTION = /^\s*(เปิดด้วย|เปิดฉาก|ฉากเปิด|ภาพตัด|ตัดไป|ตัดภาพ|กล้อง|ภาพ(เปิด|แรก)|โคลสอัพ|close[- ]?up|cut to|open(s|ing)? (on|with))/i;
+/** "… Cut to …" / "… then cut to …" / "… intercut with …" inside one visual prompt. */
+const CUT = /[.;,]?\s*(?:and\s+|then\s+)?(?:cut(?:s)?\s+to|intercut(?:\s+with)?|smash\s+cut\s+to|ภาพตัดไป(?:ที่)?|ตัดไป(?:ที่)?)\s*/i;
+
+/**
+ * Tidy one written shot before it becomes clips: a camera direction in the narration moves into the
+ * visual (and is not voiced), and a visual with "cut to" becomes one shot per picture — one clip is
+ * made from one first frame, so it cannot cut mid-clip. The lines stay with the first picture.
+ */
+function cleanShot(s) {
+  let shot = { ...s };
+  if (shot.narration && DIRECTION.test(shot.narration)) {
+    shot = { ...shot, visual: `${shot.visual ?? ''}. Scene: ${shot.narration.trim()}`.replace(/^\.\s*/, ''), narration: '' };
+  }
+  const parts = String(shot.visual ?? '')
+    .split(CUT)
+    .map((x) => x.trim().replace(/^[.;,]\s*/, ''))
+    .filter(Boolean);
+  if (parts.length < 2) return [shot];
+  return parts.map((visual, i) => ({
+    ...shot,
+    visual: visual.charAt(0).toUpperCase() + visual.slice(1),
+    narration: i ? '' : shot.narration,
+    dialogue: i ? [] : shot.dialogue ?? [],
+    product: Boolean(shot.product) && i === parts.length - 1,
+  }));
+}
+
 /** Script of one episode: its shots, written from the series outline and what came before. */
 async function writeEpisode(p, unit) {
   const ep = unit.ep;
@@ -529,7 +566,7 @@ async function writeEpisode(p, unit) {
     dialogue: (s.dialogue ?? []).filter((d) => keys.has(d.character) && d.line),
     characters: (s.characters ?? []).filter((k) => keys.has(k)),
   }));
-  const planned = clean.flatMap(splitLongShot);
+  const planned = clean.flatMap(cleanShot).flatMap(splitLongShot);
   await db.tx(async (conn) => {
     await conn.query('DELETE FROM drama_shots WHERE drama_project_id = :id AND episode_no = :ep', { id: p.id, ep });
     for (const [i, s] of planned.entries()) {
@@ -965,6 +1002,7 @@ module.exports = {
   pickVoice,
   shotSeconds,
   splitLongShot,
+  cleanShot,
   OUTLINE_SCHEMA,
   EPISODE_SCHEMA,
 };
