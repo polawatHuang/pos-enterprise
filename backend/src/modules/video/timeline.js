@@ -243,11 +243,21 @@ function buildShotstackEdit({
         (t) => t.clips.length,
       ),
     },
-    output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 },
+    output: { format: 'mp4', resolution: renderResolution(), aspectRatio: '9:16', fps: 30 },
   };
 }
 
+/**
+ * Shotstack output size: "hd" (720p) by default — the AI clips are 768P, so 1080p is not sharper but
+ * costs more render credits. SHOTSTACK_RESOLUTION=1080 renders full HD.
+ */
+function renderResolution() {
+  const v = String(require('../../config/runtime').get('SHOTSTACK_RESOLUTION') || '').trim();
+  return ['preview', 'mobile', 'sd', 'hd', '1080', '4k'].includes(v) ? v : 'hd';
+}
+
 module.exports = {
+  renderResolution,
   sceneTimings,
   buildSrt,
   buildShotstackEdit,

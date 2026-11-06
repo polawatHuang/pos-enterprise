@@ -199,8 +199,20 @@ describe('ละคร AI', () => {
     failImageNo = 4; // 2 portraits, cover, then shot 1's first attempt fails
     await manager.post(`/api/drama/${projectId}/run`, { target: 'all', episode: 1 });
     await drain();
+    // the cheap pictures come first, then the run stops for the user to check them (no clip paid for yet)
+    const review = (await manager.get(`/api/drama/${projectId}`)).body.data;
+    assert.equal(review.error, null, review.error);
+    assert.equal(review.awaitingReview, true);
+    assert.equal(review.runTarget, null);
+    assert.match(review.stageDetail, /อนุมัติภาพและทำวิดีโอ/);
+    assert.ok(review.shots.every((s) => s.imageStatus === 'done' && s.clipStatus === 'pending'));
+    assert.equal(calls.filter((c) => c.path === '/v2/video_generation').length, 0);
+    const approved = await manager.post(`/api/drama/${projectId}/episodes/1/approve-clips`);
+    assert.equal(approved.status, 202, JSON.stringify(approved.body));
+    await drain();
     const d = (await manager.get(`/api/drama/${projectId}`)).body.data;
     assert.equal(d.error, null, d.error);
+    assert.equal(d.clipsApproved, true);
     assert.ok(d.outputUrl, JSON.stringify({ stage: d.stageDetail, run: d.runTarget, steps: d.steps }));
     assert.ok(d.characters.every((c) => c.portraitUrl));
     assert.ok(d.coverUrl);
@@ -491,6 +503,8 @@ describe('ละคร AI', () => {
       imageNo = 0;
       await manager.post(`/api/drama/${fid}/run`, { target: 'all' });
       await drain();
+      await manager.post(`/api/drama/${fid}/episodes/1/approve-clips`);
+      await drain();
       const d = (await manager.get(`/api/drama/${fid}`)).body.data;
       assert.equal(d.error, null, d.error);
       assert.ok(d.outputUrl);
@@ -517,6 +531,8 @@ describe('ละคร AI', () => {
       calls = [];
       imageNo = 0;
       await manager.post(`/api/drama/${sid}/run`, { target: 'all', episode: 1 });
+      await drain();
+      await manager.post(`/api/drama/${sid}/episodes/1/approve-clips`);
       await drain();
       let d = (await manager.get(`/api/drama/${sid}?episode=1`)).body.data;
       assert.equal(d.error, null, d.error);
@@ -588,6 +604,8 @@ describe('ละคร AI', () => {
       imageNo = 0;
       failImageNo = null;
       await manager.post(`/api/drama/${tid}/run`, { target: 'all' });
+      await drain();
+      await manager.post(`/api/drama/${tid}/episodes/1/approve-clips`);
       await drain();
       const d = (await manager.get(`/api/drama/${tid}`)).body.data;
       assert.equal(d.error, null, d.error);

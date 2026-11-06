@@ -155,7 +155,7 @@ describe('timeline builders (unit)', () => {
       voiceUrls: ['https://a/1.mp3', 'https://a/2.mp3'],
       visuals: [{ type: 'image', url: 'https://img/p.jpg' }, { type: 'video', url: 'https://v/c.mp4' }],
     });
-    assert.deepEqual(edit.output, { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 });
+    assert.deepEqual(edit.output, { format: 'mp4', resolution: 'hd', aspectRatio: '9:16', fps: 30 }); // 720p by default (SHOTSTACK_RESOLUTION)
     const all = edit.timeline.tracks.flatMap((t) => t.clips);
     assert.ok(all.some((c) => c.asset.html?.includes('สร้างด้วย AI') && c.length === 5));
     assert.ok(all.some((c) => c.asset.html === '<p>ลด &lt;50%&gt;</p>'));

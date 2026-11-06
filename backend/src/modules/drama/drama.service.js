@@ -135,6 +135,9 @@ function nextEpisode(p) {
   return null;
 }
 
+/** The user checked this episode's pictures: its AI clips may be made. */
+const approved = (p, ep) => Boolean(episodeOf(p, ep)?.clips_approved);
+
 /** Run target that remakes one shot only ("สร้างช็อตนี้ใหม่" / "สร้างคลิปใหม่"): 'shot:<id>'. */
 const shotTarget = (id) => `shot:${id}`;
 const targetShotId = (target) => (/^shot:\d+$/.test(String(target ?? '')) ? Number(String(target).slice(5)) : null);
@@ -145,6 +148,8 @@ function shotUnit(p, id) {
   if (!s) return null;
   const step = 'storyboard';
   if (s.image_status === 'pending') return { step, kind: 'image', id: s.id };
+  // before the episode's pictures are approved a redo makes the picture only (no clip is paid for)
+  if (s.clip_status === 'pending' && !approved(p, s.episode_no)) return null;
   if (s.clip_status === 'pending' && s.image_status === 'done' && !finished(s.audio_status)) return { step, kind: 'voice', id: s.id };
   if (s.clip_status === 'pending' && s.image_status === 'done') return { step, kind: 'clip_start', id: s.id };
   if (s.clip_status === 'processing') return { step, kind: 'clip_poll', ep: s.episode_no };
@@ -170,6 +175,11 @@ function nextUnit(p, target, ep = 1) {
     if (step === 'storyboard') {
       const img = shots.find((s) => s.image_status === 'pending');
       if (img) return { step, kind: 'image', id: img.id };
+      // pictures cost little, clips a lot: stop for the user to check the pictures first
+      // ("ทำทุกตอนต่อเนื่อง" was chosen to run through, so it does not stop)
+      if (target !== 'series' && !approved(p, ep) && shots.some((s) => s.clip_status === 'pending' && s.image_status === 'done')) {
+        return { step, kind: 'await_review', ep };
+      }
       // a clip is made as long as its shot's voice lines, so those are voiced first
       const unvoiced = shots.find((s) => s.clip_status === 'pending' && s.image_status === 'done' && !finished(s.audio_status));
       if (unvoiced) return { step, kind: 'voice', id: unvoiced.id };
@@ -227,6 +237,14 @@ async function run({ projectId, token }) {
   if (!unit) {
     await db.query("UPDATE drama_projects SET run_target = NULL, run_token = NULL, stage_detail = 'เสร็จแล้ว' WHERE id = :id", { id: p.id });
     return { status: 'done' };
+  }
+  if (unit.kind === 'await_review') {
+    await db.query('UPDATE drama_projects SET run_target = NULL, run_token = NULL, run_episode = :ep, stage_detail = :d WHERE id = :id', {
+      id: p.id,
+      ep: unit.ep,
+      d: `${p.episodes_total > 1 ? `ตอนที่ ${unit.ep}: ` : ''}ภาพตั้งต้นพร้อมแล้ว — ตรวจภาพ แล้วกด "อนุมัติภาพและทำวิดีโอ"`,
+    });
+    return { status: 'await_review' };
   }
   if (ep !== p.run_episode) await db.query('UPDATE drama_projects SET run_episode = :ep WHERE id = :id', { id: p.id, ep });
   let delayMs;
@@ -976,8 +994,20 @@ async function previewStep({ orgId, genre }) {
   return { status: 'ok', style: row.style };
 }
 
+/** "อนุมัติภาพและทำวิดีโอ": the episode's pictures are checked, its clips may be made. */
+const approveClips = (projectId, ep) =>
+  db.query('UPDATE drama_episodes SET clips_approved = 1 WHERE drama_project_id = :id AND episode_no = :ep', { id: projectId, ep });
+
+/** The episode's pictures are all made and wait for the user's check before any clip. */
+const awaitingReview = (p, ep) => {
+  const shots = shotsOf(p, ep);
+  return !approved(p, ep) && shots.length > 0 && shots.every((s) => s.image_status === 'done') && shots.some((s) => s.clip_status === 'pending');
+};
+
 module.exports = {
   STEPS,
+  approveClips,
+  awaitingReview,
   shotTarget,
   targetShotId,
   MAX_ATTEMPTS,

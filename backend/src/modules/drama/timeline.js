@@ -1,6 +1,6 @@
 'use strict';
 
-const { DEFAULT_FONT_URL, estimateMs, srtTime, wordChunks } = require('../video/timeline');
+const { DEFAULT_FONT_URL, estimateMs, srtTime, wordChunks, renderResolution } = require('../video/timeline');
 
 /**
  * Pure builder (unit-tested): one ละคร AI episode as a Shotstack edit, 1080x1920.
@@ -173,7 +173,7 @@ function buildDramaEdit({ title, subtitle = null, endText = null, shots, musicUr
         (tr) => tr.clips.length,
       ),
     },
-    output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 },
+    output: { format: 'mp4', resolution: renderResolution(), aspectRatio: '9:16', fps: 30 },
   };
   return { edit, srt, durationSec: Math.round(t) };
 }

@@ -27,6 +27,8 @@ const adapter = defineAdapter(
       { name: 'SHOTSTACK_API_KEY' },
       // "stage" is free with a watermark; "v1" is production
       { name: 'SHOTSTACK_ENV', optional: true, default: 'stage' },
+      // Size of the finished video: hd (720p, fewer render credits; AI clips are 768P anyway) or 1080
+      { name: 'SHOTSTACK_RESOLUTION', optional: true, default: 'hd' },
       // Who turns scene pictures into AI clips (and draws missing pictures): "shotstack" (uses Shotstack credits) or "minimax" (Hailuo + image-01, needs a MiniMax plan with those models)
       { name: 'VIDEO_SCENE_AI', optional: true, default: 'shotstack' },
       // Generation models (GET /edit/{env}/models lists the ones the account can use)
