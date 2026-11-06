@@ -1906,7 +1906,8 @@ CREATE TABLE drama_shots (
   seq              INT NOT NULL,
   scene_title      VARCHAR(255) NULL,
   narration        TEXT NULL,
-  dialogue         LONGTEXT NULL COMMENT 'JSON [{character, line}]',
+  narration_emotion VARCHAR(20) NULL COMMENT 'TTS emotion of the narration',
+  dialogue         LONGTEXT NULL COMMENT 'JSON [{character, line, emotion}]',
   visual_prompt    TEXT NULL COMMENT 'English shot description',
   camera           VARCHAR(255) NULL,
   characters       VARCHAR(500) NULL COMMENT 'JSON character keys in the shot',
@@ -1959,6 +1960,6 @@ CREATE TABLE drama_style_previews (
   CONSTRAINT fk_drama_preview_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests'), ('031_marketplace_chat'), ('032_drama'), ('033_drama_clip_length'), ('034_drama_tie_in'), ('035_drama_series'), ('036_drama_review');
+INSERT INTO schema_migrations (version) VALUES ('001_initial'), ('002_accounting'), ('003_inbox'), ('004_trends'), ('005_video'), ('006_social'), ('007_trend_lifecycle'), ('008_ai_search'), ('009_covers'), ('010_video_upgrade'), ('011_pos_retail'), ('012_stock_ops'), ('013_purchasing'), ('014_lots'), ('015_app_config'), ('016_discounts_returns'), ('017_branch_payment'), ('018_promotions'), ('019_welfare'), ('020_reversals'), ('021_pos_assist'), ('022_customer_receipt'), ('023_payment_gateway'), ('024_offline_sales'), ('025_documents_hub'), ('026_purchasing_cycle'), ('027_hr_payroll'), ('028_kalodata'), ('029_trend_web_facts'), ('030_data_requests'), ('031_marketplace_chat'), ('032_drama'), ('033_drama_clip_length'), ('034_drama_tie_in'), ('035_drama_series'), ('036_drama_review'), ('037_drama_voice_emotion');
 
 SET FOREIGN_KEY_CHECKS = 1;

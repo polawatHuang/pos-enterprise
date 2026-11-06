@@ -7,8 +7,8 @@ const { DEFAULT_FONT_URL, estimateMs, srtTime, wordChunks, renderResolution } = 
  *   Shots in order, every one a moving H3 clip — no still pictures. A shot lasts as long as its voice
  *   lines (narrator, then characters) plus small gaps; if the clip is shorter than that, the clip's
  *   last moments play again rather than freezing. The title (and "ตอนที่ N") sits on the opening
- *   clip, "ติดตามตอนที่ N+1" / "จบบริบูรณ์" on the closing one. Word-by-word captions: narrator in
- *   white, characters in yellow with their name.
+ *   clip, "ติดตามตอนที่ N+1" / "จบบริบูรณ์" on the closing one. Phrase captions at the bottom: narrator
+ *   in white italic, characters in yellow after a name tag.
  */
 const TITLE_SEC = 3;
 const END_SEC = 2.5;
@@ -18,13 +18,21 @@ const r2 = (n) => Math.round(n * 100) / 100;
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+/**
+ * Captions: one short phrase at a time, still (no zoom — a zooming word reads as a giant ghost letter on a
+ * paused frame), at the bottom clear of faces and above TikTok's own buttons. Character lines are yellow
+ * with the speaker's name in a white tag before them; the narrator is white italic.
+ */
 const captionCss = (dialogue) =>
-  `p { font-family: 'Sarabun'; font-weight: 800; font-size: 76px; line-height: 1.15; text-align: center; color: ${dialogue ? '#FFE600' : '#FFFFFF'};` +
-  ' text-shadow: 0 0 8px #000, 4px 4px 0 #000, -4px -4px 0 #000, 4px -4px 0 #000, -4px 4px 0 #000, 0 8px 18px rgba(0,0,0,0.7); }';
+  `p { font-family: 'Sarabun'; font-weight: 800; font-size: 62px; line-height: 1.2; text-align: center; color: ${dialogue ? '#FFE600' : '#FFFFFF'};` +
+  `${dialogue ? '' : ' font-style: italic;'}` +
+  ' text-shadow: 0 0 6px #000, 3px 3px 0 #000, -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 0 6px 14px rgba(0,0,0,0.8); }' +
+  " .n { font-style: normal; font-weight: 800; font-size: 46px; color: #111827; background: #FFFFFF; padding: 2px 16px; border-radius: 12px; margin-right: 14px; text-shadow: none; vertical-align: middle; }";
+const CAPTION_CHARS = 20;
 const nameCss =
   "p { font-family: 'Sarabun'; font-weight: 700; font-size: 44px; text-align: center; color: #111827; background: #FFE600; padding: 6px 22px; border-radius: 14px; display: inline-block; }";
 const titleCss =
-  "p { font-family: 'Sarabun'; font-weight: 800; font-size: 104px; line-height: 1.1; text-align: center; color: #FFFFFF; text-shadow: 0 6px 24px rgba(0,0,0,0.9), 0 0 4px #000; }";
+  "p { font-family: 'Sarabun'; font-weight: 800; font-size: 92px; line-height: 1.12; text-align: center; color: #FFFFFF; background: rgba(0,0,0,0.55); padding: 18px 30px; border-radius: 26px; text-shadow: 0 4px 18px rgba(0,0,0,0.9); }";
 const badgeCss =
   "p { font-family: 'Sarabun'; font-weight: 800; font-size: 52px; text-align: center; color: #FFFFFF; background: #E11D48; padding: 8px 28px; border-radius: 16px; display: inline-block; }";
 
@@ -55,7 +63,6 @@ function buildDramaEdit({ title, subtitle = null, endText = null, shots, musicUr
   const shotTimes = [];
   const voice = [];
   const words = [];
-  const names = [];
   const cues = [];
   for (const s of shots) {
     const start = t;
@@ -66,27 +73,18 @@ function buildDramaEdit({ title, subtitle = null, endText = null, shots, musicUr
       voice.push({ asset: { type: 'audio', src: l.url, volume: 1 }, start: r2(cursor), length: len });
       cues.push({ start: cursor, end: cursor + len, text: l.name ? `${l.name}: ${l.text}` : l.text });
       const dialogue = l.speaker !== 'narrator';
-      const chunks = wordChunks(l.text, 14);
+      const chunks = wordChunks(l.text, CAPTION_CHARS);
       const each = len / Math.max(1, chunks.length);
+      const tag = dialogue && l.name ? `<span class="n">${escapeHtml(l.name)}</span>` : '';
       chunks.forEach((text, i) =>
         words.push({
-          asset: { type: 'html', html: `<p>${escapeHtml(text)}</p>`, css: captionCss(dialogue), width: 960, height: 260 },
+          asset: { type: 'html', html: `<p>${tag}${escapeHtml(text)}</p>`, css: captionCss(dialogue), width: 1000, height: 240 },
           start: r2(cursor + i * each),
           length: r2(each),
-          position: 'center',
-          offset: { y: -0.12 },
-          transition: { in: 'zoom' },
+          position: 'bottom',
+          offset: { y: 0.16 },
         }),
       );
-      if (dialogue && l.name) {
-        names.push({
-          asset: { type: 'html', html: `<p>${escapeHtml(l.name)}</p>`, css: nameCss, width: 600, height: 110 },
-          start: r2(cursor),
-          length: len,
-          position: 'center',
-          offset: { y: 0.02 },
-        });
-      }
       cursor += len + GAP_SEC;
     }
     const length = r2(Math.max(MIN_SHOT_SEC, cursor - start + 0.2));
@@ -131,7 +129,7 @@ function buildDramaEdit({ title, subtitle = null, endText = null, shots, musicUr
       start: 0,
       length: Math.min(TITLE_SEC, total),
       position: 'top',
-      offset: { y: -0.1 },
+      offset: { y: -0.08 },
       transition: { in: 'fade', out: 'fade' },
     });
     if (subtitle) {
@@ -140,7 +138,7 @@ function buildDramaEdit({ title, subtitle = null, endText = null, shots, musicUr
         start: 0.3,
         length: Math.max(0.5, Math.min(TITLE_SEC, total) - 0.3),
         position: 'top',
-        offset: { y: -0.36 },
+        offset: { y: -0.33 },
         transition: { in: 'fade', out: 'fade' },
       });
     }
@@ -169,7 +167,7 @@ function buildDramaEdit({ title, subtitle = null, endText = null, shots, musicUr
       background: '#000000',
       fonts: [{ src: fontUrl }],
       ...(musicUrl ? { soundtrack: { src: musicUrl, effect: 'fadeInFadeOut', volume: 0.1 } } : {}),
-      tracks: [{ clips: [label] }, { clips: overlays }, { clips: names }, { clips: words }, { clips: productCards }, { clips: voice }, { clips: visualClips }].filter(
+      tracks: [{ clips: [label] }, { clips: overlays }, { clips: words }, { clips: productCards }, { clips: voice }, { clips: visualClips }].filter(
         (tr) => tr.clips.length,
       ),
     },
