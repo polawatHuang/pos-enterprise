@@ -2522,6 +2522,7 @@ export interface DramaEpisode {
   outputUrl: string | null;
   durationSec: number | null;
   hasSubtitles: boolean;
+  clipsApproved: boolean;
 }
 
 export interface DramaCharacter {
@@ -2595,6 +2596,10 @@ export interface DramaProject {
   runEpisode: number | null;
   /** a one-shot run ("สร้างช็อตนี้ใหม่") works on this shot only */
   runShotId: number | null;
+  /** this episode's pictures are checked: AI clips may be made */
+  clipsApproved: boolean;
+  /** pictures made, clips wait for "อนุมัติภาพและทำวิดีโอ" */
+  awaitingReview: boolean;
   runningStep: DramaStepKey | null;
   stageDetail: string | null;
   error: string | null;

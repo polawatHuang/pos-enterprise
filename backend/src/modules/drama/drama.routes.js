@@ -99,6 +99,7 @@ function present(p, asked = null) {
         outputUrl: status === 'done' ? drama.fileUrl(row?.output_key) : null,
         durationSec: row?.duration_sec ?? null,
         hasSubtitles: Boolean(row?.subtitle_srt),
+        clipsApproved: Boolean(row?.clips_approved),
       };
     }),
     outputUrl: states.export === 'done' ? drama.fileUrl(e?.output_key) : null,
@@ -108,6 +109,9 @@ function present(p, asked = null) {
     runEpisode: runEp,
     /** a one-shot run ("สร้างช็อตนี้ใหม่"): only this shot is being made */
     runShotId: drama.targetShotId(p.run_target),
+    /** pictures made, clips wait for "อนุมัติภาพและทำวิดีโอ" */
+    clipsApproved: Boolean(e?.clips_approved),
+    awaitingReview: drama.awaitingReview(p, ep),
     runningStep: running,
     stageDetail: p.stage_detail,
     error: p.error,
@@ -546,6 +550,18 @@ router.post(
     res.status(202).json({ data: present(await drama.load(p.id), what === 'outline' ? 1 : ep) });
   },
 );
+
+/** "อนุมัติภาพและทำวิดีโอ": the pictures of the episode are checked; make its clips and the video. */
+router.post('/:id/episodes/:no/approve-clips', validate({ params: idParam.extend({ no: z.coerce.number().int().positive() }) }), async (req, res) => {
+  const p = await own(req);
+  const ep = req.valid.params.no;
+  if (!drama.episodeOf(p, ep)) throw notFound('ไม่พบตอนนี้');
+  if (!drama.shotsOf(p, ep).length) throw badRequest(`ตอนที่ ${ep} ยังไม่มีบท`);
+  await drama.approveClips(p.id, ep);
+  await drama.start(p.id, 'all', ep);
+  audit(req, 'drama.approve_clips', 'drama_project', p.id, { episode: ep });
+  res.status(202).json({ data: present(await drama.load(p.id), ep) });
+});
 
 /** Edit an episode in the outline (before its script is written, this steers it). */
 router.put(

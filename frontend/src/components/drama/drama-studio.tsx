@@ -1220,8 +1220,34 @@ function StoryboardStep({
   const images = p.shots.filter((s) => s.imageStatus === "done").length;
   const clips = p.shots.filter((s) => s.clipStatus === "done" && s.clipUrl).length;
   const failed = p.shots.filter((s) => s.imageStatus === "failed" || s.clipStatus === "failed");
+  const pendingClips = p.shots.filter((s) => s.clipStatus === "pending").length;
+  const approve = async () => {
+    try {
+      onSaved(await api.post<DramaProject>(`/drama/${p.id}/episodes/${p.episode}/approve-clips`));
+      toast.success(`เริ่มทำวิดีโอ ${pendingClips} ช็อตแล้ว ปิดหน้านี้ได้`);
+    } catch (err) {
+      toast.error(errorText(err));
+    }
+  };
   return (
     <div className="space-y-4">
+      {p.awaitingReview && !p.runTarget && (
+        <Card className="flex flex-wrap items-center gap-3 border-rose-500/50 bg-gradient-to-r from-rose-600/10 to-fuchsia-600/10 p-4">
+          <ImageIcon className="size-8 shrink-0 text-rose-600" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">
+              ภาพตั้งต้นพร้อมแล้ว {images}/{p.shots.length} ช็อต — ตรวจก่อนทำวิดีโอ
+            </p>
+            <p className="text-sm text-muted-foreground">
+              ภาพราคาไม่ถึง 1 บาท แต่คลิปละประมาณ 6–11 บาท ภาพไหนหน้าตัวละครเพี้ยนหรือไม่ตรงเรื่อง กด &quot;สร้างช็อตนี้ใหม่&quot; (ตอนนี้ทำแค่ภาพ)
+              หรือแก้คำสั่งภาพก่อน แล้วค่อยอนุมัติ
+            </p>
+          </div>
+          <Button onClick={() => void approve()} disabled={busy} className="bg-gradient-to-r from-rose-600 to-fuchsia-600 text-white">
+            <Film /> อนุมัติภาพและทำวิดีโอ ({pendingClips} คลิป)
+          </Button>
+        </Card>
+      )}
       <Card className="flex flex-wrap items-center gap-3 p-4">
         <div className="min-w-0 flex-1">
           <p className="font-semibold">
@@ -1293,7 +1319,15 @@ function StoryboardStep({
                     s.clipUrl && s.clipStatus === "done" ? "bg-success text-white" : bad ? "bg-danger text-white" : "bg-white/85 text-slate-900",
                   )}
                 >
-                  {s.clipUrl && s.clipStatus === "done" ? "วิดีโอ ✓" : bad ? "ไม่สำเร็จ" : s.clipStatus === "processing" ? "กำลังทำ" : "รอวิดีโอ"}
+                  {s.clipUrl && s.clipStatus === "done"
+                    ? "วิดีโอ ✓"
+                    : bad
+                      ? "ไม่สำเร็จ"
+                      : s.clipStatus === "processing"
+                        ? "กำลังทำ"
+                        : !p.clipsApproved && s.imageStatus === "done"
+                          ? "ภาพพร้อม · รออนุมัติ"
+                          : "รอวิดีโอ"}
                 </span>
               </div>
               <div className="space-y-1.5 p-2">
