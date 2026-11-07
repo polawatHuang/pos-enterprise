@@ -64,7 +64,7 @@ export function SidebarNav({
     .filter((g) => g.items.length > 0);
 
   return (
-    <nav aria-label="เมนูหลัก" className="scrollbar-thin flex-1 overflow-y-auto px-3 pb-6">
+    <nav aria-label="เมนูหลัก" className="scrollbar-thin min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 pb-6 [-webkit-overflow-scrolling:touch]">
       {groups.map((group) => (
         <div key={group.label} className="mt-5 first:mt-2">
           {!collapsed && (

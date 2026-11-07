@@ -53,7 +53,7 @@ export function SheetContent({ className, children, title, ...props }: React.Com
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
       <DialogPrimitive.Content
-        className={cn("fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col shadow-2xl outline-none", className)}
+        className={cn("fixed inset-y-0 left-0 z-50 flex h-dvh w-72 max-w-[85vw] flex-col overflow-hidden overscroll-contain shadow-2xl outline-none", className)}
         {...props}
       >
         <DialogPrimitive.Title className="sr-only">{title}</DialogPrimitive.Title>

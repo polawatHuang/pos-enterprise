@@ -82,7 +82,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-30 hidden flex-col bg-sidebar transition-[width] duration-200 lg:flex",
+          "fixed inset-y-0 left-0 z-30 hidden flex-col overflow-hidden bg-sidebar transition-[width] duration-200 lg:flex",
           collapsed ? "w-[72px]" : "w-64",
         )}
       >
