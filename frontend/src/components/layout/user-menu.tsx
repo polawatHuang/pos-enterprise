@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { KeyRound, LogOut, Monitor, Moon, Sun } from "lucide-react";
+import { KeyRound, LogOut, Monitor, Moon, Palette, Sun } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
   DropdownMenu,
@@ -67,6 +67,11 @@ export function UserMenu() {
           <span className="block truncate">{user.email}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href="/settings/appearance">
+            <Palette /> การแสดงผล
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link href="/settings/account">
             <KeyRound /> บัญชีและรหัสผ่าน

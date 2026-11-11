@@ -12,6 +12,7 @@ import { SearchTrigger } from "./command-palette";
 import { NotificationBell } from "./notification-bell";
 import { ThemeToggle, UserMenu } from "./user-menu";
 import { findNavItem } from "@/config/nav";
+import { APPEARANCE_ACCENTS, appearanceStorageKey } from "@/config/appearance";
 import { cn } from "@/lib/utils";
 
 const COLLAPSE_KEY = "pe.sidebar.collapsed";
@@ -32,6 +33,17 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Close the drawer if this shell is hidden by Activity
   useLayoutEffect(() => () => setMobileOpen(false), []);
+
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const saved = localStorage.getItem(appearanceStorageKey(user.id));
+      const accent = APPEARANCE_ACCENTS.find((option) => option.id === saved)?.id ?? "violet";
+      document.documentElement.dataset.accent = accent;
+    } catch {
+      document.documentElement.dataset.accent = "violet";
+    }
+  }, [user]);
 
   // Force first-login password change before using the app
   useEffect(() => {
@@ -87,7 +99,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <Brand collapsed={collapsed} />
-        <SidebarNav permissions={user.permissions} collapsed={collapsed} />
+        <SidebarNav permissions={user.permissions} userId={user.id} collapsed={collapsed} />
         <button
           onClick={toggleCollapsed}
           className="m-3 flex h-9 items-center justify-center gap-2 rounded-lg text-xs text-sidebar-muted hover:bg-white/5 hover:text-white"
@@ -103,7 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent title="เมนูหลัก" className="bg-sidebar lg:hidden">
           <Brand />
-          <SidebarNav permissions={user.permissions} onNavigate={() => setMobileOpen(false)} />
+          <SidebarNav permissions={user.permissions} userId={user.id} onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
       </Dialog.Root>
 
