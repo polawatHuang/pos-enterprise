@@ -1097,7 +1097,7 @@ export function PosView() {
       </div>
 
       {/* Mobile checkout bar */}
-      <div className="fixed inset-x-0 bottom-0 z-20 flex items-center gap-3 border-t border-border bg-card/95 p-3 backdrop-blur lg:hidden">
+      <div className="safe-area-bottom fixed inset-x-0 bottom-0 z-20 flex items-center gap-3 border-t border-border bg-card/95 p-3 backdrop-blur lg:hidden">
         <button className="min-w-0 flex-1 text-left" onClick={() => setTab("cart")}>
           <span className="block text-xs text-muted-foreground">{formatNumber(totals.units)} ชิ้น · ดูตะกร้า</span>
           <span className="text-xl font-bold tabular-nums">{formatMoney(totals.total)}</span>

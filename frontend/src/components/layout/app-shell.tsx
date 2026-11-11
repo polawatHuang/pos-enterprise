@@ -113,14 +113,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Mobile drawer */}
       <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent title="เมนูหลัก" className="bg-sidebar lg:hidden">
+        <SheetContent title="เมนูหลัก" className="safe-area-top bg-sidebar lg:hidden">
           <Brand />
           <SidebarNav permissions={user.permissions} userId={user.id} onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
       </Dialog.Root>
 
       <div className={cn("flex min-h-dvh flex-col transition-[padding] duration-200", collapsed ? "lg:pl-[72px]" : "lg:pl-64")}>
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur sm:px-6">
+        <header className="safe-area-top sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur sm:px-6">
           <button
             onClick={() => setMobileOpen(true)}
             className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent lg:hidden"

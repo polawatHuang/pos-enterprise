@@ -293,7 +293,7 @@ function Studio({ p, queryKey, onEpisode }: { p: DramaProject; queryKey: unknown
       {step === "export" && <ExportStep p={p} busy={busy} onRun={() => run("export")} onRevoice={() => redo("voices")} onPick={onEpisode} />}
 
       {/* sticky actions */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/90 backdrop-blur lg:left-[var(--sidebar-width,16rem)]">
+      <div className="safe-area-bottom fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/90 backdrop-blur lg:left-[var(--sidebar-width,16rem)]">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3">
           <Button variant="outline" onClick={() => setStep(STEPS[Math.max(0, idx - 1)].key)} disabled={idx === 0}>
             <ArrowLeft /> ย้อนกลับ

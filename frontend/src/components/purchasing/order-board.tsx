@@ -227,7 +227,7 @@ export function OrderBoard({ warehouses, initialWarehouse }: { warehouses: Wareh
       )}
 
       {can("purchasing:write") && picked.length > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-card/95 p-3 backdrop-blur lg:left-auto lg:right-6 lg:bottom-6 lg:w-[520px] lg:rounded-2xl lg:border lg:shadow-lg">
+        <div className="safe-area-bottom fixed inset-x-0 bottom-0 z-20 border-t border-border bg-card/95 p-3 backdrop-blur lg:left-auto lg:right-6 lg:bottom-6 lg:w-[520px] lg:rounded-2xl lg:border lg:shadow-lg">
           <div className="flex items-center gap-3">
             <div className="min-w-0 flex-1">
               <p className="text-xs text-muted-foreground">

@@ -138,6 +138,16 @@ html.dark[data-accent="rose"] { --primary: oklch(0.72 0.17 5); --primary-foregro
   }
 }
 
+.safe-area-top {
+  height: auto;
+  min-height: calc(4rem + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-area-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
 /* Thin scrollbars for side panels */
 .scrollbar-thin {
   scrollbar-width: thin;

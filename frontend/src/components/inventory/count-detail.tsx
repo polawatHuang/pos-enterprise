@@ -221,7 +221,7 @@ export function CountDetail({ id }: { id: number }) {
 
       {/* Sticky action bar */}
       {(counting || review) && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-card/95 p-3 backdrop-blur lg:left-auto lg:right-6 lg:bottom-6 lg:rounded-2xl lg:border lg:shadow-lg">
+        <div className="safe-area-bottom fixed inset-x-0 bottom-0 z-20 border-t border-border bg-card/95 p-3 backdrop-blur lg:left-auto lg:right-6 lg:bottom-6 lg:rounded-2xl lg:border lg:shadow-lg">
           <div className="mx-auto flex max-w-5xl items-center gap-3">
             <p className="flex-1 text-sm text-muted-foreground lg:hidden">
               นับแล้ว {c.counted}/{c.total}
