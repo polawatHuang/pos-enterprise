@@ -70,6 +70,17 @@
   --chart-6: oklch(0.65 0.02 264);
 }
 
+html[data-accent="blue"] { --primary: oklch(0.54 0.19 252); --primary-foreground: oklch(0.99 0 0); --primary-soft: color-mix(in oklch, var(--primary) 12%, white); --ring: var(--primary); --chart-1: var(--primary); }
+html.dark[data-accent="blue"] { --primary: oklch(0.7 0.16 252); --primary-foreground: oklch(0.15 0.02 268); --primary-soft: color-mix(in oklch, var(--primary) 25%, var(--background)); }
+html[data-accent="teal"] { --primary: oklch(0.56 0.14 190); --primary-foreground: oklch(0.99 0 0); --primary-soft: color-mix(in oklch, var(--primary) 12%, white); --ring: var(--primary); --chart-1: var(--primary); }
+html.dark[data-accent="teal"] { --primary: oklch(0.72 0.12 190); --primary-foreground: oklch(0.15 0.02 268); --primary-soft: color-mix(in oklch, var(--primary) 25%, var(--background)); }
+html[data-accent="green"] { --primary: oklch(0.55 0.16 150); --primary-foreground: oklch(0.99 0 0); --primary-soft: color-mix(in oklch, var(--primary) 12%, white); --ring: var(--primary); --chart-1: var(--primary); }
+html.dark[data-accent="green"] { --primary: oklch(0.72 0.14 150); --primary-foreground: oklch(0.15 0.02 268); --primary-soft: color-mix(in oklch, var(--primary) 25%, var(--background)); }
+html[data-accent="orange"] { --primary: oklch(0.62 0.18 45); --primary-foreground: oklch(0.99 0 0); --primary-soft: color-mix(in oklch, var(--primary) 12%, white); --ring: var(--primary); --chart-1: var(--primary); }
+html.dark[data-accent="orange"] { --primary: oklch(0.76 0.16 55); --primary-foreground: oklch(0.15 0.02 268); --primary-soft: color-mix(in oklch, var(--primary) 25%, var(--background)); }
+html[data-accent="rose"] { --primary: oklch(0.57 0.2 5); --primary-foreground: oklch(0.99 0 0); --primary-soft: color-mix(in oklch, var(--primary) 12%, white); --ring: var(--primary); --chart-1: var(--primary); }
+html.dark[data-accent="rose"] { --primary: oklch(0.72 0.17 5); --primary-foreground: oklch(0.15 0.02 268); --primary-soft: color-mix(in oklch, var(--primary) 25%, var(--background)); }
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

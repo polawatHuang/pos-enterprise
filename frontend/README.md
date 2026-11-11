@@ -16,11 +16,12 @@ src/
   app/(auth)/login          หน้าเข้าสู่ระบบ
   app/(app)/                ทุกหน้าที่ต้อง login (AppShell + AuthProvider)
     dashboard/              Smart Dashboard
-    settings/{users,integrations,account,reports}
+    settings/{users,integrations,account,appearance,reports}
     pos, products, inventory, accounting, inbox, trends, videos, social   ← โมดูลเฟสถัดไป
   proxy.ts                  route guard (Next 16 ใช้ proxy.ts แทน middleware.ts)
   lib/api.ts                REST client: same-origin /api + auto refresh token
   config/nav.ts             เมนู + permission ของแต่ละหน้า (เพิ่มโมดูลใหม่ที่นี่)
+  config/appearance.ts      ตัวเลือกสีธีมและคีย์บันทึกการแสดงผล
   components/ui             UI primitives (Radix + Tailwind v4)
 ```
 
