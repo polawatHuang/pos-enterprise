@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GripVertical, Pin, PinOff } from "lucide-react";
@@ -72,6 +72,8 @@ export function SidebarNav({
   const { showAll, pinned, order } = preferences;
   const [draggedHref, setDraggedHref] = useState<string | null>(null);
   const [draggedSection, setDraggedSection] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const touchDrop = useRef<{ pointerId: number; href: string | null; after: boolean } | null>(null);
 
   const persist = (next: Partial<SidebarPreferences>) => {
     setPreferences((current) => ({ ...current, ...next }));
@@ -128,6 +130,7 @@ export function SidebarNav({
     persist({ order: completeOrder });
     setDraggedHref(null);
     setDraggedSection(null);
+    setDropTarget(null);
   };
 
   const renderItem = (item: NavItem, section: string) => {
@@ -136,15 +139,22 @@ export function SidebarNav({
     return (
       <li
         key={item.href}
+        data-sidebar-item
+        data-nav-href={item.href}
+        data-nav-section={section}
         draggable={!collapsed}
         onDragStart={(event) => {
           setDraggedHref(item.href);
           setDraggedSection(section);
+          setDropTarget(null);
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData("text/plain", item.href);
         }}
         onDragOver={(event) => {
-          if (draggedHref && draggedSection === section) event.preventDefault();
+          if (draggedHref && draggedSection === section) {
+            event.preventDefault();
+            setDropTarget(item.href);
+          }
         }}
         onDrop={(event) => {
           event.preventDefault();
@@ -154,14 +164,59 @@ export function SidebarNav({
         onDragEnd={() => {
           setDraggedHref(null);
           setDraggedSection(null);
+          setDropTarget(null);
         }}
-        className={cn(draggedHref === item.href && "opacity-40")}
+        className={cn(draggedHref === item.href && "opacity-40", dropTarget === item.href && "rounded-lg ring-1 ring-primary")}
       >
         <div className="group flex h-10 items-center rounded-lg">
           {!collapsed && (
-            <span className="grid h-full w-5 shrink-0 cursor-grab place-items-center text-sidebar-muted/60 active:cursor-grabbing" aria-hidden="true">
+            <button
+              type="button"
+              className="touch-none grid h-full w-7 shrink-0 cursor-grab place-items-center text-sidebar-muted/60 active:cursor-grabbing"
+              aria-label={`ลากเพื่อเรียงลำดับ ${item.label}`}
+              onPointerDown={(event) => {
+                if (event.pointerType !== "touch") return;
+                event.preventDefault();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                touchDrop.current = { pointerId: event.pointerId, href: null, after: false };
+                setDraggedHref(item.href);
+                setDraggedSection(section);
+                setDropTarget(null);
+              }}
+              onPointerMove={(event) => {
+                if (touchDrop.current?.pointerId !== event.pointerId) return;
+                const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-sidebar-item]");
+                const href = target?.dataset.navHref;
+                if (target?.dataset.navSection === section && href && href !== item.href) {
+                  const bounds = target.getBoundingClientRect();
+                  touchDrop.current.href = href;
+                  touchDrop.current.after = event.clientY > bounds.top + bounds.height / 2;
+                  setDropTarget(href);
+                } else {
+                  touchDrop.current.href = null;
+                  setDropTarget(null);
+                }
+              }}
+              onPointerUp={(event) => {
+                if (touchDrop.current?.pointerId !== event.pointerId) return;
+                const target = touchDrop.current;
+                touchDrop.current = null;
+                if (target.href) reorder(target.href, section, target.after);
+                else {
+                  setDraggedHref(null);
+                  setDraggedSection(null);
+                  setDropTarget(null);
+                }
+              }}
+              onPointerCancel={() => {
+                touchDrop.current = null;
+                setDraggedHref(null);
+                setDraggedSection(null);
+                setDropTarget(null);
+              }}
+            >
               <GripVertical className="size-3.5" />
-            </span>
+            </button>
           )}
           <Link
             href={item.href}

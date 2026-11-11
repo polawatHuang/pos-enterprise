@@ -53,7 +53,7 @@ export function LegalShell({ title, children }: { title: string; children: React
   const q = useLegalProvider();
   return (
     <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
+      <header className="safe-area-top border-b border-border bg-card">
         <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <span className="flex items-center gap-2 font-semibold">
             <span className="grid size-8 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">P</span>

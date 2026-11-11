@@ -246,7 +246,7 @@ export function PoDetail({ id }: { id: number }) {
       </Card>
 
       {receiving && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-card/95 p-3 backdrop-blur print:hidden lg:left-auto lg:right-6 lg:bottom-6 lg:rounded-2xl lg:border lg:shadow-lg">
+        <div className="safe-area-bottom fixed inset-x-0 bottom-0 z-20 border-t border-border bg-card/95 p-3 backdrop-blur print:hidden lg:left-auto lg:right-6 lg:bottom-6 lg:rounded-2xl lg:border lg:shadow-lg">
           <div className="flex items-center justify-end gap-2">
             <Button variant="outline" onClick={() => void act("receive", true)} disabled={busy !== null}>
               รับและปิดใบ (ของไม่มาแล้ว)
