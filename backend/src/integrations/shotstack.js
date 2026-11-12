@@ -141,4 +141,38 @@ const adapter = defineAdapter(
   },
 );
 
+const creditMeter = require('../modules/saas/credits.service');
+const { current } = require('../modules/saas/credit-context');
+const render = adapter.render.bind(adapter);
+adapter.render = (edit) => {
+  adapter.requireConfig();
+  const clips = (edit?.timeline?.tracks ?? []).flatMap((track) => track.clips ?? []);
+  const durationSeconds = Math.max(
+    1,
+    ...clips.map((clip) => Number(clip.start || 0) + Number(clip.length || 0)).filter(Number.isFinite),
+  );
+  const credits = creditMeter.usdCredits((durationSeconds / 60) * 0.2);
+  return creditMeter.runMetered({
+    orgId: current()?.orgId,
+    category: 'render:shotstack',
+    reserveCredits: creditMeter.reserveMultiple(credits),
+    actualCredits: credits,
+    execute: () => render(edit),
+  });
+};
+
+const generate = adapter.generate.bind(adapter);
+adapter.generate = (asset, length, options) => {
+  adapter.requireConfig();
+  const usd = asset?.type === 'image' ? 0.1 : Math.max(1, Number(length) || 6) * 0.5;
+  const credits = creditMeter.usdCredits(usd);
+  return creditMeter.runMetered({
+    orgId: current()?.orgId,
+    category: `generation:shotstack:${asset?.type || 'unknown'}`,
+    reserveCredits: creditMeter.reserveMultiple(credits),
+    actualCredits: credits,
+    execute: () => generate(asset, length, options),
+  });
+};
+
 module.exports = adapter;

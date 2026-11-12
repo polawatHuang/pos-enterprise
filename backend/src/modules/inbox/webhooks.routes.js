@@ -11,6 +11,7 @@ const shopee = require('../../integrations/shopee');
 const tiktokShop = require('../../integrations/tiktok-shop');
 const inbox = require('./inbox.service');
 const { replyToConversation } = require('./agent.service');
+const { runWithOrg } = require('../saas/credit-context');
 
 /**
  * Public webhooks (no session). Each request is authenticated by the platform's HMAC signature
@@ -45,9 +46,11 @@ async function logEvent(provider, eventId, payload) {
 
 /** Reply right away (fast path) and queue an idempotent fallback in case this process is recycled. */
 async function respond(conversationId, opts = {}) {
-  await enqueue('inbox.ai_reply', { conversationId }, { runAt: new Date(Date.now() + FALLBACK_DELAY_MS), maxAttempts: 3 });
+  const orgId = opts.orgId;
+  if (!orgId) throw new Error('องค์กรของบทสนทนาไม่พร้อมสำหรับการคิดเครดิต AI');
+  await enqueue('inbox.ai_reply', { conversationId }, { orgId, runAt: new Date(Date.now() + FALLBACK_DELAY_MS), maxAttempts: 3 });
   setImmediate(() => {
-    replyToConversation(conversationId, opts).catch((err) => logger.warn({ err: err.message, conversationId }, 'inline AI reply failed; fallback job will retry'));
+    runWithOrg({ orgId }, () => replyToConversation(conversationId, opts)).catch((err) => logger.warn({ err: err.message, conversationId }, 'inline AI reply failed; fallback job will retry'));
   });
 }
 
@@ -83,7 +86,7 @@ router.post('/line', async (req, res) => {
         text: lineText(ev.message),
         externalMessageId: ev.message.id,
       });
-      if (!r.duplicate) await respond(r.conversationId, { replyToken: ev.replyToken });
+      if (!r.duplicate) await respond(r.conversationId, { replyToken: ev.replyToken, orgId: channel.org_id });
     } catch (err) {
       logger.error({ err }, 'LINE webhook event failed');
     }
@@ -128,7 +131,7 @@ router.post('/meta', async (req, res) => {
         const token = known ? null : await inbox.channelToken(channel);
         const customerName = token ? await metaSocial.customerName(channel.platform, ev.sender.id, token) : null;
         const r = await inbox.ingestInbound({ channel, threadId: ev.sender.id, customerName, text, externalMessageId: msg.mid });
-        if (!r.duplicate) await respond(r.conversationId);
+        if (!r.duplicate) await respond(r.conversationId, { orgId: channel.org_id });
       } catch (err) {
         logger.error({ err }, 'Meta webhook event failed');
       }

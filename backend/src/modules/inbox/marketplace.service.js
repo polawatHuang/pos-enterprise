@@ -155,7 +155,7 @@ async function syncConversation(channel, conversationId, { buyerName = null } = 
   }
   if (latest && Date.now() - latest.at < ANSWER_WITHIN_MS) {
     // lazy: the webhook module owns the "reply now + queued fallback" helper
-    await require('./webhooks.routes').respond(convId);
+    await require('./webhooks.routes').respond(convId, { orgId: channel.org_id });
   }
   return { ingested, conversationId: convId };
 }

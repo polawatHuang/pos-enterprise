@@ -285,4 +285,60 @@ const adapter = defineAdapter(
   },
 );
 
+const creditMeter = require('../modules/saas/credits.service');
+const { current } = require('../modules/saas/credit-context');
+
+const generateImage = adapter.generateImage.bind(adapter);
+adapter.generateImage = (options) => {
+  adapter.requireConfig();
+  const usd = /image-01/i.test(adapter.requireConfig().MINIMAX_IMAGE_MODEL || 'image-01') ? 0.0035 : 0.25;
+  const credits = creditMeter.usdCredits(usd);
+  return creditMeter.runMetered({
+    orgId: current()?.orgId,
+    category: 'image:minimax',
+    reserveCredits: creditMeter.reserveMultiple(credits),
+    actualCredits: credits,
+    execute: () => generateImage(options),
+  });
+};
+
+const synthesize = adapter.synthesize.bind(adapter);
+adapter.synthesize = (text, options) => {
+  const env = adapter.requireConfig();
+  const chars = String(text).length;
+  const usd = (chars / 1_000_000) * (/speech-2\.[0-9]+-hd/i.test(env.MINIMAX_TTS_MODEL || 'speech-2.6-hd') ? 100 : 60);
+  const credits = creditMeter.usdCredits(usd);
+  return creditMeter.runMetered({
+    orgId: current()?.orgId,
+    category: 'speech:minimax',
+    reserveCredits: creditMeter.reserveMultiple(credits),
+    actualCredits: credits,
+    execute: () => synthesize(text, options),
+  });
+};
+
+const startClip = adapter.startClip.bind(adapter);
+adapter.startClip = (options) => {
+  const model = adapter.clipModel();
+  const hasImage = Boolean(options.firstFrame || options.references?.length);
+  const effectiveModel = !hasImage && /fast/i.test(model) ? 'MiniMax-Hailuo-2.3' : model;
+  const duration = /(^|-)H3|Hailuo-3/i.test(effectiveModel)
+    ? Math.max(4, Math.min(15, Math.round(Number(options.duration) || 6)))
+    : Number(options.duration) > 6 ? 10 : 6;
+  const usd = /(^|-)H3|Hailuo-3/i.test(effectiveModel)
+    ? duration * 0.08
+    : /fast/i.test(effectiveModel)
+      ? duration === 6 ? 0.19 : 0.32
+      : duration === 6 ? 0.28 : 0.56;
+  const credits = creditMeter.usdCredits(usd);
+  adapter.requireConfig();
+  return creditMeter.runMetered({
+    orgId: current()?.orgId,
+    category: `video:${effectiveModel}`,
+    reserveCredits: creditMeter.reserveMultiple(credits),
+    actualCredits: credits,
+    execute: () => startClip(options),
+  });
+};
+
 module.exports = adapter;

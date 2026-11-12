@@ -10,6 +10,7 @@ export interface User {
   mustChangePassword: boolean;
   /** a manager has set the PIN used to approve refunds/voids on a cashier's till */
   hasPosPin?: boolean;
+  platformAdmin?: boolean;
   roles: string[];
   permissions: Permission[];
 }

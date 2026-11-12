@@ -8,6 +8,8 @@ const { audit } = require('../../core/audit');
 const { badRequest, notFound } = require('../../core/errors');
 const runtime = require('../../config/runtime');
 const { adapters, status, EDITABLE } = require('../../integrations');
+const creditMeter = require('../saas/credits.service');
+const { current } = require('../saas/credit-context');
 // testable ids are listed in status() so the page only offers the button where it works
 
 const router = express.Router();
@@ -69,7 +71,20 @@ async function checkMetaApp() {
  * A cheap, read-only request per service with the current keys, so a pasted key can be checked
  * right away. Returns an optional detail shown next to "เชื่อมต่อได้".
  */
-const ping = (a) => a.createMessage({ messages: [{ role: 'user', content: 'ping' }], maxTokens: 16, timeoutMs: 20_000, maxRetries: 0 }).then(() => null);
+const ping = (a) => {
+  const provider = a.meta.id;
+  const model = runtime.get(provider === 'anthropic' ? 'ANTHROPIC_MODEL' : 'MINIMAX_MODEL');
+  return creditMeter
+    .meterText({
+      orgId: current()?.orgId,
+      provider,
+      model,
+      messages: [{ role: 'user', content: 'ping' }],
+      maxTokens: 16,
+      execute: () => a.createMessage({ messages: [{ role: 'user', content: 'ping' }], maxTokens: 16, timeoutMs: 20_000, maxRetries: 0 }),
+    })
+    .then(() => null);
+};
 const TESTS = {
   minimax: ping,
   anthropic: ping,

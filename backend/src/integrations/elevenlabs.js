@@ -43,4 +43,19 @@ const adapter = defineAdapter(
   },
 );
 
+const creditMeter = require('../modules/saas/credits.service');
+const { current } = require('../modules/saas/credit-context');
+const synthesize = adapter.synthesize.bind(adapter);
+adapter.synthesize = (text, options) => {
+  adapter.requireConfig();
+  const credits = creditMeter.usdCredits(String(text).length / 1000);
+  return creditMeter.runMetered({
+    orgId: current()?.orgId,
+    category: 'speech:elevenlabs',
+    reserveCredits: creditMeter.reserveMultiple(credits),
+    actualCredits: credits,
+    execute: () => synthesize(text, options),
+  });
+};
+
 module.exports = adapter;

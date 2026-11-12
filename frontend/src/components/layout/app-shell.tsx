@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Dialog } from "radix-ui";
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Loader2, Menu, RefreshCw, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { SheetContent } from "@/components/ui/overlays";
@@ -14,6 +15,7 @@ import { ThemeToggle, UserMenu } from "./user-menu";
 import { findNavItem } from "@/config/nav";
 import { APPEARANCE_ACCENTS, appearanceStorageKey } from "@/config/appearance";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 
 const COLLAPSE_KEY = "pe.sidebar.collapsed";
 
@@ -21,6 +23,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { user, isLoading, isError, retry } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
+  const billing = useQuery({
+    queryKey: ["saas", "me"],
+    queryFn: () => api.get<{ subscription: { status: string; trialEndsAt: string | null } }>("/saas/me"),
+    enabled: Boolean(user),
+    staleTime: 30_000,
+  });
   const [mobileOpen, setMobileOpen] = useState(false);
   // Lazy read is safe: the server render only ever shows the loading state below
   const [collapsed, setCollapsed] = useState(() => {
@@ -144,6 +152,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Link href="/settings/account" className="ml-auto font-medium underline underline-offset-2">
               เปลี่ยนเลย
             </Link>
+          </div>
+        )}
+
+        {billing.data?.subscription.status === "expired" && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-warning/30 bg-warning-soft px-4 py-3 text-sm text-warning sm:px-6">
+            <AlertTriangle className="size-4 shrink-0" />
+            ช่วงทดลองใช้หรือแพ็กเกจหมดอายุแล้ว การใช้งานระบบถูกพักไว้
+            <Link href="/settings/billing" className="ml-auto font-medium underline underline-offset-2">ต่ออายุแพ็กเกจ</Link>
           </div>
         )}
 
