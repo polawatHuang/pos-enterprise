@@ -11,6 +11,7 @@ const { resetOrgData, CONFIRM_PHRASE } = require('./reset');
 const { getTaxSettings, saveTaxSettings, VAT_TYPES } = require('./tax');
 const { parseAccount, promptpayIdSchema, bankAccountSchema } = require('../pos/payment-target');
 const { formatAccountNo } = require('../pos/pos.service');
+const saas = require('../saas/saas.service');
 
 const router = express.Router();
 router.use(authenticate);
@@ -71,6 +72,7 @@ router.post('/branches', requirePermission('settings:manage'), validate({ body: 
   const orgId = req.user.orgId;
   const id = await db
     .tx(async (conn) => {
+      await saas.assertCapacity(conn, orgId, 'branches');
       const [r] = await conn.query(
         `INSERT INTO branches (org_id, code, name, branch_no, address, promptpay_id, bank_account)
          VALUES (:orgId, :code, :name, :branchNo, :address, :promptpayId, :bankAccount)`,

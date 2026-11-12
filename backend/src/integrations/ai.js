@@ -4,6 +4,8 @@ const { AppError, badRequest } = require('../core/errors');
 const runtime = require('../config/runtime');
 const minimax = require('./minimax');
 const anthropic = require('./anthropic');
+const creditMeter = require('../modules/saas/credits.service');
+const { current } = require('../modules/saas/credit-context');
 
 /**
  * Single entry point for every AI feature (chat agent, receipt reading, video scripts).
@@ -32,7 +34,17 @@ function requireConfig() {
  * effort is honoured by Claude only.
  */
 function createMessage(params) {
-  return active().createMessage(params);
+  const provider = active();
+  const context = current();
+  return creditMeter.meterText({
+    orgId: context?.orgId,
+    provider: providerId(),
+    model: runtime.get(providerId() === 'anthropic' ? 'ANTHROPIC_MODEL' : 'MINIMAX_MODEL'),
+    system: params.system,
+    messages: params.messages,
+    maxTokens: params.maxTokens,
+    execute: () => provider.createMessage({ ...params, maxRetries: 0 }),
+  });
 }
 
 const textOf = (response) =>
@@ -67,9 +79,9 @@ async function extractStructured({ system, content, schema, toolName = 'submit_r
   }
   let response;
   if (p.capabilities.structuredOutput) {
-    response = await p.createMessage({ system, maxTokens, messages: [{ role: 'user', content }], outputFormat: { type: 'json_schema', schema } });
+    response = await createMessage({ system, maxTokens, messages: [{ role: 'user', content }], outputFormat: { type: 'json_schema', schema } });
   } else {
-    response = await p.createMessage({
+    response = await createMessage({
       system: `${system}\n\nส่งผลลัพธ์ด้วยการเรียกเครื่องมือ ${toolName} เพียงครั้งเดียว`,
       maxTokens,
       messages: [{ role: 'user', content }],

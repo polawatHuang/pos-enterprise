@@ -232,7 +232,9 @@ const setRun = (id, fields) => {
 
 async function next(runId, step, state) {
   await setRun(runId, { stage: STAGES[step], state: { ...state, step } });
-  await enqueue('scrape.ai', { runId, step }, { maxAttempts: 1 });
+  const source = await db.one('SELECT s.org_id FROM scrape_runs r JOIN scrape_sources s ON s.id = r.source_id WHERE r.id = :runId', { runId });
+  if (!source) throw new Error('ไม่พบองค์กรของงานค้นหา AI');
+  await enqueue('scrape.ai', { runId, step }, { orgId: source.org_id, maxAttempts: 1 });
 }
 
 /** Called by executeRun for an ai_search source: validate and queue the first step. */

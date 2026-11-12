@@ -5,6 +5,7 @@ const db = require('../db/pool');
 const logger = require('../core/logger');
 const runtime = require('../config/runtime');
 const handlers = require('./handlers');
+const { runWithOrg } = require('../modules/saas/credit-context');
 
 const WORKER_ID = `${os.hostname()}:${process.pid}`;
 // Jobs stuck in "running" longer than this (process killed mid-job) are re-queued.
@@ -14,7 +15,7 @@ const STALE_LOCK_MINUTES = 15;
 async function claimNext() {
   return db.tx(async (conn) => {
     const [rows] = await conn.query(
-      `SELECT id, org_id, type, payload, attempts, max_attempts FROM jobs
+      `SELECT id, org_id, type, payload, attempts, max_attempts, saas_admin_bypass FROM jobs
         WHERE status = 'queued' AND run_at <= UTC_TIMESTAMP()
         ORDER BY priority DESC, run_at ASC
         LIMIT 1
@@ -40,7 +41,10 @@ async function runOne(job) {
   const handler = handlers[job.type];
   try {
     if (!handler) throw new Error(`No handler registered for job type "${job.type}"`);
-    const result = await handler(parsePayload(job.payload), { jobId: job.id, orgId: job.org_id });
+    const result = await runWithOrg(
+      { orgId: job.org_id == null ? null : Number(job.org_id), platformAdmin: Boolean(job.saas_admin_bypass), jobId: job.id },
+      () => handler(parsePayload(job.payload), { jobId: job.id, orgId: job.org_id }),
+    );
     await db.query(
       `UPDATE jobs SET status = 'succeeded', result = :result, last_error = NULL, locked_at = NULL WHERE id = :id`,
       { id: job.id, result: result === undefined ? null : JSON.stringify(result) },

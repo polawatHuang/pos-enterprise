@@ -14,6 +14,11 @@ const LOCK_MINUTES = 15;
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
 function toPublicUser(row, rp) {
+  const platformAdmins = new Set(
+    env.PLATFORM_ADMIN_EMAILS.split(',')
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
   return {
     id: row.id,
     orgId: row.org_id,
@@ -23,6 +28,7 @@ function toPublicUser(row, rp) {
     avatarUrl: row.avatar_url,
     mustChangePassword: Boolean(row.must_change_password),
     hasPosPin: row.pos_pin_hash != null,
+    platformAdmin: platformAdmins.has(String(row.email).toLowerCase()),
     roles: rp.roles,
     permissions: rp.permissions,
   };

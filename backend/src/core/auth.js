@@ -3,7 +3,9 @@
 const crypto = require('node:crypto');
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
-const { unauthorized, forbidden } = require('./errors');
+const { AppError, unauthorized, forbidden } = require('./errors');
+const db = require('../db/pool');
+const { runWithOrg } = require('../modules/saas/credit-context');
 
 const ACCESS_COOKIE = 'pe_at';
 const REFRESH_COOKIE = 'pe_rt';
@@ -15,7 +17,14 @@ const SESSION_HINT_COOKIE = 'pe_session';
 
 function signAccessToken(user) {
   return jwt.sign(
-    { org: user.orgId, br: user.branchId ?? null, roles: user.roles, perms: user.permissions, name: user.fullName },
+    {
+      org: user.orgId,
+      br: user.branchId ?? null,
+      roles: user.roles,
+      perms: user.permissions,
+      name: user.fullName,
+      platformAdmin: Boolean(user.platformAdmin),
+    },
     env.JWT_ACCESS_SECRET,
     { subject: String(user.id), expiresIn: env.ACCESS_TOKEN_TTL_SEC, issuer: 'pos-enterprise' },
   );
@@ -78,8 +87,34 @@ function authenticate(req, res, next) {
       roles: payload.roles || [],
       permissions: payload.perms || [],
       name: payload.name,
+      platformAdmin: payload.platformAdmin === true,
     };
-    return next();
+    const requestPath = req.originalUrl.split('?')[0];
+    const billingAccess = requestPath.startsWith('/api/saas/') || requestPath === '/api/saas' || requestPath.startsWith('/api/auth/');
+    const check = async () => {
+      if (!billingAccess) {
+        const subscription = await db.one(
+          `SELECT status,
+                  (trial_ends_at IS NOT NULL AND trial_ends_at > UTC_TIMESTAMP()) AS trial_valid,
+                  (current_period_end IS NULL OR current_period_end > UTC_TIMESTAMP()) AS period_valid
+             FROM saas_subscriptions WHERE org_id = :orgId LIMIT 1`,
+          { orgId: req.user.orgId },
+        );
+        const allowed =
+          req.user.platformAdmin ||
+          subscription?.status === 'legacy' ||
+          (subscription?.status === 'trialing' && Boolean(subscription.trial_valid)) ||
+          (subscription?.status === 'active' && Boolean(subscription.period_valid));
+        if (!allowed) {
+          throw new AppError(402, 'SUBSCRIPTION_REQUIRED', 'ช่วงทดลองใช้หรือแพ็กเกจหมดอายุแล้ว กรุณาต่ออายุเพื่อใช้งานต่อ');
+        }
+      }
+      return next();
+    };
+    return runWithOrg(
+      { orgId: req.user.orgId, platformAdmin: req.user.platformAdmin, userId: req.user.id },
+      () => check().catch(next),
+    );
   } catch (err) {
     const msg = err.name === 'TokenExpiredError' ? 'เซสชันหมดอายุ' : 'โทเคนไม่ถูกต้อง';
     return next(Object.assign(unauthorized(msg), { code: 'TOKEN_INVALID' }));

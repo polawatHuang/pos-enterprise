@@ -54,6 +54,13 @@ const schema = z.object({
   PUBLIC_API_URL: z.string().url().optional(),
   // Public origin of the web app (Vercel). OAuth callbacks redirect back here; defaults to the first CORS origin.
   APP_PUBLIC_URL: z.string().url().optional(),
+  // Slip2Go verifies SaaS payment slips. A separate key can be configured for platform billing.
+  SAAS_SLIP2GO_SECRET_KEY: z.string().optional(),
+  SLIP2GO_SECRET_KEY: z.string().optional(),
+  SAAS_PROMPTPAY_ID: z.string().optional(),
+  PROMPTPAY_CODE: z.string().optional(),
+  // Platform operators are explicitly allow-listed; a tenant's `admin` role is not a platform admin.
+  PLATFORM_ADMIN_EMAILS: z.string().default(''),
   // Apply new files in database/migrations when the app starts (no phpMyAdmin import needed)
   AUTO_MIGRATE: bool(true),
   // "cron" = shared hosting (external trigger); "inprocess" = VPS with a long-running worker

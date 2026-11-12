@@ -12,7 +12,7 @@ export function proxy(request: NextRequest) {
   const hasSession = request.cookies.has("pe_session");
   // /login, the customer's own receipt page (opened from the QR on a receipt) and the legal pages
   // (also given to Meta / TikTok app review) need no session
-  const isAuthPage = pathname === "/login" || pathname.startsWith("/r/") || LEGAL_PAGES.has(pathname);
+  const isAuthPage = pathname === "/" || pathname === "/pricing" || pathname === "/signup" || pathname === "/login" || pathname.startsWith("/r/") || LEGAL_PAGES.has(pathname);
 
   if (!hasSession && !isAuthPage) {
     const url = new URL("/login", request.url);

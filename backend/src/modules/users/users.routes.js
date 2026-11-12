@@ -9,6 +9,7 @@ const { authenticate, requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
 const { notFound, conflict, forbidden } = require('../../core/errors');
 const { passwordSchema } = require('../auth/auth.routes');
+const saas = require('../saas/saas.service');
 
 const router = express.Router();
 router.use(authenticate);
@@ -122,6 +123,7 @@ router.post(
     if (await db.one('SELECT id FROM users WHERE email = :email', { email })) throw conflict('อีเมลนี้ถูกใช้แล้ว');
     const passwordHash = await bcrypt.hash(b.password, 12);
     const id = await db.tx(async (conn) => {
+      await saas.assertCapacity(conn, req.user.orgId, 'users');
       const [r] = await conn.query(
         `INSERT INTO users (org_id, branch_id, email, password_hash, full_name, phone, must_change_password)
          VALUES (:orgId, :branchId, :email, :passwordHash, :fullName, :phone, 1)`,
