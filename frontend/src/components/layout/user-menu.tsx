@@ -51,7 +51,7 @@ export function UserMenu() {
   if (!user) return null;
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
       <DropdownMenuTrigger className="flex items-center gap-2.5 rounded-lg p-1 pr-2 hover:bg-accent" aria-label="เมนูผู้ใช้">
         <span className="grid size-8 place-items-center rounded-full bg-primary-soft text-xs font-semibold text-primary">
           {initials(user.fullName)}
@@ -61,7 +61,7 @@ export function UserMenu() {
           <span className="block text-[11px] text-muted-foreground">{user.roles.map((r) => ROLE_LABELS[r] ?? r).join(", ")}</span>
         </span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
+      <DropdownMenuContent side="bottom" align="end" collisionPadding={8} className="w-[min(15rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)]">
         <DropdownMenuLabel>
           <span className="block truncate font-medium text-foreground">{user.fullName}</span>
           <span className="block truncate">{user.email}</span>
