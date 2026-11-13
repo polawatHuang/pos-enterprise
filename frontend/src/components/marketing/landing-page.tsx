@@ -187,13 +187,13 @@ export function LandingPage() {
               <ArrowUpRight className="size-3 text-violet-300" />
             </div>
             <h1 className="mt-6 max-w-[650px] text-[2.55rem] font-semibold leading-[1.16] tracking-[-.045em] sm:mt-7 sm:text-5xl lg:text-[3.55rem]">
-              ระบบ POS
-              <span className="landing-gradient-text block">จัดการร้านง่ายกว่าเดิม</span>
-              พร้อมโตทุกวัน
+              POS สำหรับ
+              <span className="landing-gradient-text block">ร้านค้าปลีกหลายสาขา</span>
+              บริหารง่ายในที่เดียว
             </h1>
             <p className="mt-5 max-w-xl text-sm leading-7 text-slate-400 sm:mt-6 sm:text-base sm:leading-8">
-              โปรแกรม POS สำหรับร้านค้า ที่เชื่อมการขายหน้าร้าน สต๊อกหลายสาขา บัญชี ทีมงาน แชต และ AI
-              ให้คุณเห็นภาพธุรกิจในที่เดียวและใช้เวลากับการเติบโต มากกว่างานหลังร้าน
+              เชื่อมการขายหน้าร้าน สต๊อกหลายสาขา จัดซื้อ บัญชี และทีมงานไว้ในระบบเดียว
+              ให้เจ้าของร้านค้าปลีกไทยเห็นภาพธุรกิจและควบคุมงานหลังร้านได้ง่ายขึ้น
             </p>
             <div className="mt-7 flex flex-col gap-3 min-[400px]:flex-row sm:mt-8">
               <Link href="/signup" className="landing-button group inline-flex h-12 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white">

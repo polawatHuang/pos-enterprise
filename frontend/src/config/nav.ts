@@ -80,6 +80,8 @@ const MANAGE_PERMISSIONS = [
   "inventory:write",
   "inventory:approve",
   "purchasing:write",
+  "operations:manage",
+  "users:write",
   "dashboard:view",
   "settings:manage",
   "accounting:read",

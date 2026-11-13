@@ -30,6 +30,9 @@ const route = (path, fn) =>
   });
 
 route('/summary', repo.summary);
+router.get('/activation', async (req, res) => {
+  res.json({ data: await repo.activation({ orgId: req.user.orgId }) });
+});
 route('/sales-trend', repo.salesTrend);
 route('/channel-mix', repo.channelMix);
 route('/top-products', repo.topProducts);
