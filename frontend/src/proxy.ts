@@ -10,9 +10,16 @@ const LEGAL_PAGES = new Set(["/terms", "/privacy", "/data-deletion"]);
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const hasSession = request.cookies.has("pe_session");
-  // /login, the customer's own receipt page (opened from the QR on a receipt) and the legal pages
-  // (also given to Meta / TikTok app review) need no session
-  const isAuthPage = pathname === "/" || pathname === "/pricing" || pathname === "/signup" || pathname === "/login" || pathname.startsWith("/r/") || LEGAL_PAGES.has(pathname);
+  // Public pages, legal pages, and crawler metadata must be reachable without a session.
+  const isAuthPage =
+    pathname === "/" ||
+    pathname === "/pricing" ||
+    pathname === "/signup" ||
+    pathname === "/login" ||
+    pathname === "/sitemap.xml" ||
+    pathname === "/opengraph-image" ||
+    pathname.startsWith("/r/") ||
+    LEGAL_PAGES.has(pathname);
 
   if (!hasSession && !isAuthPage) {
     const url = new URL("/login", request.url);
