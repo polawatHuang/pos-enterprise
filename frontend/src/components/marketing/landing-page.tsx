@@ -319,7 +319,7 @@ export function LandingPage() {
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 text-[10px] text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:px-8 sm:text-xs">
           <Link href="/" className="flex items-center gap-2 font-medium text-slate-400"><span className="grid size-6 place-items-center rounded-md bg-violet-500/20 text-violet-200"><Store className="size-3.5" /></span> POS Enterprise</Link>
           <div className="flex flex-wrap gap-x-4 gap-y-2"><Link className="transition hover:text-slate-300" href="/terms">ข้อกำหนด</Link><Link className="transition hover:text-slate-300" href="/privacy">ความเป็นส่วนตัว</Link><Link className="transition hover:text-slate-300" href="/pricing">แพ็กเกจ</Link><Link className="transition hover:text-slate-300" href="/login">เข้าสู่ระบบ</Link></div>
-          <span>ระบบจัดการธุรกิจสำหรับทุกการเติบโต</span>
+          <span>© {new Date().getFullYear()} POS Enterprise. All rights reserved.</span>
         </div>
       </footer>
     </main>
