@@ -7,9 +7,9 @@ import { GripVertical, Pin, PinOff } from "lucide-react";
 import { hasPermission, isFrontline, navGroups, type NavItem } from "@/config/nav";
 import { cn } from "@/lib/utils";
 
-export function Brand({ collapsed = false }: { collapsed?: boolean }) {
+export function Brand({ collapsed = false, className }: { collapsed?: boolean; className?: string }) {
   return (
-    <div className={cn("flex h-16 shrink-0 items-center gap-3 px-5", collapsed && "justify-center px-0")}>
+    <div className={cn("flex h-16 shrink-0 items-center gap-3 px-5", collapsed && "justify-center px-0", className)}>
       <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary text-base font-bold text-primary-foreground shadow-lg shadow-primary/30">
         P
       </div>
@@ -51,11 +51,13 @@ export function SidebarNav({
   permissions,
   userId,
   collapsed = false,
+  scrollable = true,
   onNavigate,
 }: {
   permissions: string[];
   userId: number;
   collapsed?: boolean;
+  scrollable?: boolean;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
@@ -260,7 +262,15 @@ export function SidebarNav({
   };
 
   return (
-    <nav aria-label="เมนูหลัก" className="scrollbar-thin min-h-0 w-full flex-1 touch-pan-y overflow-y-auto overscroll-y-contain px-3 pb-6 [-webkit-overflow-scrolling:touch]">
+    <nav
+      aria-label="เมนูหลัก"
+      className={cn(
+        "w-full touch-pan-y px-3 pb-6",
+        scrollable
+          ? "scrollbar-thin min-h-0 flex-1 basis-0 overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]"
+          : "min-h-0 flex-none overflow-visible",
+      )}
+    >
       {pinnedItems.length > 0 && (
         <div className="mt-5 first:mt-2">
           {!collapsed && <p className="mb-1.5 px-3 text-[11px] font-medium uppercase tracking-wider text-sidebar-muted">ปักหมุด</p>}
