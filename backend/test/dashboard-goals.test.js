@@ -69,3 +69,14 @@ test('completion is scoped to the owner and returns the persisted status', async
   assert.equal(calls[0].params.id, 17);
   assert.match(calls[0].sql, /goal_date = DATE\(CONVERT_TZ/);
 });
+
+test('history includes goals created today in the selected calendar-day range', async () => {
+  calls.length = 0;
+  queryResult = (sql) => sql.startsWith('UPDATE') ? { affectedRows: 0 } : [row];
+  const result = await goals.history({ ...owner, days: 30 });
+  const historyQuery = calls[1];
+  assert.equal(result[0].id, 17);
+  assert.equal(result[0].date, '2026-11-13');
+  assert.equal(historyQuery.params.daysBeforeToday, 29);
+  assert.match(historyQuery.sql, /goal_date <= DATE\(CONVERT_TZ/);
+});
