@@ -121,9 +121,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Mobile drawer */}
       <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent title="เมนูหลัก" className="safe-area-top bg-sidebar lg:hidden">
-          <Brand />
-          <SidebarNav permissions={user.permissions} userId={user.id} onNavigate={() => setMobileOpen(false)} />
+        <SheetContent title="เมนูหลัก" className="bg-sidebar pt-[env(safe-area-inset-top)] lg:hidden">
+          <Brand className="sticky top-0 z-10 bg-sidebar" />
+          <SidebarNav permissions={user.permissions} userId={user.id} scrollable={false} onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
       </Dialog.Root>
 
