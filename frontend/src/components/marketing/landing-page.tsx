@@ -187,7 +187,7 @@ export function LandingPage() {
               <ArrowUpRight className="size-3 text-violet-300" />
             </div>
             <h1 className="mt-6 max-w-[650px] text-[2.55rem] font-semibold leading-[1.16] tracking-[-.045em] sm:mt-7 sm:text-5xl lg:text-[3.55rem]">
-              จัดการร้านให้
+              จัดการร้าน
               <span className="landing-gradient-text block">ง่ายกว่าที่เคย</span>
               พร้อมโตทุกวัน
             </h1>

@@ -106,6 +106,40 @@ export interface DailyGoal {
   completedAt: string | null;
 }
 
+export interface OperationsTask {
+  id: number;
+  branchId: number;
+  branchName: string;
+  date: string;
+  type: "checklist" | "incident" | "handoff" | "receiving";
+  shift: "morning" | "day" | "evening" | "any";
+  title: string;
+  description: string | null;
+  link: string | null;
+  priority: "normal" | "high" | "urgent";
+  status: "pending" | "in_progress" | "done" | "skipped" | "follow_up";
+  assignedTo: number | null;
+  assigneeName: string | null;
+  createdByName: string;
+  dueAt: string | null;
+  statusReason: string | null;
+  handoffNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  overdue: boolean;
+}
+
+export interface OperationsTaskEvent {
+  id: number;
+  action: string;
+  fromStatus: OperationsTask["status"] | null;
+  toStatus: OperationsTask["status"] | null;
+  note: string | null;
+  createdAt: string;
+  userName: string;
+}
+
 export interface TrendPoint {
   date: string;
   revenue: number;
