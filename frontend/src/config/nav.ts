@@ -9,6 +9,7 @@ import {
   Calculator,
   CalendarClock,
   ClipboardList,
+  ClipboardCheck,
   FileText,
   HandCoins,
   PiggyBank,
@@ -95,6 +96,7 @@ export const navGroups: NavGroup[] = [
     label: "ภาพรวม",
     items: [
       { href: "/dashboard", label: "ภาพรวมร้าน", icon: LayoutDashboard, permission: "dashboard:view", phase: 1 },
+      { href: "/operations", label: "งานร้านวันนี้", icon: ClipboardCheck, permission: ["operations:work", "operations:manage"], phase: 1, essential: true },
       { href: "/documents", label: "ศูนย์เอกสาร", icon: FileText, permission: DOCUMENTS_READ, phase: 1 },
     ],
   },
