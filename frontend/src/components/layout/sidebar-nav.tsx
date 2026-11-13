@@ -142,7 +142,6 @@ export function SidebarNav({
         data-sidebar-item
         data-nav-href={item.href}
         data-nav-section={section}
-        draggable={!collapsed}
         onDragStart={(event) => {
           setDraggedHref(item.href);
           setDraggedSection(section);
@@ -172,6 +171,7 @@ export function SidebarNav({
           {!collapsed && (
             <button
               type="button"
+              draggable={!collapsed}
               className="touch-none grid h-full w-7 shrink-0 cursor-grab place-items-center text-sidebar-muted/60 active:cursor-grabbing"
               aria-label={`ลากเพื่อเรียงลำดับ ${item.label}`}
               onPointerDown={(event) => {
@@ -260,7 +260,7 @@ export function SidebarNav({
   };
 
   return (
-    <nav aria-label="เมนูหลัก" className="scrollbar-thin min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 pb-6 [-webkit-overflow-scrolling:touch]">
+    <nav aria-label="เมนูหลัก" className="scrollbar-thin min-h-0 w-full flex-1 touch-pan-y overflow-y-auto overscroll-y-contain px-3 pb-6 [-webkit-overflow-scrolling:touch]">
       {pinnedItems.length > 0 && (
         <div className="mt-5 first:mt-2">
           {!collapsed && <p className="mb-1.5 px-3 text-[11px] font-medium uppercase tracking-wider text-sidebar-muted">ปักหมุด</p>}

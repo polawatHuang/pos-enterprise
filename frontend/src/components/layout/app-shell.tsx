@@ -98,7 +98,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const current = findNavItem(pathname);
 
   return (
-    <div className="min-h-dvh">
+    <div className="min-h-dvh min-w-0">
       {/* Desktop sidebar */}
       <aside
         className={cn(
@@ -127,7 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </SheetContent>
       </Dialog.Root>
 
-      <div className={cn("flex min-h-dvh flex-col transition-[padding] duration-200", collapsed ? "lg:pl-[72px]" : "lg:pl-64")}>
+      <div className={cn("flex min-h-dvh min-w-0 flex-col transition-[padding] duration-200", collapsed ? "lg:pl-[72px]" : "lg:pl-64")}>
         <header className="safe-area-top sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur sm:px-6">
           <button
             onClick={() => setMobileOpen(true)}
@@ -163,7 +163,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-6 sm:px-6 lg:py-8">{children}</main>
+        <main className="mx-auto min-w-0 w-full max-w-[1440px] flex-1 px-4 py-6 sm:px-6 lg:py-8">{children}</main>
       </div>
     </div>
   );
