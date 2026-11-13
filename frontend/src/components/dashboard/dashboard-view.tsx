@@ -37,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, NativeSelect, Segmented, Skeleton } from "@/components/ui/primitives";
 import { PageHeader } from "@/components/layout/page";
 import { DailyGoals } from "./daily-goals";
+import { StoreSetup } from "./store-setup";
 import { CashflowChart, ChannelDonut, SalesTrendChart } from "./charts";
 import { channelLabel, Delta, EmptyState, ErrorNote, KpiCard, ListSkeleton, OpsTile } from "./widgets";
 
@@ -111,6 +112,7 @@ export function DashboardView() {
         }
       />
 
+      <StoreSetup />
       <DailyGoals />
 
       {/* KPI row */}

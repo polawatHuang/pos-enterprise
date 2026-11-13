@@ -96,6 +96,35 @@ async function summary({ orgId, branchId }) {
   };
 }
 
+async function activation({ orgId }) {
+  const row = await db.one(
+    `SELECT
+       (SELECT COUNT(*) FROM branches b WHERE b.org_id = :orgId AND b.is_active = 1) AS active_branches,
+       (SELECT COUNT(*) FROM products p WHERE p.org_id = :orgId AND p.status = 'active') AS active_products,
+       (SELECT COUNT(*) FROM users u WHERE u.org_id = :orgId AND u.status = 'active') AS active_staff,
+       (SELECT COUNT(*) FROM sales_orders so
+         WHERE so.org_id = :orgId AND so.status NOT IN ('cancelled','refunded')) AS sales_orders,
+       (SELECT MIN(so.ordered_at) FROM sales_orders so
+         WHERE so.org_id = :orgId AND so.status NOT IN ('cancelled','refunded')) AS first_sale_at,
+       (SELECT o.created_at FROM organizations o WHERE o.id = :orgId) AS org_created_at`,
+    { orgId },
+  );
+  const firstSaleAt = row.first_sale_at;
+  const orgCreatedAt = row.org_created_at;
+  const daysToFirstSale = firstSaleAt && orgCreatedAt
+    ? Math.max(0, Math.round(((new Date(firstSaleAt) - new Date(orgCreatedAt)) / 86_400_000) * 10) / 10)
+    : null;
+
+  return {
+    activeBranches: Number(row.active_branches),
+    activeProducts: Number(row.active_products),
+    activeStaff: Number(row.active_staff),
+    salesOrders: Number(row.sales_orders),
+    firstSaleAt,
+    daysToFirstSale,
+  };
+}
+
 async function salesTrend({ orgId, branchId, days }) {
   const rows = await db.query(
     `SELECT DATE_FORMAT(${local('so.ordered_at')}, '%Y-%m-%d') AS day,
@@ -285,4 +314,4 @@ async function activity({ orgId, limit }) {
   }));
 }
 
-module.exports = { summary, salesTrend, channelMix, topProducts, cashflow, lowStock, inboxByChannel, trending, activity };
+module.exports = { summary, activation, salesTrend, channelMix, topProducts, cashflow, lowStock, inboxByChannel, trending, activity };

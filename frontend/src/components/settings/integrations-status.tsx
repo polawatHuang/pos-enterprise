@@ -37,6 +37,13 @@ export function IntegrationsStatus() {
         description="ตั้งคีย์ได้จากหน้านี้ (เข้ารหัสเก็บในฐานข้อมูล) หรือผ่าน environment variables บนเซิร์ฟเวอร์ — ค่าที่ตั้งจากหน้านี้ใช้ก่อน และระบบไม่แสดงค่าคีย์เต็ม"
         actions={data && <Badge tone={configured === data.length ? "success" : "warning"}>{configured}/{data.length} พร้อมใช้งาน</Badge>}
       />
+      <Card className="mb-4 border-warning/30 bg-warning-soft/30 p-4">
+        <h2 className="text-sm font-semibold">การเชื่อมต่อที่ยังไม่มีในระบบ</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          ขณะนี้ยังไม่มี API connector ที่ยืนยันการทำงานสำหรับ All Online/Delivery และยังไม่มีรูปแบบส่งออกรายงาน CPALL/FC อย่างเป็นทางการ
+          กรุณาตรวจสอบและทำรายการผ่านช่องทางเดิมก่อน อย่านำ API key ของบริการเหล่านี้มาใส่แทนบริการอื่นในรายการด้านล่าง
+        </p>
+      </Card>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {isPending
           ? Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-52 rounded-xl" />)

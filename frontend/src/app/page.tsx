@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { LandingPage } from "@/components/marketing/landing-page";
 import { siteUrl } from "@/lib/site";
 
-const title = "โปรแกรม POS จัดการร้านค้าและสต๊อกหลายสาขา | POS Enterprise";
+const title = "โปรแกรม POS ร้านค้าปลีกหลายสาขา จัดการสต๊อกและบัญชี | POS Enterprise";
 const description =
-  "ระบบ POS สำหรับร้านค้า เชื่อมขายหน้าร้าน สต๊อกหลายสาขา บัญชี ทีมงาน และ AI ในที่เดียว ทดลองใช้ POS Enterprise ฟรี 14 วัน";
+  "ระบบ POS สำหรับร้านค้าปลีกไทยหลายสาขา เชื่อมขายหน้าร้าน สต๊อก จัดซื้อ บัญชี และทีมงานไว้ในที่เดียว ทดลองใช้ POS Enterprise ฟรี 14 วัน";
 const keywords = [
   "โปรแกรม POS",
   "ระบบ POS",
@@ -14,6 +14,8 @@ const keywords = [
   "โปรแกรมสต๊อกสินค้า",
   "ระบบจัดการสต๊อก",
   "POS หลายสาขา",
+  "ระบบ POS ร้านค้าปลีก",
+  "โปรแกรมบริหารร้านค้าหลายสาขา",
   "โปรแกรมบัญชีร้านค้า",
   "ระบบบริหารร้านค้าปลีก",
   "ซอฟต์แวร์บริหารธุรกิจ",
