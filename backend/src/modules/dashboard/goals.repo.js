@@ -80,12 +80,13 @@ async function remove({ orgId, userId, id }) {
 
 async function history({ orgId, userId, days }) {
   await db.query(EXPIRE_OLD, { orgId, userId });
+  const daysBeforeToday = days - 1;
   const rows = await db.query(
     `SELECT ${selectFields} FROM daily_goals
       WHERE org_id = :orgId AND user_id = :userId
-        AND goal_date >= ${LOCAL_TODAY} - INTERVAL :days DAY AND goal_date < ${LOCAL_TODAY}
+        AND goal_date >= ${LOCAL_TODAY} - INTERVAL :daysBeforeToday DAY AND goal_date <= ${LOCAL_TODAY}
       ORDER BY goal_date DESC, created_at, id`,
-    { orgId, userId, days },
+    { orgId, userId, daysBeforeToday },
   );
   return rows.map(mapGoal);
 }
