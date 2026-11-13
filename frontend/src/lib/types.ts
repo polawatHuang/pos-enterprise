@@ -97,6 +97,15 @@ export interface DashboardSummary {
   video: { inProgress: number; ready: number };
 }
 
+export interface DailyGoal {
+  id: number;
+  date: string;
+  title: string;
+  status: "pending" | "completed" | "missed";
+  createdAt: string;
+  completedAt: string | null;
+}
+
 export interface TrendPoint {
   date: string;
   revenue: number;

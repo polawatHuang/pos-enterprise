@@ -1,0 +1,79 @@
+.celebration {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: rgb(15 12 35 / 78%);
+  backdrop-filter: blur(5px);
+  animation: fade-in 180ms ease-out both;
+}
+
+.burst {
+  position: absolute;
+  top: 42%;
+  left: 50%;
+}
+
+.burst span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 7px;
+  height: 12px;
+  border-radius: 2px;
+  background: hsl(var(--hue) 95% 65%);
+  animation: confetti 1500ms cubic-bezier(0.12, 0.72, 0.25, 1) var(--delay) both;
+}
+
+.celebrationMessage {
+  position: relative;
+  padding: 2rem;
+  text-align: center;
+  color: white;
+  animation: pop 420ms cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+@keyframes confetti {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(0);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--x), var(--y), 0) rotate(var(--spin));
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .celebration,
+  .burst span,
+  .celebrationMessage {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+  }
+}
