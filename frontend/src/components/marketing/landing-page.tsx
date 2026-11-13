@@ -166,7 +166,7 @@ export function LandingPage() {
           </Link>
           <nav aria-label="เมนูหลัก" className="flex items-center gap-1.5 sm:gap-6">
             <Link href="#features" className="hidden text-sm text-slate-400 transition hover:text-white sm:inline">ฟีเจอร์</Link>
-            <Link href="/pricing" className="hidden text-sm text-slate-400 transition hover:text-white sm:inline">แพ็กเกจ</Link>
+            <Link href="/#pricing" className="hidden text-sm text-slate-400 transition hover:text-white sm:inline">แพ็กเกจ</Link>
             <Link href="/login" className="rounded-lg px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/[.06] hover:text-white sm:px-3 sm:text-sm">เข้าสู่ระบบ</Link>
             <Link href="/signup" className="landing-button inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-white sm:h-10 sm:gap-2 sm:px-4 sm:text-sm">
               เริ่มใช้ฟรี <ArrowRight className="size-3.5 sm:size-4" />
@@ -325,7 +325,7 @@ export function LandingPage() {
       <footer className="border-t border-white/[.06]">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 text-[10px] text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:px-8 sm:text-xs">
           <Link href="/" className="flex items-center gap-2 font-medium text-slate-400"><span className="grid size-6 place-items-center rounded-md bg-violet-500/20 text-violet-200"><Store className="size-3.5" /></span> POS Enterprise</Link>
-          <div className="flex flex-wrap gap-x-4 gap-y-2"><Link className="transition hover:text-slate-300" href="/terms">ข้อกำหนด</Link><Link className="transition hover:text-slate-300" href="/privacy">ความเป็นส่วนตัว</Link><Link className="transition hover:text-slate-300" href="/pricing">แพ็กเกจ</Link><Link className="transition hover:text-slate-300" href="/login">เข้าสู่ระบบ</Link></div>
+          <div className="flex flex-wrap gap-x-4 gap-y-2"><Link className="transition hover:text-slate-300" href="/terms">ข้อกำหนด</Link><Link className="transition hover:text-slate-300" href="/privacy">ความเป็นส่วนตัว</Link><Link className="transition hover:text-slate-300" href="/#pricing">แพ็กเกจ</Link><Link className="transition hover:text-slate-300" href="/login">เข้าสู่ระบบ</Link></div>
           <Suspense fallback={<span>© POS Enterprise. All rights reserved.</span>}>
             <CopyrightNotice />
           </Suspense>
