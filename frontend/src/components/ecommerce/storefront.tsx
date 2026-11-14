@@ -34,6 +34,7 @@ import { base64Of } from "@/lib/image";
 import { formatDateTime, formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
+import type { PublicStoreSeoData } from "@/lib/ecommerce-seo";
 
 type Product = {
   id: number;
@@ -46,12 +47,7 @@ type Product = {
   category: string | null;
   available: number;
 };
-type StorefrontData = {
-  store: { name: string; slug: string; warehouseName: string | null };
-  shippingFee: number;
-  paymentReady: boolean;
-  products: Product[];
-};
+type StorefrontData = PublicStoreSeoData;
 type CartLine = { productId: number; quantity: number };
 type Quote = {
   subtotal: number;
@@ -115,10 +111,11 @@ function ProductImage({ product, className = "" }: { product: Product; className
   );
 }
 
-export function Storefront({ slug }: { slug: string }) {
+export function Storefront({ slug, initialData }: { slug: string; initialData?: StorefrontData }) {
   const shop = useQuery({
     queryKey: ["public-store", slug],
     queryFn: () => api.get<StorefrontData>(`/ecommerce/public/stores/${slug}`),
+    initialData,
     retry: false,
   });
   const [cart, setCart] = useState<CartLine[]>([]);

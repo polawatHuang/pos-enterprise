@@ -652,17 +652,19 @@ html.dark[data-accent="rose"] { --primary: oklch(0.72 0.17 5); --primary-foregro
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  .landing-preview { transform: none; }
+}
 
-  .store-shell {
-    font-family: var(--font-plex-thai), sans-serif;
-  }
+.store-shell {
+  font-family: var(--font-plex-thai), sans-serif;
+}
 
-  .store-hero {
-    background:
-      radial-gradient(ellipse at 82% 55%, rgb(183 161 255 / 54%), transparent 34%),
-      linear-gradient(115deg, #f1edff 2%, #eee9ff 52%, #e8e4fa 100%);
-    animation: store-reveal 700ms cubic-bezier(.2, .75, .25, 1) both;
-  }
+.store-hero {
+  background:
+    radial-gradient(ellipse at 82% 55%, rgb(183 161 255 / 54%), transparent 34%),
+    linear-gradient(115deg, #f1edff 2%, #eee9ff 52%, #e8e4fa 100%);
+  animation: store-reveal 700ms cubic-bezier(.2, .75, .25, 1) both;
+}
 
   .store-hero-orb {
     position: absolute;
@@ -682,11 +684,15 @@ html.dark[data-accent="rose"] { --primary: oklch(0.72 0.17 5); --primary-foregro
     color: transparent;
   }
 
-  .store-cta {
-    background: linear-gradient(110deg, #743de3, #6030c5 58%, #7547e8);
-    background-size: 180% 100%;
-    animation: store-shimmer 5s ease-in-out infinite;
-  }
+.store-cta {
+  background: linear-gradient(110deg, #4c1d95, #5b21b6 58%, #4c1d95);
+  background-size: 180% 100%;
+  animation: store-shimmer 5s ease-in-out infinite;
+}
+
+.store-cta:hover {
+  filter: brightness(1.12);
+}
 
   .store-hero-art {
     perspective: 900px;
@@ -919,15 +925,13 @@ html.dark[data-accent="rose"] { --primary: oklch(0.72 0.17 5); --primary-foregro
     .store-product-card { padding: .42rem; border-radius: 1rem; }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .store-shell *,
-    .store-shell *::before,
-    .store-shell *::after {
-      animation-duration: .01ms !important;
-      animation-iteration-count: 1 !important;
-      scroll-behavior: auto !important;
-      transition-duration: .01ms !important;
-    }
+@media (prefers-reduced-motion: reduce) {
+  .store-shell *,
+  .store-shell *::before,
+  .store-shell *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
   }
-  .landing-preview { transform: none; }
 }

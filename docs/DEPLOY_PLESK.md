@@ -34,7 +34,7 @@ Webhooks (Meta / LINE / TikTok) ────────────────
 >
 > ไฟล์ seed ขนาด ~0.7 MB ถ้าเกิน "Max upload size" ของ phpMyAdmin ให้ zip ไฟล์ก่อน (phpMyAdmin รับ `.zip` / `.gz`) หรือแยกนำเข้าเฉพาะส่วน reference data
 
-**ร้านค้าออนไลน์:** ระบบรัน migration `041_ecommerce.sql` ตอนเริ่ม backend โดยอัตโนมัติ (ถ้าเปิด `AUTO_MIGRATE` ไว้) ร้านใหม่จะยังไม่เผยแพร่จนกว่าแอดมินจะเลือกคลัง ตั้งค่า PromptPay ใน POS และเปิดร้านจากเมนู “ร้านค้าออนไลน์” ต้องตั้ง `SLIP2GO_SECRET_KEY` หรือ `SAAS_SLIP2GO_SECRET_KEY` ใน environment ของ backend เพื่อเปิดรับและตรวจสอบการชำระเงิน
+**ร้านค้าออนไลน์:** ระบบรัน migration `041_ecommerce.sql` และ `042_ecommerce_store_name.sql` ตอนเริ่ม backend โดยอัตโนมัติ (ถ้าเปิด `AUTO_MIGRATE` ไว้) ตั้งชื่อหน้าร้านได้ในเมนู “ร้านค้าออนไลน์” ก่อนเปิดเผยแพร่ ร้านจะยังไม่เผยแพร่จนกว่าแอดมินจะเลือกคลัง ตั้งค่า PromptPay ใน POS และกดเปิดร้าน ต้องตั้ง `SLIP2GO_SECRET_KEY` หรือ `SAAS_SLIP2GO_SECRET_KEY` ใน environment ของ backend เพื่อเปิดรับและตรวจสอบการชำระเงิน
 
 หลัง import จะมีบัญชี:
 

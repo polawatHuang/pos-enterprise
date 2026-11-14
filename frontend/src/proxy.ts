@@ -18,6 +18,7 @@ export function proxy(request: NextRequest) {
     pathname === "/login" ||
     pathname === "/sitemap.xml" ||
     pathname === "/opengraph-image" ||
+    pathname.startsWith("/shop/") ||
     pathname.startsWith("/r/") ||
     LEGAL_PAGES.has(pathname);
 

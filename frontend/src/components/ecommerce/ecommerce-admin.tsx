@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 type Warehouse = { id: number; name: string; branchId: number | null };
 type StoreConfig = {
   slug: string;
+  storeName: string;
   enabled: boolean;
   warehouseId: number | null;
   warehouseName: string | null;
@@ -96,6 +97,8 @@ export function EcommerceAdmin() {
   const [status, setStatus] = useState<(typeof ORDER_STATES)[number]["value"]>("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
+  const [storeName, setStoreName] = useState<string | null>(null);
+  const [savingStoreName, setSavingStoreName] = useState(false);
   const config = useQuery({ queryKey: ["ecommerce", "store"], queryFn: () => api.get<StoreConfig>("/ecommerce/admin/store") });
   const orders = useQuery({
     queryKey: ["ecommerce", "orders", status, search],
@@ -128,6 +131,22 @@ export function EcommerceAdmin() {
       refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "เปลี่ยนคลังจัดส่งไม่สำเร็จ");
+    }
+  };
+  const saveStoreName = async () => {
+    if (!config.data) return;
+    const name = (storeName ?? config.data.storeName).trim();
+    if (name.length < 2 || name.length > 191) return toast.error("ชื่อร้านต้องมีความยาว 2–191 ตัวอักษร");
+    setSavingStoreName(true);
+    try {
+      const next = await api.patch<StoreConfig>("/ecommerce/admin/store", { storeName: name });
+      qc.setQueryData(["ecommerce", "store"], next);
+      setStoreName(next.storeName);
+      toast.success("บันทึกชื่อร้านแล้ว");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "บันทึกชื่อร้านไม่สำเร็จ");
+    } finally {
+      setSavingStoreName(false);
     }
   };
   const showFile = async (kind: "slip" | "shipment") => {
@@ -185,6 +204,28 @@ export function EcommerceAdmin() {
           </div>
           <div className="grid gap-5 p-5 md:grid-cols-[1fr_auto] md:items-end">
             <div className="space-y-3">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium" htmlFor="ecommerce-store-name">ชื่อร้านที่ลูกค้าจะเห็น</label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    id="ecommerce-store-name"
+                    value={storeName ?? config.data?.storeName ?? ""}
+                    onChange={(event) => setStoreName(event.target.value)}
+                    maxLength={191}
+                    placeholder="เช่น ร้านดอกไม้บ้านสวน"
+                    disabled={config.isPending}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void saveStoreName()}
+                    disabled={!config.data || savingStoreName || (storeName ?? config.data.storeName).trim() === config.data.storeName}
+                  >
+                    {savingStoreName && <Loader2 className="size-4 animate-spin" />}
+                    บันทึกชื่อร้าน
+                  </Button>
+                </div>
+              </div>
               <label className="block text-sm font-medium" htmlFor="ecommerce-warehouse">คลังจัดส่ง</label>
               <NativeSelect
                 id="ecommerce-warehouse"
