@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, LogOut, MapPin, Package, Trash2, UserRound } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
@@ -50,6 +51,27 @@ export function StoreAccount({ slug, storeName, loginEnabled }: { slug: string; 
     retry: false,
   });
   const loginRequired = account.error instanceof ApiError && account.error.status === 401;
+  const loginReason = searchParams.get("reason") ?? "";
+  const loginError = {
+    cancelled: "คุณยกเลิกการเข้าสู่ระบบ LINE สามารถกดปุ่มเข้าสู่ระบบเพื่อลองอีกครั้งได้",
+    state: "สถานะเข้าสู่ระบบไม่ตรงกันหรือหมดอายุ กรุณาเริ่มเข้าสู่ระบบใหม่ และอนุญาต cookies สำหรับเว็บไซต์นี้",
+    proxy: "ค่า ECOMMERCE_AUTH_PROXY_SECRET ระหว่าง Vercel กับ Backend ไม่ตรงกัน หรือยังไม่ได้ตั้งค่า ให้ตรวจทั้งสองฝั่งแล้ว deploy/restart ใหม่",
+    line: "LINE ปฏิเสธการแลกเปลี่ยน authorization code ตรวจว่า LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_CHANNEL_SECRET และ Callback URL ตรงกับ LINE Login channel เดียวกัน",
+    config: "Backend ยังตั้งค่า LINE Login ไม่ครบ ตรวจ LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_CHANNEL_SECRET, APP_PUBLIC_URL และ ECOMMERCE_AUTH_PROXY_SECRET",
+    backend: "เชื่อมต่อ Backend เพื่อจบการเข้าสู่ระบบไม่ได้ ตรวจ Backend Logs และสถานะ /api/health",
+    deploy: "Backend ยังไม่มี API สำหรับ LINE Login กรุณา deploy โค้ด Backend ล่าสุดและ Restart App",
+    session: "Backend ยืนยันตัวตนแล้วแต่ข้อมูลร้านไม่ตรงกัน กรุณาเริ่มเข้าสู่ระบบใหม่และตรวจ APP_PUBLIC_URL",
+  }[loginReason];
+
+  useEffect(() => {
+    if (searchParams.get("login") !== "failed") return;
+    toast.error(`LINE Login ไม่สำเร็จ${loginReason ? ` [${loginReason.toUpperCase()}]` : ""}`, {
+      description: loginError ?? "ไม่ทราบสาเหตุ กรุณาตรวจ Backend Logs และลองใหม่",
+      duration: 20_000,
+      closeButton: true,
+      id: `line-login-${slug}-${loginReason || "unknown"}`,
+    });
+  }, [loginError, loginReason, searchParams, slug]);
 
   const removeAddress = async (id: number) => {
     try {
@@ -92,7 +114,7 @@ export function StoreAccount({ slug, storeName, loginEnabled }: { slug: string; 
           {account.data && <Button variant="outline" className="rounded-xl" onClick={() => void logout()}><LogOut className="size-4" /> ออกจากระบบ</Button>}
         </header>
         {searchParams.get("login") === "success" && <p role="status" className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">เชื่อมต่อ LINE สำเร็จแล้ว</p>}
-        {searchParams.get("login") === "failed" && <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">เข้าสู่ระบบ LINE ไม่สำเร็จหรือหมดเวลา กรุณาลองใหม่อีกครั้ง</p>}
+        {searchParams.get("login") === "failed" && <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm leading-6 text-rose-800">{loginError ?? "เข้าสู่ระบบ LINE ไม่สำเร็จ กรุณาตรวจการตั้งค่าแล้วลองใหม่อีกครั้ง"}</p>}
         {searchParams.get("login") === "unavailable" && <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">LINE Login ยังไม่พร้อมใช้งาน กรุณาติดต่อร้านค้าหรือลองใหม่ภายหลัง</p>}
 
         {account.isPending ? (
