@@ -3,7 +3,13 @@
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../src/db/pool');
-const { validImageSignature, normalizeItems, SHIPPING_FEE, ORDER_TTL_MINUTES } = require('../src/modules/ecommerce/ecommerce.service');
+const {
+  validImageSignature,
+  normalizeItems,
+  publicImageUrl,
+  SHIPPING_FEE,
+  ORDER_TTL_MINUTES,
+} = require('../src/modules/ecommerce/ecommerce.service');
 const { applyMovement } = require('../src/modules/inventory/inventory.service');
 
 after(async () => {
@@ -34,6 +40,12 @@ test('e-commerce image uploads require a matching JPEG, PNG, or WebP signature',
   assert.equal(validImageSignature(webp, 'image/webp'), true);
   assert.equal(validImageSignature(png, 'image/jpeg'), false);
   assert.equal(validImageSignature(Buffer.from('not an image'), 'image/png'), false);
+});
+
+test('public product images never point at the authenticated staff image route', () => {
+  assert.equal(publicImageUrl(21, 'media:abc-0123456789abcdef01.jpg'), '/api/ecommerce/public/products/21/image');
+  assert.equal(publicImageUrl(21, '/api/products/21/image'), '/api/ecommerce/public/products/21/image');
+  assert.equal(publicImageUrl(21, 'https://images.example.com/product.jpg'), 'https://images.example.com/product.jpg');
 });
 
 test('e-commerce shipping and payment reservation use the specified amounts and duration', () => {
