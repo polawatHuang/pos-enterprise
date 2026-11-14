@@ -2,7 +2,7 @@
   "name": "pos-enterprise-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "REST API for POS Enterprise (Node.js + MySQL). Deployed on Plesk (Atom Hosting).",
+  "description": "REST API for POSWITHAI (Node.js + MySQL). Deployed on Plesk (Atom Hosting).",
   "main": "app.js",
   "type": "commonjs",
   "engines": {

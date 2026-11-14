@@ -110,7 +110,7 @@ router.post('/test-line', requirePermission('inventory:write'), async (req, res)
   const s = await alerts.getLineSettings(req.user.orgId);
   if (!s.to.length) throw badRequest('ยังไม่ได้เลือกผู้รับแจ้งเตือน');
   try {
-    const sent = await alerts.pushLine(req.user.orgId, '✅ ทดสอบแจ้งเตือนสต๊อกจาก POS Enterprise', { ...s, enabled: true });
+    const sent = await alerts.pushLine(req.user.orgId, '✅ ทดสอบแจ้งเตือนสต๊อกจาก POSWITHAI', { ...s, enabled: true });
     res.json({ data: { sent } });
   } catch (err) {
     throw badRequest(`ส่ง LINE ไม่สำเร็จ: ${err.message}`);

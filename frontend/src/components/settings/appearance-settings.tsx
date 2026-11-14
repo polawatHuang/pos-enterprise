@@ -38,7 +38,7 @@ export function AppearanceSettings() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">การแสดงผล</h1>
-        <p className="mt-1 text-sm text-muted-foreground">ปรับแต่งเมนูและสีของ POS Enterprise สำหรับบัญชีนี้</p>
+        <p className="mt-1 text-sm text-muted-foreground">ปรับแต่งเมนูและสีของ POSWITHAI สำหรับบัญชีนี้</p>
       </div>
       <Card className="max-w-3xl">
         <CardHeader>

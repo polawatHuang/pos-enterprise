@@ -57,7 +57,7 @@ export function LegalShell({ title, children }: { title: string; children: React
         <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <span className="flex items-center gap-2 font-semibold">
             <span className="grid size-8 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">P</span>
-            {q.data?.name ?? "POS Enterprise"}
+            {q.data?.name ?? "POSWITHAI"}
           </span>
           <nav className="flex flex-wrap gap-1 text-sm sm:ml-auto" aria-label="เอกสาร">
             {PAGES.map((p) => (
@@ -79,7 +79,7 @@ export function LegalShell({ title, children }: { title: string; children: React
         <div className="legal mt-6 space-y-6 text-[15px] leading-7">{children}</div>
       </main>
       <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
-        © {q.data ? q.data.legalName || q.data.name : "POS Enterprise"}
+        © {q.data ? q.data.legalName || q.data.name : "POSWITHAI"}
       </footer>
     </div>
   );
