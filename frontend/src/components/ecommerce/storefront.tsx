@@ -226,10 +226,8 @@ export function Storefront({ slug, initialData }: { slug: string; initialData?: 
           <nav className="hidden items-center gap-7 text-sm font-medium text-slate-500 md:flex">
             <a href="#shop-home" className="text-slate-950">หน้าแรก</a>
             <a href="#shop-products" className="hover:text-slate-950">สินค้า</a>
-            <a href="#shop-service" className="hover:text-slate-950">บริการ</a>
           </nav>
           <div className="flex items-center gap-2">
-            <Link href={`/shop/${slug}`} className="hidden rounded-full px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 sm:block">เลือกซื้อ</Link>
             {shop.data.customerLoginEnabled && <Link href={`/shop/${slug}/account`} className="inline-flex h-10 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold text-slate-700 hover:bg-violet-50 sm:px-3 sm:text-sm" aria-label="บัญชีของฉัน">
               <UserRound className="size-4" /> <span className="hidden sm:inline">{account.data?.customer.displayName ?? "บัญชี"}</span>
             </Link>}
