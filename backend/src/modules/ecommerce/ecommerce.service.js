@@ -15,6 +15,7 @@ const { consumeFefo } = require('../inventory/lots');
 const { postJournal, saleLines } = require('../accounting/ledger.service');
 const slip2go = require('../../integrations/slip2go');
 const media = require('../video/media');
+const { validImageSignature } = require('../../utils/image');
 
 const SHIPPING_FEE = 60;
 const ORDER_TTL_MINUTES = 30;
@@ -25,13 +26,6 @@ const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const lineLoginReady = () => Boolean(
   env.LINE_LOGIN_CHANNEL_ID && env.LINE_LOGIN_CHANNEL_SECRET && env.APP_PUBLIC_URL && env.ECOMMERCE_AUTH_PROXY_SECRET,
 );
-
-function validImageSignature(buffer, mimeType) {
-  if (mimeType === 'image/jpeg') return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
-  if (mimeType === 'image/png') return buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  if (mimeType === 'image/webp') return buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
-  return false;
-}
 
 function normalizeItems(items) {
   const grouped = new Map();
@@ -111,13 +105,40 @@ async function publicStore(slug) {
       sku: p.sku,
       name: p.name,
       description: p.description,
-      imageUrl: p.image_url,
+      imageUrl: publicImageUrl(p.id, p.image_url),
       price: Number(p.price),
       unit: p.unit,
       category: p.category_name,
       available: Number(p.available),
     })),
   };
+}
+
+function publicImageUrl(productId, imageUrl) {
+  return typeof imageUrl === 'string' && imageUrl.startsWith('media:')
+    ? `/api/ecommerce/public/products/${productId}/image`
+    : imageUrl;
+}
+
+async function publicProductImage(productId) {
+  const product = await db.one(
+    `SELECT p.image_url
+       FROM products p
+       JOIN ecommerce_stores s ON s.org_id = p.org_id AND s.is_enabled = 1 AND s.warehouse_id IS NOT NULL
+       JOIN stock_levels sl ON sl.product_id = p.id AND sl.warehouse_id = s.warehouse_id AND sl.variant_id = 0
+       LEFT JOIN product_categories c ON c.id = p.category_id
+      WHERE p.id = :productId AND p.status = 'active' AND p.open_price = 0
+        AND (c.age_restricted IS NULL OR c.age_restricted = 0)
+        AND sl.quantity > sl.reserved
+      LIMIT 1`,
+    { productId },
+  );
+  const storageKey = product?.image_url?.startsWith('media:') ? product.image_url.slice('media:'.length) : null;
+  const file = storageKey ? media.filePath(storageKey) : null;
+  if (!file) throw notFound('ไม่พบรูปสินค้า');
+  const mime = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[media.extOf(storageKey)];
+  if (!mime) throw notFound('ไม่พบรูปสินค้า');
+  return { file, mime };
 }
 
 async function beginLineLogin(slug) {
@@ -978,6 +999,7 @@ module.exports = {
   validImageSignature,
   normalizeItems,
   publicStore,
+  publicProductImage,
   publicStoreIndex,
   beginLineLogin,
   completeLineLogin,

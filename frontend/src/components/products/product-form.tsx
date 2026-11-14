@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus } from "lucide-react";
+import { ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, ApiError } from "@/lib/api";
+import { api, apiAssetUrl, ApiError } from "@/lib/api";
 import { withOfflineCopy } from "@/lib/offline-cache";
 import type { Category, Product, ProductDetail, Supplier, Warehouse } from "@/lib/types";
 import { lineVatRate, netOfInclusive, useTaxSettings, vatTypeLabel } from "@/lib/tax";
@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, NativeSelect, Textarea } from "@/components/ui/primitives";
 import { DialogContent } from "@/components/ui/overlays";
 import { ScanButton } from "@/components/ui/barcode-scanner";
+import { base64Of, downscaleToDataUrl, isImageFile, toUploadableImage } from "@/lib/image";
 
 const num = (msg: string) =>
   z
@@ -95,6 +96,15 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
   const [openingWh, setOpeningWh] = useState("");
   const [counts, setCounts] = useState<Record<number, string>>({});
   const [reason, setReason] = useState("แก้ไขจำนวนจากหน้าสินค้า");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [removeImage, setRemoveImage] = useState(false);
+  useEffect(
+    () => () => {
+      if (imagePreview?.startsWith("blob:")) URL.revokeObjectURL(imagePreview);
+    },
+    [imagePreview],
+  );
   const defaultWh = String(warehouses.data?.find((w) => w.branchId === user?.branchId)?.id ?? warehouses.data?.[0]?.id ?? "");
   const changedCounts = (detail.data?.stock ?? []).filter(
     (s) => counts[s.warehouseId] !== undefined && counts[s.warehouseId] !== "" && Number(counts[s.warehouseId]) !== s.quantity,
@@ -138,6 +148,33 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
   const net = netOfInclusive(price, lineVatRate(tax, vatType));
   const margin = net > 0 ? ((net - cost) / net) * 100 : 0;
 
+  const pickImage = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (!isImageFile(file)) {
+      toast.error("กรุณาเลือกไฟล์รูปภาพ");
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error("รูปภาพต้นฉบับต้องมีขนาดไม่เกิน 15 MB");
+      return;
+    }
+    setImagePreview((current) => {
+      if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
+      return URL.createObjectURL(file);
+    });
+    setImageFile(file);
+    setRemoveImage(false);
+  };
+
+  const clearImage = () => {
+    if (imagePreview?.startsWith("blob:")) URL.revokeObjectURL(imagePreview);
+    setImagePreview(null);
+    setImageFile(null);
+    setRemoveImage(Boolean(product?.imageUrl));
+  };
+
   const onSubmit = async (v: Values) => {
     const qty = Number(openingQty);
     if (isNew && openingQty.trim() && (!(qty > 0) || !(openingWh || defaultWh))) {
@@ -179,8 +216,9 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
           }
         : {}),
     };
+    let saved: Product;
     try {
-      const saved = isNew ? await api.post<Product>("/products", body) : await api.patch<Product>(`/products/${product.id}`, body);
+      saved = isNew ? await api.post<Product>("/products", body) : await api.patch<Product>(`/products/${product.id}`, body);
       // Stock changes are recorded as adjustments (movement history + audit), one per warehouse
       for (const s of changedCounts) {
         await api.post("/inventory/adjust", {
@@ -190,23 +228,79 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
           reason: reason.trim() || "แก้ไขจำนวนจากหน้าสินค้า",
         });
       }
-      toast.success(isNew ? "เพิ่มสินค้าแล้ว" : "บันทึกแล้ว");
-      void qc.invalidateQueries({ queryKey: ["products"] });
-      void qc.invalidateQueries({ queryKey: ["inventory"] });
-      onSaved(saved);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError(err.message.includes("บาร์โค้ด") ? "barcode" : "sku", {
           message: err.message,
         });
       } else toast.error(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
+      return;
     }
+
+    let imageSaveError: unknown = undefined;
+    try {
+      if (imageFile) {
+        const uploadable = await toUploadableImage(imageFile, { maxSide: 1800, quality: 0.85 });
+        const mimeType = uploadable.file.type === "image/png" ? "image/png" : "image/jpeg";
+        const dataUrl = await downscaleToDataUrl(uploadable.file, {
+          maxSide: 1800,
+          type: mimeType === "image/png" ? "png" : "jpeg",
+          quality: 0.82,
+        });
+        const imageBase64 = base64Of(dataUrl);
+        if (imageBase64.length > 6_990_508) throw new Error("รูปหลังย่อแล้วยังมีขนาดเกิน 5 MB");
+        saved = await api.post<Product>(`/products/${saved.id}/image`, { mimeType, imageBase64 });
+      } else if (removeImage && product?.imageUrl) {
+        saved = await api.del<Product>(`/products/${saved.id}/image`);
+      }
+    } catch (err) {
+      imageSaveError = err;
+    }
+    if (imageSaveError) {
+      const message = imageSaveError instanceof Error ? imageSaveError.message : "กรุณาลองใหม่";
+      toast.error(`บันทึกข้อมูลสินค้าแล้ว แต่${imageFile ? "อัปโหลด" : "ลบ"}รูปไม่สำเร็จ: ${message}`);
+    } else {
+      toast.success(isNew ? "เพิ่มสินค้าแล้ว" : "บันทึกแล้ว");
+    }
+    void qc.invalidateQueries({ queryKey: ["products"] });
+    void qc.invalidateQueries({ queryKey: ["inventory"] });
+    onSaved(saved);
   };
 
   return (
     <DialogContent title={isNew ? "เพิ่มสินค้า" : `แก้ไข ${product.name}`} className="max-w-2xl">
       <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4" noValidate>
         <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="รูปสินค้า (ไม่บังคับ)" className="sm:col-span-2">
+            <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border p-3">
+              <div className="flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
+                {(imagePreview ?? (!removeImage ? product?.imageUrl : null)) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imagePreview ?? apiAssetUrl(product?.imageUrl) ?? ""}
+                    alt="ตัวอย่างรูปสินค้า"
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  <ImagePlus className="size-8 text-muted-foreground" aria-hidden="true" />
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted">
+                  <ImagePlus className="size-4" />
+                  เลือกรูป
+                  <input type="file" accept="image/*" className="sr-only" onChange={pickImage} />
+                </label>
+                {(imagePreview || product?.imageUrl) && (
+                  <Button type="button" variant="outline" size="sm" onClick={clearImage}>
+                    <Trash2 className="size-4" />
+                    ลบรูป
+                  </Button>
+                )}
+                <p className="basis-full text-xs text-muted-foreground">รองรับรูปภาพไม่เกิน 15 MB ระบบจะย่อก่อนอัปโหลด</p>
+              </div>
+            </div>
+          </Field>
           <Field label="บาร์โค้ด" error={errors.barcode?.message}>
             <div className="flex gap-2">
               <Input inputMode="numeric" className="h-11" aria-invalid={!!errors.barcode} {...register("barcode")} />

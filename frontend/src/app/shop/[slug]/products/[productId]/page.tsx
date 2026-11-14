@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import { ProductDetail } from "@/components/ecommerce/product-detail";
+import { apiAssetUrl } from "@/lib/api";
 import { getPublicStoreSeoData } from "@/lib/ecommerce-seo";
 import { siteOrigin } from "@/lib/site";
 
@@ -16,7 +17,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const canonical = `${siteOrigin}/shop/${encodeURIComponent(slug)}/products/${product.id}`;
   const description = product.description?.trim().slice(0, 300)
     || `เลือกซื้อ ${product.name} จาก ${store.store.name} สินค้าพร้อมส่งจากสต๊อกจริง`;
-  const image = product.imageUrl || `${siteOrigin}/shop/${encodeURIComponent(slug)}/opengraph-image`;
+  const image = apiAssetUrl(product.imageUrl) || `${siteOrigin}/shop/${encodeURIComponent(slug)}/opengraph-image`;
   return {
     title: `${product.name} | ${store.store.name}`,
     description,
@@ -52,7 +53,7 @@ async function ShopProductContent({ params }: Props) {
     "@type": "Product",
     name: product.name,
     description: product.description || undefined,
-    image: product.imageUrl || undefined,
+    image: apiAssetUrl(product.imageUrl),
     sku: product.sku,
     offers: {
       "@type": "Offer",

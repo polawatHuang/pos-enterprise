@@ -42,6 +42,12 @@ function buildUrl(path: string, query?: Query) {
 /** API URL for plain links and downloads (e.g. a CSV export), honouring NEXT_PUBLIC_API_URL. */
 export const apiUrl = buildUrl;
 
+/** Resolve a backend API path returned by the server, including direct-API deployments. */
+export function apiAssetUrl(path: string | null | undefined): string | undefined {
+  if (!path) return undefined;
+  return path.startsWith("/api/") ? buildUrl(path.slice(4)) : path;
+}
+
 // One refresh at a time even when many queries hit 401 simultaneously.
 let refreshing: Promise<boolean> | null = null;
 function refreshSession(): Promise<boolean> {

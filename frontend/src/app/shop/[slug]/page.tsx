@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import { Storefront } from "@/components/ecommerce/storefront";
+import { apiAssetUrl } from "@/lib/api";
 import { getPublicStoreSeoData } from "@/lib/ecommerce-seo";
 import { siteOrigin } from "@/lib/site";
 
@@ -92,7 +93,7 @@ async function ShopPageContent({ params }: { params: Promise<{ slug: string }> }
           "@type": "Product",
           name: product.name,
           description: product.description || undefined,
-          image: product.imageUrl || undefined,
+          image: apiAssetUrl(product.imageUrl),
           sku: product.sku,
           offers: {
             "@type": "Offer",
