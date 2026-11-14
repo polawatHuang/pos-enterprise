@@ -3,13 +3,14 @@
 const db = require('../../db/pool');
 const env = require('../../config/env');
 const { getTaxSettings } = require('../org/tax');
+const { paidSalesOrder } = require('../../utils/sales-order-sql');
 
 // All timestamps are UTC; shift into the business timezone for day/month buckets.
 // CONVERT_TZ with numeric offsets works without MySQL timezone tables (shared hosting).
 const TZ = env.APP_TZ_OFFSET;
 const local = (col) => `CONVERT_TZ(${col}, '+00:00', '${TZ}')`;
 const LOCAL_NOW = `CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${TZ}')`;
-const VALID_ORDER = `so.status NOT IN ('cancelled','refunded')`;
+const VALID_ORDER = `so.status NOT IN ('cancelled','refunded') AND ${paidSalesOrder('so')}`;
 const branchFilter = (alias) => `(:branchId IS NULL OR ${alias}.branch_id = :branchId)`;
 
 /** Revenue for a local-date window [from, to) expressed as SQL expressions. */
@@ -41,7 +42,7 @@ async function summary({ orgId, branchId }) {
       `SELECT COALESCE(SUM(CASE WHEN t.type='income' THEN t.amount END), 0) AS other_income,
               COALESCE(SUM(CASE WHEN t.type='expense' THEN t.amount END), 0) AS expenses
          FROM transactions t
-        WHERE t.org_id = :orgId AND ${branchFilter('t')} AND t.txn_date >= ${monthStart}`,
+        WHERE t.org_id = :orgId AND ${branchFilter('t')} AND t.status = 'posted' AND t.txn_date >= ${monthStart}`,
       p,
     ),
     db.one(
@@ -103,9 +104,9 @@ async function activation({ orgId }) {
        (SELECT COUNT(*) FROM products p WHERE p.org_id = :orgId AND p.status = 'active') AS active_products,
        (SELECT COUNT(*) FROM users u WHERE u.org_id = :orgId AND u.status = 'active') AS active_staff,
        (SELECT COUNT(*) FROM sales_orders so
-         WHERE so.org_id = :orgId AND so.status NOT IN ('cancelled','refunded')) AS sales_orders,
+         WHERE so.org_id = :orgId AND ${VALID_ORDER}) AS sales_orders,
        (SELECT MIN(so.ordered_at) FROM sales_orders so
-         WHERE so.org_id = :orgId AND so.status NOT IN ('cancelled','refunded')) AS first_sale_at,
+         WHERE so.org_id = :orgId AND ${VALID_ORDER}) AS first_sale_at,
        (SELECT o.created_at FROM organizations o WHERE o.id = :orgId) AS org_created_at`,
     { orgId },
   );
@@ -212,7 +213,7 @@ async function cashflow({ orgId, branchId, months }) {
     db.query(
       `SELECT DATE_FORMAT(t.txn_date, '%Y-%m') AS month, t.type, SUM(t.amount) AS amount
          FROM transactions t
-        WHERE t.org_id = :orgId AND ${branchFilter('t')} AND t.txn_date >= ${start}
+        WHERE t.org_id = :orgId AND ${branchFilter('t')} AND t.status = 'posted' AND t.txn_date >= ${start}
         GROUP BY month, t.type`,
       p,
     ),

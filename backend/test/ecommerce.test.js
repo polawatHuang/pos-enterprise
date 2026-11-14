@@ -11,6 +11,7 @@ const {
   ORDER_TTL_MINUTES,
 } = require('../src/modules/ecommerce/ecommerce.service');
 const { applyMovement } = require('../src/modules/inventory/inventory.service');
+const { paidSalesOrder } = require('../src/utils/sales-order-sql');
 
 after(async () => {
   await db.pool.end();
@@ -46,6 +47,13 @@ test('public product images never point at the authenticated staff image route',
   assert.equal(publicImageUrl(21, 'media:abc-0123456789abcdef01.jpg'), '/api/ecommerce/public/products/21/image');
   assert.equal(publicImageUrl(21, '/api/products/21/image'), '/api/ecommerce/public/products/21/image');
   assert.equal(publicImageUrl(21, 'https://images.example.com/product.jpg'), 'https://images.example.com/product.jpg');
+});
+
+test('financial reports only include paid website orders', () => {
+  const predicate = paidSalesOrder('so');
+  assert.match(predicate, /so\.channel <> 'website'/);
+  assert.match(predicate, /e\.sales_order_id = so\.id AND e\.payment_status = 'paid'/);
+  assert.throws(() => paidSalesOrder('so; DROP TABLE sales_orders'), /Invalid sales order SQL alias/);
 });
 
 test('e-commerce shipping and payment reservation use the specified amounts and duration', () => {

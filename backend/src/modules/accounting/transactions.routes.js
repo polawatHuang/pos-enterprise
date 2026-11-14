@@ -11,6 +11,7 @@ const { r2, postJournal, reverseJournalsFor, transactionLines } = require('./led
 const { getTaxSettings } = require('../org/tax');
 const env = require('../../config/env');
 const { getOrder } = require('../pos/pos.service');
+const { paidSalesOrder } = require('../../utils/sales-order-sql');
 
 const router = express.Router();
 
@@ -147,7 +148,7 @@ const ENTRIES = `(
          CASE WHEN so.status IN ('cancelled', 'refunded') THEN 'void' ELSE 'posted' END, 0,
          so.created_by, so.ordered_at, so.order_no, so.channel, (SELECT COUNT(*) FROM sales_order_items i WHERE i.order_id = so.id)
     FROM sales_orders so LEFT JOIN customers c ON c.id = so.customer_id
-   WHERE so.org_id = :orgId AND so.status <> 'pending'
+   WHERE so.org_id = :orgId AND so.status <> 'pending' AND ${paidSalesOrder('so')}
 ) e`;
 
 router.get(
