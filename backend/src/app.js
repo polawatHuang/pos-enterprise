@@ -63,7 +63,7 @@ function createApp() {
   const jsonSmall = express.json({ limit: '1mb' });
   const jsonLarge = express.json({ limit: '8mb' });
   // Image uploads (receipt photos, cover images) come as base64 JSON
-  const LARGE_BODY = /^\/api\/(accounting\/ai\/extract-receipt|covers(\/\d+\/final)?|drama\/\d+\/product-image|saas\/orders\/[0-9a-f-]+\/verify-slip|ecommerce\/public\/stores\/[^/]+\/orders\/[^/]+\/verify-slip)$/i;
+  const LARGE_BODY = /^\/api\/(accounting\/ai\/extract-receipt|covers(\/\d+\/final)?|drama\/\d+\/product-image|products\/\d+\/image|saas\/orders\/[0-9a-f-]+\/verify-slip|ecommerce\/public\/stores\/[^/]+\/orders\/[^/]+\/verify-slip)$/i;
   app.use((req, res, next) => (LARGE_BODY.test(req.path) ? jsonLarge : jsonSmall)(req, res, next));
   app.use(cookieParser());
 

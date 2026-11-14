@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, BadgeCheck, MessageCircle, PackageCheck, ShoppingCart, Star, Truck, Zap } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { api, ApiError } from "@/lib/api";
+import { api, apiAssetUrl, ApiError } from "@/lib/api";
 import { addEcommerceCartItem, writeEcommerceCart } from "@/lib/ecommerce-cart";
 import { formatDateTime, formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,7 @@ export function ProductDetail({
     .filter((item) => item.id !== product.id && (!product.category || item.category === product.category))
     .slice(0, 6);
   const reviewLoginRequired = eligibleQuery.error instanceof ApiError && eligibleQuery.error.status === 401;
+  const productImageUrl = apiAssetUrl(product.imageUrl);
 
   const addToCart = () => {
     try {
@@ -106,8 +107,8 @@ export function ProductDetail({
         </Link>
         <section className="mt-5 grid gap-6 rounded-3xl bg-white p-4 shadow-sm sm:p-7 lg:grid-cols-2 lg:gap-10">
           <div className="relative aspect-square overflow-hidden rounded-2xl bg-[#f0eff5]">
-            {product.imageUrl ? (
-              <div role="img" aria-label={product.name} className="size-full bg-contain bg-center bg-no-repeat" style={{ backgroundImage: `url("${product.imageUrl.replaceAll('"', "%22")}")` }} />
+            {productImageUrl ? (
+              <div role="img" aria-label={product.name} className="size-full bg-contain bg-center bg-no-repeat" style={{ backgroundImage: `url("${productImageUrl.replaceAll('"', "%22")}")` }} />
             ) : <div className="grid size-full place-items-center text-7xl font-bold text-violet-200">{product.name.slice(0, 1)}</div>}
           </div>
           <div className="flex flex-col py-1 sm:py-3">
@@ -194,7 +195,7 @@ export function ProductDetail({
           {similar.length ? <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             {similar.map((item) => <Link key={item.id} href={`/shop/${slug}/products/${item.id}`} className="group rounded-2xl border border-slate-100 p-2 transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md">
               <div className="aspect-square overflow-hidden rounded-xl bg-[#f0eff5]">
-                {item.imageUrl ? <div className="size-full bg-contain bg-center bg-no-repeat transition group-hover:scale-105" style={{ backgroundImage: `url("${item.imageUrl.replaceAll('"', "%22")}")` }} /> : <div className="grid size-full place-items-center text-3xl font-bold text-violet-200">{item.name.slice(0, 1)}</div>}
+                {apiAssetUrl(item.imageUrl) ? <div className="size-full bg-contain bg-center bg-no-repeat transition group-hover:scale-105" style={{ backgroundImage: `url("${apiAssetUrl(item.imageUrl)!.replaceAll('"', "%22")}")` }} /> : <div className="grid size-full place-items-center text-3xl font-bold text-violet-200">{item.name.slice(0, 1)}</div>}
               </div>
               <p className="mt-2 line-clamp-2 min-h-10 text-xs font-semibold text-slate-800">{item.name}</p>
               <p className="mt-1 text-sm font-bold text-violet-700">{formatMoney(item.price)} ฿</p>

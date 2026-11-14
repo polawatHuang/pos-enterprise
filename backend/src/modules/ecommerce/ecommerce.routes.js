@@ -1,10 +1,12 @@
 'use strict';
 
 const express = require('express');
+const fs = require('node:fs');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { z } = require('zod');
 const env = require('../../config/env');
 const { validate } = require('../../core/http');
+const { notFound } = require('../../core/errors');
 const { authenticate, requirePermission } = require('../../core/auth');
 const service = require('./ecommerce.service');
 
@@ -49,6 +51,14 @@ router.get('/public/stores', async (_req, res) => {
 
 router.get('/public/stores/:slug', validate({ params: slugParam }), async (req, res) => {
   res.json({ data: await service.publicStore(req.valid.params.slug) });
+});
+
+router.get('/public/products/:productId/image', validate({
+  params: z.object({ productId: z.coerce.number().int().positive() }),
+}), async (req, res) => {
+  const image = await service.publicProductImage(req.valid.params.productId);
+  if (!fs.existsSync(image.file)) throw notFound('ไม่พบรูปสินค้า');
+  res.set({ 'Cache-Control': 'public, no-cache', 'X-Content-Type-Options': 'nosniff' }).type(image.mime).sendFile(image.file);
 });
 
 router.post(

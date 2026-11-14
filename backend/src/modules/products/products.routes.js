@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const fs = require('node:fs');
 const { z } = require('zod');
 const db = require('../../db/pool');
 const { validate } = require('../../core/http');
@@ -10,12 +11,19 @@ const { badRequest, notFound, conflict, forbidden } = require('../../core/errors
 const { getTaxSettings } = require('../org/tax');
 const { applyMovement } = require('../inventory/inventory.service');
 const { receiveLot } = require('../inventory/lots');
+const media = require('../video/media');
+const { validImageSignature } = require('../../utils/image');
 
 const router = express.Router();
 router.use(authenticate);
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 const money = z.coerce.number().min(0).max(99_999_999);
+const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
+const imageBody = z.object({
+  mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+  imageBase64: z.string().min(1).max(7_000_000).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'รูปภาพไม่ถูกต้อง'),
+});
 
 const productBody = z.object({
   sku: z.string().trim().min(1).max(64),
@@ -70,7 +78,7 @@ function mapProduct(r) {
     trackExpiry: Boolean(r.track_expiry),
     openPrice: Boolean(r.open_price),
     shelfLifeDays: r.shelf_life_days == null ? null : Number(r.shelf_life_days),
-    imageUrl: r.image_url,
+    imageUrl: r.image_url?.startsWith('media:') ? `/api/products/${r.id}/image` : r.image_url,
     status: r.status,
     onHand: Number(r.on_hand),
     createdAt: r.created_at,
@@ -244,6 +252,64 @@ router.get('/:id', requirePermission('products:read'), validate({ params: idPara
   res.json({ data: { ...product, stock: stock.map((s) => ({ ...s, quantity: Number(s.quantity) })) } });
 });
 
+router.get('/:id/image', requirePermission('products:read'), validate({ params: idParam }), async (req, res) => {
+  const product = await db.one(
+    'SELECT image_url FROM products WHERE org_id = :orgId AND id = :id',
+    { orgId: req.user.orgId, id: req.valid.params.id },
+  );
+  const storageKey = product?.image_url?.startsWith('media:') ? product.image_url.slice('media:'.length) : null;
+  const file = storageKey ? media.filePath(storageKey) : null;
+  if (!file || !fs.existsSync(file)) throw notFound('ไม่พบรูปสินค้า');
+  const mime = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[media.extOf(storageKey)];
+  res.set({ 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff' }).type(mime).sendFile(file);
+});
+
+router.post('/:id/image', requirePermission('products:write'), validate({ params: idParam, body: imageBody }), async (req, res) => {
+  const { id } = req.valid.params;
+  const product = await db.one(
+    'SELECT image_url FROM products WHERE org_id = :orgId AND id = :id',
+    { orgId: req.user.orgId, id },
+  );
+  if (!product) throw notFound('ไม่พบสินค้า');
+  const { mimeType, imageBase64 } = req.valid.body;
+  const buffer = Buffer.from(imageBase64, 'base64');
+  if (!buffer.length || buffer.length > MAX_PRODUCT_IMAGE_BYTES || !validImageSignature(buffer, mimeType)) {
+    throw badRequest('รูปสินค้าไม่ถูกต้อง รองรับ JPEG, PNG หรือ WebP ขนาดไม่เกิน 5 MB');
+  }
+  const storageKey = media.saveFile(buffer, mimeType);
+  try {
+    const updated = await db.query(
+      'UPDATE products SET image_url = :imageUrl WHERE org_id = :orgId AND id = :id',
+      { imageUrl: `media:${storageKey}`, orgId: req.user.orgId, id },
+    );
+    if (!updated.affectedRows) throw notFound('ไม่พบสินค้า');
+  } catch (error) {
+    media.removeFile(storageKey);
+    throw error;
+  }
+  const oldKey = product.image_url?.startsWith('media:') ? product.image_url.slice('media:'.length) : null;
+  if (oldKey) media.removeFile(oldKey);
+  audit(req, 'product.image.update', 'product', id, { mimeType, sizeBytes: buffer.length });
+  res.json({ data: await getProduct(req.user.orgId, id) });
+});
+
+router.delete('/:id/image', requirePermission('products:write'), validate({ params: idParam }), async (req, res) => {
+  const { id } = req.valid.params;
+  const product = await db.one(
+    'SELECT image_url FROM products WHERE org_id = :orgId AND id = :id',
+    { orgId: req.user.orgId, id },
+  );
+  if (!product) throw notFound('ไม่พบสินค้า');
+  if (product.image_url) {
+    const updated = await db.query('UPDATE products SET image_url = NULL WHERE org_id = :orgId AND id = :id', { orgId: req.user.orgId, id });
+    if (!updated.affectedRows) throw notFound('ไม่พบสินค้า');
+    const storageKey = product.image_url.startsWith('media:') ? product.image_url.slice('media:'.length) : null;
+    if (storageKey) media.removeFile(storageKey);
+    audit(req, 'product.image.delete', 'product', id);
+  }
+  res.json({ data: await getProduct(req.user.orgId, id) });
+});
+
 /** A code nobody has to invent: P + date + 4 random characters, retried until it is free. */
 async function autoSku(orgId) {
   const day = new Date().toISOString().slice(2, 10).replace(/-/g, '');
@@ -344,8 +410,10 @@ router.delete('/:id', requirePermission('products:write'), validate({ params: id
   if (used.length) {
     throw conflict(`ลบ "${p.name}" ไม่ได้ เพราะมี${used.map((k) => `${LABEL[k]} ${Number(u[k]).toLocaleString('th-TH')} รายการ`).join(', ')} — ตั้งสถานะเป็น "เลิกขาย" แทนเพื่อเก็บประวัติไว้`);
   }
+  const image = await db.one('SELECT image_url FROM products WHERE id = :id AND org_id = :orgId', { id, orgId: req.user.orgId });
   // Only the opening balance remains: stock levels, lots, units and knowledge go with the product (cascade)
   await db.query('DELETE FROM products WHERE id = :id AND org_id = :orgId', { id, orgId: req.user.orgId });
+  if (image?.image_url?.startsWith('media:')) media.removeFile(image.image_url.slice('media:'.length));
   audit(req, 'product.delete', 'product', id, { sku: p.sku, name: p.name, onHand: Number(u.onHand) });
   res.json({ data: { id } });
 });

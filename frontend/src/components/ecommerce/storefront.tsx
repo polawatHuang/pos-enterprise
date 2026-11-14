@@ -31,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, apiAssetUrl } from "@/lib/api";
 import { base64Of } from "@/lib/image";
 import { formatDateTime, formatMoney } from "@/lib/utils";
 import { useEcommerceCart, type EcommerceCartLine } from "@/lib/ecommerce-cart";
@@ -116,14 +116,15 @@ async function readFile(file: File) {
 }
 
 function ProductImage({ product, className = "" }: { product: Product; className?: string }) {
+  const imageUrl = apiAssetUrl(product.imageUrl);
   return (
     <div
-      role={product.imageUrl ? "img" : undefined}
-      aria-label={product.imageUrl ? product.name : undefined}
+      role={imageUrl ? "img" : undefined}
+      aria-label={imageUrl ? product.name : undefined}
       className={`store-product-image ${className}`}
-      style={product.imageUrl ? { backgroundImage: `url("${product.imageUrl.replaceAll('"', "%22")}")` } : undefined}
+      style={imageUrl ? { backgroundImage: `url("${imageUrl.replaceAll('"', "%22")}")` } : undefined}
     >
-      {!product.imageUrl && <span aria-hidden className="store-image-mark">{product.name.slice(0, 1)}</span>}
+      {!imageUrl && <span aria-hidden className="store-image-mark">{product.name.slice(0, 1)}</span>}
     </div>
   );
 }
