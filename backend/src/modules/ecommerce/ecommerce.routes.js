@@ -24,6 +24,24 @@ const limiter = (windowMs, limit, message) => rateLimit({
 });
 const orderLimiter = limiter(60 * 60 * 1000, 12, 'สร้างคำสั่งซื้อบ่อยเกินไป กรุณาลองใหม่ภายหลัง');
 const slipLimiter = limiter(15 * 60 * 1000, 10, 'ตรวจสอบสลิปบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่');
+const lineLoginLimiter = limiter(15 * 60 * 1000, 15, 'เริ่มเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่');
+const customerToken = (req) => req.cookies?.pe_ec ?? null;
+
+router.post('/public/auth/line/complete', validate({
+  body: z.object({ code: z.string().min(1).max(2048), state: z.string().min(32).max(128) }),
+}), async (req, res) => {
+  const result = await service.completeLineLogin({
+    ...req.valid.body,
+    proxySecret: req.get('x-ecommerce-auth-proxy'),
+  });
+  res.json({ data: result });
+});
+
+router.get('/public/auth/line/start', lineLoginLimiter, validate({
+  query: z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,119}$/) }),
+}), async (req, res) => {
+  res.json({ data: await service.beginLineLogin(req.valid.query.slug) });
+});
 
 router.get('/public/stores', async (_req, res) => {
   res.json({ data: await service.publicStoreIndex() });
@@ -58,12 +76,62 @@ router.post(
       address: z.string().trim().min(5).max(1500),
       postalCode: z.string().trim().min(3).max(12),
       note: z.string().trim().max(500).optional(),
+      saveAddress: z.boolean().optional().default(false),
     }),
   }),
   async (req, res) => {
-    res.status(201).json({ data: await service.createOrder(req.valid.params.slug, req.valid.body) });
+    const identity = await service.customerIdentityFromToken(customerToken(req));
+    res.status(201).json({ data: await service.createOrder(req.valid.params.slug, req.valid.body, identity?.id ?? null) });
   },
 );
+
+router.get('/public/stores/:slug/products/:productId/reviews', validate({
+  params: z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,119}$/), productId: z.coerce.number().int().positive() }),
+}), async (req, res) => {
+  res.json({ data: await service.productReviews(req.valid.params.slug, req.valid.params.productId) });
+});
+
+router.get('/public/stores/:slug/products/:productId/reviewable', validate({
+  params: z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,119}$/), productId: z.coerce.number().int().positive() }),
+}), async (req, res) => {
+  res.json({ data: await service.reviewableItems(req.valid.params.slug, req.valid.params.productId, customerToken(req)) });
+});
+
+router.post('/public/stores/:slug/products/:productId/reviews', validate({
+  params: z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,119}$/), productId: z.coerce.number().int().positive() }),
+  body: z.object({
+    orderItemId: z.coerce.number().int().positive(),
+    rating: z.coerce.number().int().min(1).max(5),
+    text: z.string().trim().max(2000).optional().default(''),
+  }),
+}), async (req, res) => {
+  res.status(201).json({
+    data: await service.createProductReview(req.valid.params.slug, req.valid.params.productId, customerToken(req), req.valid.body),
+  });
+});
+
+router.get('/public/stores/:slug/customer/account', validate({ params: slugParam }), async (req, res) => {
+  res.json({ data: await service.customerAccount(req.valid.params.slug, customerToken(req)) });
+});
+
+router.delete('/public/stores/:slug/customer/addresses/:id', validate({
+  params: z.object({ slug: slugParam.shape.slug, id: z.coerce.number().int().positive() }),
+}), async (req, res) => {
+  await service.deleteCustomerAddress(req.valid.params.slug, customerToken(req), req.valid.params.id);
+  res.json({ data: { ok: true } });
+});
+
+router.post('/public/stores/:slug/customer/logout', validate({ params: slugParam }), async (req, res) => {
+  await service.logoutCustomer(customerToken(req));
+  res.clearCookie('pe_ec', {
+    httpOnly: true,
+    secure: env.COOKIE_SECURE,
+    sameSite: env.COOKIE_SAMESITE,
+    domain: env.COOKIE_DOMAIN || undefined,
+    path: '/',
+  });
+  res.json({ data: { ok: true } });
+});
 
 router.get('/public/stores/:slug/orders/:token', validate({ params: tokenParam }), async (req, res) => {
   res.json({ data: await service.tracking(req.valid.params.slug, req.valid.params.token) });

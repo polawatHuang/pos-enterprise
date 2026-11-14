@@ -26,6 +26,7 @@ import {
   Sparkles,
   TicketPercent,
   Truck,
+  UserRound,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -49,6 +50,20 @@ type Product = {
 };
 type StorefrontData = PublicStoreSeoData;
 type CartLine = { productId: number; quantity: number };
+type CustomerAddress = {
+  id: number;
+  recipientName: string;
+  phone: string;
+  email: string | null;
+  address: string;
+  postalCode: string;
+  isDefault: boolean;
+};
+type CustomerAccount = {
+  customer: { displayName: string; pictureUrl: string | null };
+  addresses: CustomerAddress[];
+  orders: { id: number; orderNo: string; status: string; total: number; orderedAt: string; trackPath: string }[];
+};
 type Quote = {
   subtotal: number;
   discount: number;
@@ -126,7 +141,14 @@ export function Storefront({ slug, initialData }: { slug: string; initialData?: 
   const [discountInput, setDiscountInput] = useState("");
   const [discountCode, setDiscountCode] = useState("");
   const [order, setOrder] = useState<CreatedOrder | null>(null);
+  const [saveAddress, setSaveAddress] = useState(false);
   const [customer, setCustomer] = useState({ customerName: "", phone: "", email: "", address: "", postalCode: "", note: "" });
+  const account = useQuery({
+    queryKey: ["public-store-customer", slug],
+    queryFn: () => api.get<CustomerAccount>(`/ecommerce/public/stores/${slug}/customer/account`),
+    enabled: Boolean(shop.data?.customerLoginEnabled),
+    retry: false,
+  });
   const products = useMemo(() => shop.data?.products ?? [], [shop.data?.products]);
   const categories = useMemo(() => ["ทั้งหมด", ...new Set(products.map((p) => p.category).filter((x): x is string => Boolean(x)))], [products]);
   const visible = products.filter((p) => (category === "ทั้งหมด" || p.category === category) && (!search || `${p.name} ${p.sku}`.toLowerCase().includes(search.toLowerCase())));
@@ -139,6 +161,20 @@ export function Storefront({ slug, initialData }: { slug: string; initialData?: 
   });
   const subtotal = cart.reduce((sum, line) => sum + (products.find((p) => p.id === line.productId)?.price ?? 0) * line.quantity, 0);
   const checkoutTotal = quote.data?.total ?? subtotal + (shop.data?.shippingFee ?? 60);
+  const openCheckout = () => {
+    const address = account.data?.addresses.find((item) => item.isDefault);
+    if (address && !customer.customerName) {
+      setCustomer((current) => ({
+        ...current,
+        customerName: address.recipientName,
+        phone: address.phone,
+        email: address.email ?? "",
+        address: address.address,
+        postalCode: address.postalCode,
+      }));
+    }
+    setCheckoutOpen(true);
+  };
   const add = (product: Product) => {
     setCart((current) => {
       const line = current.find((item) => item.productId === product.id);
@@ -166,6 +202,7 @@ export function Storefront({ slug, initialData }: { slug: string; initialData?: 
         items: cart,
         ...(discountCode ? { discountCode } : {}),
         ...customer,
+        saveAddress,
       });
       setOrder(created);
       setCheckoutOpen(false);
@@ -193,6 +230,9 @@ export function Storefront({ slug, initialData }: { slug: string; initialData?: 
           </nav>
           <div className="flex items-center gap-2">
             <Link href={`/shop/${slug}`} className="hidden rounded-full px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 sm:block">เลือกซื้อ</Link>
+            {shop.data.customerLoginEnabled && <Link href={`/shop/${slug}/account`} className="inline-flex h-10 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold text-slate-700 hover:bg-violet-50 sm:px-3 sm:text-sm" aria-label="บัญชีของฉัน">
+              <UserRound className="size-4" /> <span className="hidden sm:inline">{account.data?.customer.displayName ?? "บัญชี"}</span>
+            </Link>}
             <Button className="relative size-10 rounded-full p-0" aria-label={`ตะกร้าสินค้า ${itemCount} ชิ้น`} onClick={() => setCartOpen(true)}>
               <ShoppingBag className="size-4" />
               {itemCount > 0 && <span className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-full bg-fuchsia-500 px-1 text-[10px] font-bold text-white">{itemCount}</span>}
@@ -279,7 +319,9 @@ export function Storefront({ slug, initialData }: { slug: string; initialData?: 
                 return (
                   <article key={product.id} className="store-product-card group" style={{ animationDelay: `${Math.min(index, 9) * 55}ms` }}>
                     <div className="relative overflow-hidden rounded-[18px] bg-[#f0eff5]">
-                      <ProductImage product={product} className="aspect-[.95] w-full transition duration-500 group-hover:scale-[1.04]" />
+                      <Link href={`/shop/${slug}/products/${product.id}`} aria-label={`ดูรายละเอียด ${product.name}`}>
+                        <ProductImage product={product} className="aspect-[.95] w-full transition duration-500 group-hover:scale-[1.04]" />
+                      </Link>
                       {index < 2 && <span className="absolute left-2.5 top-2.5 rounded-full bg-white/85 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-violet-700 shadow-sm">Featured</span>}
                       <button type="button" onClick={() => toast("เพิ่มสินค้าเข้ารายการโปรดเมื่อเข้าสู่ระบบ")} className="absolute right-2.5 top-2.5 grid size-8 place-items-center rounded-full bg-white/85 text-slate-500 shadow-sm transition hover:text-rose-500" aria-label="เพิ่มรายการโปรด"><Heart className="size-4" /></button>
                       <button type="button" onClick={() => add(product)} disabled={inCart >= product.available} className="store-quick-add absolute bottom-2.5 right-2.5 grid size-9 place-items-center rounded-full bg-white text-slate-900 shadow-lg transition hover:bg-violet-600 hover:text-white disabled:opacity-40 sm:translate-y-2 sm:opacity-0 sm:group-hover:translate-y-0 sm:group-hover:opacity-100" aria-label={`เพิ่ม ${product.name} ลงตะกร้า`}>
@@ -288,7 +330,7 @@ export function Storefront({ slug, initialData }: { slug: string; initialData?: 
                     </div>
                     <div className="px-1 pt-3">
                       <p className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-400">{product.category ?? "สินค้าแนะนำ"}</p>
-                      <h3 className="mt-1 line-clamp-2 min-h-10 text-sm font-semibold leading-5 text-slate-800">{product.name}</h3>
+                      <h3 className="mt-1 line-clamp-2 min-h-10 text-sm font-semibold leading-5 text-slate-800"><Link href={`/shop/${slug}/products/${product.id}`} className="hover:text-violet-700">{product.name}</Link></h3>
                       <div className="mt-2 flex items-center justify-between gap-1">
                         <p className="text-sm font-bold text-slate-950">{formatMoney(product.price)} <small className="font-normal text-slate-500">/ {product.unit}</small></p>
                         <span className="text-[10px] text-slate-400">เหลือ {product.available}</span>
@@ -331,11 +373,15 @@ export function Storefront({ slug, initialData }: { slug: string; initialData?: 
         onApplyCode={applyCode}
         onClose={() => setCartOpen(false)}
         onQuantity={setQuantity}
-        onCheckout={() => { setCartOpen(false); setCheckoutOpen(true); }}
+        onCheckout={() => { setCartOpen(false); openCheckout(); }}
       />}
       {checkoutOpen && <CheckoutModal
         customer={customer}
         setCustomer={setCustomer}
+        addresses={account.data?.addresses ?? []}
+        canSaveAddress={Boolean(account.data)}
+        saveAddress={saveAddress}
+        setSaveAddress={setSaveAddress}
         total={checkoutTotal}
         busy={quote.isFetching}
         onClose={() => setCheckoutOpen(false)}
@@ -408,9 +454,13 @@ function CartDrawer({
 }
 
 function CheckoutModal({
-  customer, setCustomer, total, busy, onClose, onSubmit,
+  customer, setCustomer, addresses, canSaveAddress, saveAddress, setSaveAddress, total, busy, onClose, onSubmit,
 }: {
   customer: { customerName: string; phone: string; email: string; address: string; postalCode: string; note: string };
+  addresses: CustomerAddress[];
+  canSaveAddress: boolean;
+  saveAddress: boolean;
+  setSaveAddress: (value: boolean) => void;
   setCustomer: (value: (old: typeof customer) => typeof customer) => void; total: number; busy: boolean;
   onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -421,6 +471,26 @@ function CheckoutModal({
         <button type="button" onClick={onClose} className="grid size-9 place-items-center rounded-full hover:bg-slate-100" aria-label="ปิด"><X className="size-5" /></button>
       </div>
       <form className="space-y-4 p-5" onSubmit={onSubmit}>
+        {addresses.length > 0 && <label className="block text-xs font-semibold text-slate-700">เลือกที่อยู่ที่บันทึกไว้
+          <select
+            defaultValue=""
+            onChange={(event) => {
+              const address = addresses.find((item) => item.id === Number(event.target.value));
+              if (address) setCustomer((current) => ({
+                ...current,
+                customerName: address.recipientName,
+                phone: address.phone,
+                email: address.email ?? "",
+                address: address.address,
+                postalCode: address.postalCode,
+              }));
+            }}
+            className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+          >
+            <option value="">กรอกที่อยู่ใหม่</option>
+            {addresses.map((address) => <option key={address.id} value={address.id}>{address.recipientName} · {address.address.slice(0, 60)}{address.isDefault ? " (ค่าเริ่มต้น)" : ""}</option>)}
+          </select>
+        </label>}
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="text-xs font-semibold text-slate-700">ชื่อผู้รับ<input required minLength={2} maxLength={191} value={customer.customerName} onChange={(e) => setCustomer((c) => ({ ...c, customerName: e.target.value }))} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /></label>
           <label className="text-xs font-semibold text-slate-700">เบอร์โทรศัพท์<input required minLength={8} maxLength={50} inputMode="tel" value={customer.phone} onChange={(e) => setCustomer((c) => ({ ...c, phone: e.target.value }))} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /></label>
@@ -431,6 +501,7 @@ function CheckoutModal({
           <label className="text-xs font-semibold text-slate-700">รหัสไปรษณีย์<input required minLength={3} maxLength={12} inputMode="numeric" value={customer.postalCode} onChange={(e) => setCustomer((c) => ({ ...c, postalCode: e.target.value }))} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /></label>
           <label className="text-xs font-semibold text-slate-700">หมายเหตุ (ถ้ามี)<input maxLength={500} value={customer.note} onChange={(e) => setCustomer((c) => ({ ...c, note: e.target.value }))} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" placeholder="เช่น ฝากไว้ที่นิติบุคคล" /></label>
         </div>
+        {canSaveAddress && <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={saveAddress} onChange={(event) => setSaveAddress(event.target.checked)} className="size-4 accent-violet-600" />บันทึกที่อยู่นี้ไว้ใช้ครั้งถัดไป</label>}
         <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3 text-sm"><span className="text-slate-600">ยอดชำระรวม (รวมค่าส่ง ฿60)</span><b className="text-lg">{formatMoney(total)} ฿</b></div>
         <Button type="submit" className="h-12 w-full rounded-xl" disabled={busy}>สร้างคำสั่งซื้อและแสดง QR <ArrowRight className="size-4" /></Button>
         <p className="text-center text-[10px] text-slate-400">ระบบจะสำรองสินค้าไว้ 30 นาทีระหว่างรอชำระเงิน</p>

@@ -109,7 +109,8 @@ export async function apiFetch<T>(
   let res = await doFetch().catch(networkError);
   // an answer from the server (even an error) means the connection works; 502-504 is the proxy saying the backend is down
   setReachable(res.status < 502 || res.status > 504);
-  if (res.status === 401 && !skipRefresh && !NO_REFRESH.has(path)) {
+  const isPublicStoreRequest = path.startsWith("/ecommerce/public/stores/");
+  if (res.status === 401 && !skipRefresh && !isPublicStoreRequest && !NO_REFRESH.has(path)) {
     if (await refreshSession()) res = await doFetch().catch(networkError);
     else if (typeof window !== "undefined") {
       // Full reload clears all client state (Activity keeps hidden routes mounted otherwise)

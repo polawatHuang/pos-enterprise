@@ -18,8 +18,13 @@ const media = require('../video/media');
 
 const SHIPPING_FEE = 60;
 const ORDER_TTL_MINUTES = 30;
+const CUSTOMER_SESSION_DAYS = 30;
 const r2 = (n) => Math.round(Number(n) * 100) / 100;
 const slipSecret = () => env.SLIP2GO_SECRET_KEY || env.SAAS_SLIP2GO_SECRET_KEY || '';
+const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const lineLoginReady = () => Boolean(
+  env.LINE_LOGIN_CHANNEL_ID && env.LINE_LOGIN_CHANNEL_SECRET && env.APP_PUBLIC_URL && env.ECOMMERCE_AUTH_PROXY_SECRET,
+);
 
 function validImageSignature(buffer, mimeType) {
   if (mimeType === 'image/jpeg') return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
@@ -100,6 +105,7 @@ async function publicStore(slug) {
     store: { name: store.store_name, slug: store.slug, warehouseName: store.warehouse_name },
     shippingFee: SHIPPING_FEE,
     paymentReady: setup.ready,
+    customerLoginEnabled: lineLoginReady(),
     products: products.map((p) => ({
       id: Number(p.id),
       sku: p.sku,
@@ -114,25 +120,307 @@ async function publicStore(slug) {
   };
 }
 
+async function beginLineLogin(slug) {
+  if (!lineLoginReady()) throw new AppError(503, 'LINE_LOGIN_NOT_CONFIGURED', 'ร้านค้ายังไม่ได้เปิดใช้งาน LINE Login');
+  await storeBySlug(slug);
+  await db.query('DELETE FROM ecommerce_line_login_states WHERE expires_at <= UTC_TIMESTAMP()');
+  const state = crypto.randomBytes(32).toString('base64url');
+  const codeVerifier = crypto.randomBytes(48).toString('base64url');
+  const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+  await db.query(
+    `INSERT INTO ecommerce_line_login_states (state_hash, store_slug, code_verifier, expires_at)
+     VALUES (:stateHash, :slug, :codeVerifier, UTC_TIMESTAMP() + INTERVAL 10 MINUTE)`,
+    { stateHash: hash(state), slug, codeVerifier },
+  );
+  const callback = new URL('/shop/auth/line/callback', env.APP_PUBLIC_URL).toString();
+  const authorize = new URL('https://access.line.me/oauth2/v2.1/authorize');
+  authorize.search = new URLSearchParams({
+    response_type: 'code',
+    client_id: env.LINE_LOGIN_CHANNEL_ID,
+    redirect_uri: callback,
+    state,
+    scope: 'profile',
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+  }).toString();
+  return { authorizationUrl: authorize.toString(), state };
+}
+
+async function completeLineLogin({ code, state, proxySecret }) {
+  if (!lineLoginReady() || !proxySecret || Buffer.byteLength(proxySecret) !== Buffer.byteLength(env.ECOMMERCE_AUTH_PROXY_SECRET)
+      || !crypto.timingSafeEqual(Buffer.from(proxySecret), Buffer.from(env.ECOMMERCE_AUTH_PROXY_SECRET))) {
+    throw new AppError(403, 'FORBIDDEN', 'ไม่อนุญาตให้ดำเนินการ LINE Login callback');
+  }
+  const attempt = await db.tx(async (conn) => {
+    const [[row]] = await conn.query(
+      `SELECT state_hash, store_slug, code_verifier
+         FROM ecommerce_line_login_states
+        WHERE state_hash = :stateHash AND expires_at > UTC_TIMESTAMP()
+        FOR UPDATE`,
+      { stateHash: hash(state) },
+    );
+    if (!row) throw badRequest('LINE Login หมดอายุหรือ state ไม่ถูกต้อง กรุณาลองใหม่');
+    await conn.query('DELETE FROM ecommerce_line_login_states WHERE state_hash = :stateHash', { stateHash: row.state_hash });
+    return row;
+  });
+  const callback = new URL('/shop/auth/line/callback', env.APP_PUBLIC_URL).toString();
+  let tokenResponse;
+  try {
+    const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: callback,
+        client_id: env.LINE_LOGIN_CHANNEL_ID,
+        client_secret: env.LINE_LOGIN_CHANNEL_SECRET,
+        code_verifier: attempt.code_verifier,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    tokenResponse = await tokenRes.json();
+    if (!tokenRes.ok || !tokenResponse.access_token) {
+      throw new AppError(401, 'LINE_LOGIN_FAILED', 'ยืนยันตัวตนกับ LINE ไม่สำเร็จ กรุณาลองเข้าสู่ระบบอีกครั้ง');
+    }
+    const profileRes = await fetch('https://api.line.me/v2/profile', {
+      headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const profile = await profileRes.json();
+    if (!profileRes.ok || typeof profile.userId !== 'string' || typeof profile.displayName !== 'string') {
+      throw new AppError(401, 'LINE_LOGIN_FAILED', 'อ่านโปรไฟล์ LINE ไม่สำเร็จ กรุณาลองเข้าสู่ระบบอีกครั้ง');
+    }
+    const lineUserId = profile.userId.slice(0, 191);
+    await db.query(
+      `INSERT INTO ecommerce_customer_identities (line_user_id, display_name, picture_url)
+       VALUES (:lineUserId, :displayName, :pictureUrl)
+       ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), picture_url = VALUES(picture_url)`,
+      { lineUserId, displayName: profile.displayName.slice(0, 191), pictureUrl: typeof profile.pictureUrl === 'string' ? profile.pictureUrl.slice(0, 1000) : null },
+    );
+    const identity = await db.one(
+      'SELECT id, display_name, picture_url FROM ecommerce_customer_identities WHERE line_user_id = :lineUserId',
+      { lineUserId },
+    );
+    await db.query('DELETE FROM ecommerce_customer_sessions WHERE expires_at <= UTC_TIMESTAMP()');
+    const sessionToken = crypto.randomBytes(48).toString('base64url');
+    await db.query(
+      `INSERT INTO ecommerce_customer_sessions (token_hash, identity_id, expires_at)
+       VALUES (:tokenHash, :identityId, UTC_TIMESTAMP() + INTERVAL :days DAY)`,
+      { tokenHash: hash(sessionToken), identityId: identity.id, days: CUSTOMER_SESSION_DAYS },
+    );
+    return {
+      sessionToken,
+      expiresIn: CUSTOMER_SESSION_DAYS * 86400,
+      storeSlug: attempt.store_slug,
+      customer: { displayName: identity.display_name, pictureUrl: identity.picture_url },
+    };
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError(502, 'LINE_LOGIN_UNAVAILABLE', 'เชื่อมต่อ LINE Login ไม่สำเร็จ กรุณาลองใหม่ภายหลัง');
+  }
+}
+
+async function customerIdentityFromToken(token) {
+  if (!token || token.length > 128) return null;
+  return db.one(
+    `SELECT i.id, i.display_name, i.picture_url
+       FROM ecommerce_customer_sessions s
+       JOIN ecommerce_customer_identities i ON i.id = s.identity_id
+      WHERE s.token_hash = :tokenHash AND s.expires_at > UTC_TIMESTAMP()`,
+    { tokenHash: hash(token) },
+  );
+}
+
+async function customerAccount(slug, token) {
+  const store = await storeBySlug(slug, { enabled: false });
+  const identity = await customerIdentityFromToken(token);
+  if (!identity) throw new AppError(401, 'CUSTOMER_LOGIN_REQUIRED', 'กรุณาเข้าสู่ระบบด้วย LINE');
+  const [addresses, orders] = await Promise.all([
+    db.query(
+      `SELECT id, recipient_name, phone, email, address, postal_code, is_default
+         FROM ecommerce_customer_addresses
+        WHERE org_id = :orgId AND identity_id = :identityId
+        ORDER BY is_default DESC, updated_at DESC LIMIT 10`,
+      { orgId: store.org_id, identityId: identity.id },
+    ),
+    db.query(
+      `SELECT so.id, so.order_no, so.status, so.total, so.ordered_at, e.payment_status, e.public_token
+         FROM ecommerce_order_details e
+         JOIN sales_orders so ON so.id = e.sales_order_id
+        WHERE e.org_id = :orgId AND e.customer_identity_id = :identityId
+        ORDER BY so.ordered_at DESC LIMIT 50`,
+      { orgId: store.org_id, identityId: identity.id },
+    ),
+  ]);
+  return {
+    customer: { displayName: identity.display_name, pictureUrl: identity.picture_url },
+    addresses: addresses.map((row) => ({
+      id: Number(row.id),
+      recipientName: row.recipient_name,
+      phone: row.phone,
+      email: row.email,
+      address: row.address,
+      postalCode: row.postal_code,
+      isDefault: Boolean(row.is_default),
+    })),
+    orders: orders.map((row) => ({
+      id: Number(row.id),
+      orderNo: row.order_no,
+      status: row.payment_status === 'expired' ? 'expired' : row.status,
+      total: Number(row.total),
+      orderedAt: row.ordered_at,
+      trackPath: `/shop/${slug}/track/${row.public_token}`,
+    })),
+  };
+}
+
+async function logoutCustomer(token) {
+  if (token && token.length <= 128) {
+    await db.query('DELETE FROM ecommerce_customer_sessions WHERE token_hash = :tokenHash', { tokenHash: hash(token) });
+  }
+}
+
+async function deleteCustomerAddress(slug, token, addressId) {
+  const store = await storeBySlug(slug, { enabled: false });
+  const identity = await customerIdentityFromToken(token);
+  if (!identity) throw new AppError(401, 'CUSTOMER_LOGIN_REQUIRED', 'กรุณาเข้าสู่ระบบด้วย LINE');
+  await db.tx(async (conn) => {
+    const [result] = await conn.query(
+      `DELETE FROM ecommerce_customer_addresses
+        WHERE id = :addressId AND org_id = :orgId AND identity_id = :identityId`,
+      { addressId, orgId: store.org_id, identityId: identity.id },
+    );
+    if (!result.affectedRows) throw notFound('ไม่พบที่อยู่จัดส่ง');
+    await conn.query(
+      'UPDATE ecommerce_customer_addresses SET is_default = 0 WHERE org_id = :orgId AND identity_id = :identityId',
+      { orgId: store.org_id, identityId: identity.id },
+    );
+    const [[remaining]] = await conn.query(
+      `SELECT id FROM ecommerce_customer_addresses
+        WHERE org_id = :orgId AND identity_id = :identityId
+        ORDER BY updated_at DESC LIMIT 1`,
+      { orgId: store.org_id, identityId: identity.id },
+    );
+    if (remaining) {
+      await conn.query('UPDATE ecommerce_customer_addresses SET is_default = 1 WHERE id = :id', { id: remaining.id });
+    }
+  });
+}
+
+async function productReviews(slug, productId) {
+  const store = await storeBySlug(slug);
+  const product = await db.one(
+    `SELECT id, name FROM products
+      WHERE id = :productId AND org_id = :orgId AND status = 'active' AND open_price = 0`,
+    { productId, orgId: store.org_id },
+  );
+  if (!product) throw notFound('ไม่พบสินค้า');
+  const summary = await db.one(
+    `SELECT COUNT(*) AS count, COALESCE(AVG(rating), 0) AS average
+       FROM ecommerce_product_reviews
+      WHERE org_id = :orgId AND product_id = :productId`,
+    { orgId: store.org_id, productId },
+  );
+  const rows = await db.query(
+    `SELECT rating, review_text, created_at
+       FROM ecommerce_product_reviews
+      WHERE org_id = :orgId AND product_id = :productId
+      ORDER BY created_at DESC LIMIT 50`,
+    { orgId: store.org_id, productId },
+  );
+  return {
+    productName: product.name,
+    count: Number(summary.count),
+    average: Number(summary.average),
+    reviews: rows.map((row) => ({
+      rating: Number(row.rating),
+      text: row.review_text,
+      createdAt: row.created_at,
+      reviewer: 'ผู้ซื้อที่ยืนยันแล้ว',
+    })),
+  };
+}
+
+async function reviewableItems(slug, productId, token) {
+  const store = await storeBySlug(slug, { enabled: false });
+  const identity = await customerIdentityFromToken(token);
+  if (!identity) throw new AppError(401, 'CUSTOMER_LOGIN_REQUIRED', 'กรุณาเข้าสู่ระบบด้วย LINE');
+  const rows = await db.query(
+    `SELECT i.id AS order_item_id, so.order_no, so.ordered_at, i.quantity
+       FROM ecommerce_order_details e
+       JOIN sales_orders so ON so.id = e.sales_order_id
+       JOIN sales_order_items i ON i.order_id = so.id
+      WHERE e.org_id = :orgId AND e.customer_identity_id = :identityId
+        AND e.payment_status = 'paid' AND so.status IN ('paid','packed','shipped','completed')
+        AND i.product_id = :productId
+        AND NOT EXISTS (
+          SELECT 1 FROM ecommerce_product_reviews r WHERE r.sales_order_item_id = i.id
+        )
+      ORDER BY so.ordered_at DESC LIMIT 20`,
+    { orgId: store.org_id, identityId: identity.id, productId },
+  );
+  return rows.map((row) => ({
+    orderItemId: Number(row.order_item_id),
+    orderNo: row.order_no,
+    orderedAt: row.ordered_at,
+    quantity: Number(row.quantity),
+  }));
+}
+
+async function createProductReview(slug, productId, token, { orderItemId, rating, text }) {
+  const store = await storeBySlug(slug, { enabled: false });
+  const identity = await customerIdentityFromToken(token);
+  if (!identity) throw new AppError(401, 'CUSTOMER_LOGIN_REQUIRED', 'กรุณาเข้าสู่ระบบด้วย LINE');
+  await db.tx(async (conn) => {
+    const [[item]] = await conn.query(
+      `SELECT i.id
+         FROM ecommerce_order_details e
+         JOIN sales_orders so ON so.id = e.sales_order_id
+         JOIN sales_order_items i ON i.order_id = so.id
+        WHERE e.org_id = :orgId AND e.customer_identity_id = :identityId
+          AND e.payment_status = 'paid' AND so.status IN ('paid','packed','shipped','completed')
+          AND i.id = :orderItemId AND i.product_id = :productId
+        FOR UPDATE`,
+      { orgId: store.org_id, identityId: identity.id, orderItemId, productId },
+    );
+    if (!item) throw badRequest('รีวิวได้เฉพาะสินค้าที่ซื้อและชำระเงินแล้ว');
+    await conn.query(
+      `INSERT INTO ecommerce_product_reviews
+         (org_id, product_id, sales_order_id, sales_order_item_id, customer_identity_id, rating, review_text)
+       SELECT :orgId, :productId, i.order_id, i.id, :identityId, :rating, :text
+         FROM sales_order_items i
+        WHERE i.id = :orderItemId`,
+      { orgId: store.org_id, productId, identityId: identity.id, rating, text: text || null, orderItemId },
+    );
+  }).catch((error) => {
+    if (error.code === 'ER_DUP_ENTRY') throw conflict('สินค้ารายการนี้ได้รับรีวิวแล้ว');
+    throw error;
+  });
+  return { ok: true };
+}
+
 async function publicStoreIndex() {
   const rows = await db.query(
-    `SELECT s.slug, s.updated_at
+    `SELECT s.slug, s.updated_at, p.id AS product_id
        FROM ecommerce_stores s
+       JOIN products p ON p.org_id = s.org_id AND p.status = 'active' AND p.open_price = 0
+       JOIN stock_levels sl
+         ON sl.product_id = p.id AND sl.warehouse_id = s.warehouse_id AND sl.variant_id = 0
+       LEFT JOIN product_categories c ON c.id = p.category_id
       WHERE s.is_enabled = 1
         AND s.warehouse_id IS NOT NULL
-        AND EXISTS (
-          SELECT 1
-            FROM products p
-            JOIN stock_levels sl
-              ON sl.product_id = p.id AND sl.warehouse_id = s.warehouse_id AND sl.variant_id = 0
-            LEFT JOIN product_categories c ON c.id = p.category_id
-           WHERE p.org_id = s.org_id AND p.status = 'active' AND p.open_price = 0
-             AND (c.age_restricted IS NULL OR c.age_restricted = 0)
-             AND sl.quantity > sl.reserved
-        )
-      ORDER BY s.org_id`,
+        AND (c.age_restricted IS NULL OR c.age_restricted = 0)
+        AND sl.quantity > sl.reserved
+      ORDER BY s.org_id, p.id`,
   );
-  return rows.map((row) => ({ slug: row.slug, updatedAt: row.updated_at }));
+  const stores = new Map();
+  for (const row of rows) {
+    const item = stores.get(row.slug) ?? { slug: row.slug, updatedAt: row.updated_at, productIds: [] };
+    item.productIds.push(Number(row.product_id));
+    stores.set(row.slug, item);
+  }
+  return Array.from(stores.values());
 }
 
 async function quote(slug, { items: rawItems, code = '' }) {
@@ -244,7 +532,7 @@ async function expirePendingOrders(conn, orgId) {
   }
 }
 
-async function createOrder(slug, input) {
+async function createOrder(slug, input, customerIdentityId = null) {
   const store = await storeBySlug(slug);
   if (!store.warehouse_id) throw badRequest('ร้านยังไม่ได้เลือกคลังจัดส่ง');
   const setup = await paymentSetup(store.org_id, store.branch_id);
@@ -331,12 +619,13 @@ async function createOrder(slug, input) {
     }
     await conn.query(
       `INSERT INTO ecommerce_order_details
-         (sales_order_id, org_id, warehouse_id, public_token, customer_name, phone, email, shipping_address, postal_code, customer_note, expires_at)
-       VALUES (:salesOrderId, :orgId, :warehouseId, :token, :name, :phone, :email, :address, :postalCode, :note,
+         (sales_order_id, org_id, customer_identity_id, warehouse_id, public_token, customer_name, phone, email, shipping_address, postal_code, customer_note, expires_at)
+       VALUES (:salesOrderId, :orgId, :customerIdentityId, :warehouseId, :token, :name, :phone, :email, :address, :postalCode, :note,
                UTC_TIMESTAMP() + INTERVAL :ttl MINUTE)`,
       {
         salesOrderId,
         orgId: store.org_id,
+        customerIdentityId,
         warehouseId: store.warehouse_id,
         token: publicToken,
         name: input.customerName,
@@ -348,6 +637,47 @@ async function createOrder(slug, input) {
         ttl: ORDER_TTL_MINUTES,
       },
     );
+    if (customerIdentityId && input.saveAddress) {
+      const [[addressCount]] = await conn.query(
+        'SELECT COUNT(*) AS count FROM ecommerce_customer_addresses WHERE org_id = :orgId AND identity_id = :identityId',
+        { orgId: store.org_id, identityId: customerIdentityId },
+      );
+      const [existing] = await conn.query(
+        `SELECT id FROM ecommerce_customer_addresses
+          WHERE org_id = :orgId AND identity_id = :identityId
+            AND phone = :phone AND address = :address AND postal_code = :postalCode
+          LIMIT 1 FOR UPDATE`,
+        { orgId: store.org_id, identityId: customerIdentityId, phone: input.phone, address: input.address, postalCode: input.postalCode },
+      );
+      if (!existing.length && Number(addressCount.count) >= 10) throw badRequest('บันทึกที่อยู่ได้สูงสุด 10 รายการ กรุณาลบที่อยู่เก่าก่อน');
+      await conn.query(
+        'UPDATE ecommerce_customer_addresses SET is_default = 0 WHERE org_id = :orgId AND identity_id = :identityId',
+        { orgId: store.org_id, identityId: customerIdentityId },
+      );
+      if (existing.length) {
+        await conn.query(
+          `UPDATE ecommerce_customer_addresses
+              SET recipient_name = :name, email = :email, is_default = 1
+            WHERE id = :id AND org_id = :orgId AND identity_id = :identityId`,
+          { id: existing[0].id, orgId: store.org_id, identityId: customerIdentityId, name: input.customerName, email: input.email ?? null },
+        );
+      } else {
+        await conn.query(
+          `INSERT INTO ecommerce_customer_addresses
+             (identity_id, org_id, recipient_name, phone, email, address, postal_code, is_default)
+           VALUES (:identityId, :orgId, :name, :phone, :email, :address, :postalCode, 1)`,
+          {
+            identityId: customerIdentityId,
+            orgId: store.org_id,
+            name: input.customerName,
+            phone: input.phone,
+            email: input.email ?? null,
+            address: input.address,
+            postalCode: input.postalCode,
+          },
+        );
+      }
+    }
     await conn.query(
       `INSERT IGNORE INTO notifications (org_id, type, severity, title, body, link, permission, ref_key)
        VALUES (:orgId, 'ecommerce_order', 'info', 'มีคำสั่งซื้อใหม่', :body, '/ecommerce', 'pos:manage', :refKey)`,
@@ -649,6 +979,15 @@ module.exports = {
   normalizeItems,
   publicStore,
   publicStoreIndex,
+  beginLineLogin,
+  completeLineLogin,
+  customerIdentityFromToken,
+  customerAccount,
+  logoutCustomer,
+  deleteCustomerAddress,
+  productReviews,
+  reviewableItems,
+  createProductReview,
   quote,
   adminStore,
   updateAdminStore,
