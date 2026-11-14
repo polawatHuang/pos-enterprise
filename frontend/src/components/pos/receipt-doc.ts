@@ -29,9 +29,10 @@ export function receiptDoc(order: PosOrder, settings: PosSettings | undefined, t
   const org = settings?.org;
   const b: ReceiptBlock[] = [];
   const voided = order.status === "cancelled";
+  const branchId = order.branchId ?? settings?.paymentBranch?.id;
   const branchNo = order.branchNo ?? settings?.paymentBranch?.branchNo;
   const branchAddress = order.branchAddress
-    ?? (branchNo ? settings?.org.branches.find((branch) => branch.branchNo === branchNo)?.address : settings?.paymentBranch?.address)
+    ?? (branchId ? settings?.org.branches?.find((branch) => branch.id === branchId)?.address : settings?.paymentBranch?.address)
     ?? org?.address;
   b.push({ kind: "text", text: org?.legalName || org?.name || "ใบเสร็จรับเงิน", align: "center", bold: true, big: true });
   if (branchAddress) b.push({ kind: "text", text: branchAddress, align: "center" });

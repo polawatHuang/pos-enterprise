@@ -591,6 +591,7 @@ async function getOrder(orgId, orderId) {
     channel: o.channel,
     status: o.status,
     shiftId: o.shift_id,
+    branchId: o.branch_id,
     branchName: o.branch_name,
     branchNo: o.branch_no,
     branchAddress: o.branch_address,

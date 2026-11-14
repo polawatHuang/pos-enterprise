@@ -110,8 +110,8 @@ test('POS settings return branch-specific receipt addresses only for the signed-
     const settings = (await cashier.get('/api/pos/settings')).body.data;
     assert.equal(settings.paymentBranch.address, 'ที่อยู่สาขาสองทดสอบ');
     assert.equal(settings.paymentBranch.branchNo, original.branch_no);
-    assert.equal(settings.org.branches.find((branch) => branch.branchNo === hq.branchNo).address, 'ที่อยู่สำนักงานใหญ่ทดสอบ');
-    assert.equal(settings.org.branches.find((branch) => branch.branchNo === otherBranch.branchNo).address, 'ที่อยู่สาขาสองทดสอบ');
+    assert.equal(settings.org.branches.find((branch) => Number(branch.id) === Number(hq.id)).address, 'ที่อยู่สำนักงานใหญ่ทดสอบ');
+    assert.equal(settings.org.branches.find((branch) => Number(branch.id) === Number(otherBranch.id)).address, 'ที่อยู่สาขาสองทดสอบ');
   } finally {
     for (const branch of before) {
       await db.query('UPDATE branches SET address = :address WHERE id = :id', { id: branch.id, address: branch.address });

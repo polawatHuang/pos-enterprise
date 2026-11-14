@@ -748,6 +748,7 @@ export interface PosOrder {
   channel: string;
   status: string;
   shiftId: number | null;
+  branchId?: number | null;
   branchName: string | null;
   branchNo: string | null;
   branchAddress?: string | null;
@@ -873,7 +874,7 @@ export interface PosSettings {
     address: string | null;
     phone: string | null;
     vatRegistered: boolean;
-    branches: { branchNo: string; address: string | null }[];
+    branches: { id: number; branchNo: string; address: string | null }[];
   };
 }
 
