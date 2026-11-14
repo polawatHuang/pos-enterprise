@@ -13,24 +13,30 @@ function clearOAuthCookies(response: NextResponse, callbackPath: string) {
   response.cookies.set("pe_line_slug", "", { path: callbackPath, maxAge: 0 });
 }
 
+function failure(request: NextRequest, slug: string, reason: string, callbackPath: string) {
+  const destination = new URL(slugPattern.test(slug) ? `/shop/${slug}/account` : "/shop", request.url);
+  if (slugPattern.test(slug)) destination.searchParams.set("login", "failed");
+  destination.searchParams.set("reason", reason);
+  const response = NextResponse.redirect(destination);
+  clearOAuthCookies(response, callbackPath);
+  return response;
+}
+
 export async function handleLineCallback(request: NextRequest, callbackPath: string) {
   const slug = request.cookies.get("pe_line_slug")?.value ?? "";
   const state = request.nextUrl.searchParams.get("state") ?? "";
   const code = request.nextUrl.searchParams.get("code") ?? "";
+  const providerError = request.nextUrl.searchParams.get("error");
   const expectedState = request.cookies.get("pe_line_state")?.value ?? "";
-  const fallback = new URL(slugPattern.test(slug) ? `/shop/${slug}/account?login=failed` : "/shop", request.url);
 
+  if (providerError) return failure(request, slug, "cancelled", callbackPath);
   if (!slugPattern.test(slug) || !state || state !== expectedState || !code) {
-    const response = NextResponse.redirect(fallback);
-    clearOAuthCookies(response, callbackPath);
-    return response;
+    return failure(request, slug, "state", callbackPath);
   }
 
   const proxySecret = process.env.ECOMMERCE_AUTH_PROXY_SECRET;
   if (!proxySecret) {
-    const response = NextResponse.redirect(fallback);
-    clearOAuthCookies(response, callbackPath);
-    return response;
+    return failure(request, slug, "proxy", callbackPath);
   }
 
   try {
@@ -41,16 +47,27 @@ export async function handleLineCallback(request: NextRequest, callbackPath: str
       cache: "no-store",
     });
     if (!result.ok) {
-      const response = NextResponse.redirect(fallback);
-      clearOAuthCookies(response, callbackPath);
-      return response;
+      const body = await result.json().catch(() => null) as { error?: { code?: string } } | null;
+      const codeFromBackend = body?.error?.code;
+      const reason = codeFromBackend === "FORBIDDEN"
+        ? "proxy"
+        : codeFromBackend === "LINE_LOGIN_FAILED"
+          ? "line"
+          : codeFromBackend === "LINE_LOGIN_UNAVAILABLE"
+            ? "backend"
+            : codeFromBackend === "LINE_LOGIN_NOT_CONFIGURED"
+              ? "config"
+              : codeFromBackend === "BAD_REQUEST"
+                ? "state"
+                : result.status === 404
+                  ? "deploy"
+                  : "backend";
+      return failure(request, slug, reason, callbackPath);
     }
 
     const body = await result.json() as { data: { sessionToken: string; expiresIn: number; storeSlug: string } };
     if (!body.data.sessionToken || body.data.storeSlug !== slug) {
-      const response = NextResponse.redirect(fallback);
-      clearOAuthCookies(response, callbackPath);
-      return response;
+      return failure(request, slug, "session", callbackPath);
     }
 
     const response = NextResponse.redirect(new URL(`/shop/${slug}/account?login=success`, request.url));
@@ -65,8 +82,6 @@ export async function handleLineCallback(request: NextRequest, callbackPath: str
     });
     return response;
   } catch {
-    const response = NextResponse.redirect(fallback);
-    clearOAuthCookies(response, callbackPath);
-    return response;
+    return failure(request, slug, "backend", callbackPath);
   }
 }
