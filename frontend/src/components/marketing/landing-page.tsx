@@ -53,7 +53,7 @@ function DashboardPreview() {
         <div className="flex h-12 items-center justify-between border-b border-white/[.07] px-4 sm:h-14 sm:px-5">
           <div className="flex items-center gap-2.5">
             <span className="grid size-7 place-items-center rounded-lg bg-violet-500 text-white"><Store className="size-4" /></span>
-            <span className="text-xs font-semibold tracking-tight text-white sm:text-sm">POS <span className="text-violet-300">Enterprise</span></span>
+            <span className="text-xs font-semibold tracking-tight text-white sm:text-sm">POSWITHAI</span>
           </div>
           <div className="hidden items-center gap-1.5 rounded-lg border border-white/[.08] bg-white/[.035] px-3 py-1.5 text-[10px] text-slate-400 sm:flex">
             <span className="size-1.5 rounded-full bg-emerald-400" /> สาขาสยาม · วันนี้
@@ -162,7 +162,7 @@ export function LandingPage() {
         <div className="mx-auto flex h-[68px] w-full max-w-7xl items-center justify-between px-4 sm:h-[76px] sm:px-8">
           <Link href="/" className="flex items-center gap-2.5" aria-label="POSWITHAI หน้าแรก">
             <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-violet-400 to-indigo-500 text-white shadow-lg shadow-violet-950/40"><Store className="size-[18px]" /></span>
-            <span className="text-sm font-semibold tracking-tight text-white sm:text-base">POS <span className="text-violet-300">Enterprise</span></span>
+            <span className="text-sm font-semibold tracking-tight text-white sm:text-base">POSWITHAI</span>
           </Link>
           <nav aria-label="เมนูหลัก" className="flex items-center gap-1.5 sm:gap-6">
             <Link href="#features" className="hidden text-sm text-slate-400 transition hover:text-white sm:inline">ฟีเจอร์</Link>

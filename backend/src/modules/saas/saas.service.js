@@ -40,11 +40,16 @@ async function createTenant({ organizationName, fullName, email, password, meta 
         `INSERT INTO branches (org_id, code, name, branch_no) VALUES (:orgId, 'HQ', 'สำนักงานใหญ่', '00000')`,
         { orgId: org.insertId },
       );
-      await conn.query('INSERT INTO warehouses (org_id, branch_id, code, name) VALUES (:orgId, :branchId, :code, :name)', {
+      const [warehouse] = await conn.query('INSERT INTO warehouses (org_id, branch_id, code, name) VALUES (:orgId, :branchId, :code, :name)', {
         orgId: org.insertId,
         branchId: branch.insertId,
         code: 'WH-HQ',
         name: 'คลังสำนักงานใหญ่',
+      });
+      await conn.query('INSERT INTO ecommerce_stores (org_id, slug, warehouse_id) VALUES (:orgId, :slug, :warehouseId)', {
+        orgId: org.insertId,
+        slug: `store-${org.insertId}`,
+        warehouseId: warehouse.insertId,
       });
       const [[ownerRole]] = await conn.query("SELECT id FROM roles WHERE code = 'owner' LIMIT 1");
       if (!ownerRole) throw new AppError(503, 'RBAC_NOT_CONFIGURED', 'ระบบบทบาทยังไม่พร้อม กรุณาติดต่อผู้ดูแลระบบ');

@@ -63,7 +63,7 @@ function createApp() {
   const jsonSmall = express.json({ limit: '1mb' });
   const jsonLarge = express.json({ limit: '8mb' });
   // Image uploads (receipt photos, cover images) come as base64 JSON
-  const LARGE_BODY = /^\/api\/(accounting\/ai\/extract-receipt|covers(\/\d+\/final)?|drama\/\d+\/product-image|saas\/orders\/[0-9a-f-]+\/verify-slip)$/i;
+  const LARGE_BODY = /^\/api\/(accounting\/ai\/extract-receipt|covers(\/\d+\/final)?|drama\/\d+\/product-image|saas\/orders\/[0-9a-f-]+\/verify-slip|ecommerce\/public\/stores\/[^/]+\/orders\/[^/]+\/verify-slip)$/i;
   app.use((req, res, next) => (LARGE_BODY.test(req.path) ? jsonLarge : jsonSmall)(req, res, next));
   app.use(cookieParser());
 
@@ -113,6 +113,7 @@ function createApp() {
   app.use('/api/public/r', require('./modules/public/receipt.routes').router);
   app.use('/api/public/payments', require('./modules/public/payments.routes').router);
   app.use('/api/public/legal', require('./modules/public/legal.routes').router);
+  app.use('/api/ecommerce', require('./modules/ecommerce/ecommerce.routes').router);
   app.use('/api/documents', require('./modules/documents-hub/hub.routes').router);
   app.use('/api/hr', require('./modules/hr').router);
   app.use('/api/pos', require('./modules/pos/pos.routes').router);
