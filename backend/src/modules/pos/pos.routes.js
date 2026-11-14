@@ -258,7 +258,7 @@ router.get('/settings', async (req, res) => {
   const [pay, org, branches] = await Promise.all([
     paymentFor(req.user.orgId, await payingBranch(req.user)),
     db.one('SELECT name, legal_name, tax_id, address, phone, vat_registered FROM organizations WHERE id = :orgId', { orgId: req.user.orgId }),
-    db.query('SELECT branch_no AS branchNo, address FROM branches WHERE org_id = :orgId', { orgId: req.user.orgId }),
+    db.query('SELECT id, branch_no AS branchNo, address FROM branches WHERE org_id = :orgId', { orgId: req.user.orgId }),
   ]);
   res.json({
     data: {

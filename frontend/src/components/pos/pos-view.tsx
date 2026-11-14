@@ -528,6 +528,7 @@ export function PosView() {
       channel: "pos",
       status: "completed",
       shiftId: s.id,
+      branchId: settings.data?.paymentBranch?.id ?? null,
       branchName: s.branchName,
       branchNo: settings.data?.paymentBranch?.branchNo ?? null,
       branchAddress: settings.data?.paymentBranch?.address ?? null,
