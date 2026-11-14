@@ -255,9 +255,10 @@ async function payingBranch(user) {
 }
 
 router.get('/settings', async (req, res) => {
-  const [pay, org] = await Promise.all([
+  const [pay, org, branches] = await Promise.all([
     paymentFor(req.user.orgId, await payingBranch(req.user)),
     db.one('SELECT name, legal_name, tax_id, address, phone, vat_registered FROM organizations WHERE id = :orgId', { orgId: req.user.orgId }),
+    db.query('SELECT branch_no AS branchNo, address FROM branches WHERE org_id = :orgId', { orgId: req.user.orgId }),
   ]);
   res.json({
     data: {
@@ -281,6 +282,7 @@ router.get('/settings', async (req, res) => {
         address: org.address,
         phone: org.phone,
         vatRegistered: Boolean(org.vat_registered),
+        branches,
       },
     },
   });

@@ -557,7 +557,7 @@ async function checkout(user, input) {
 
 async function getOrder(orgId, orderId) {
   const o = await db.one(
-    `SELECT so.*, b.name AS branch_name, b.branch_no, u.full_name AS cashier_name, c.name AS customer_name, c.points AS customer_points,
+    `SELECT so.*, b.name AS branch_name, b.branch_no, b.address AS branch_address, u.full_name AS cashier_name, c.name AS customer_name, c.points AS customer_points,
             dc.code AS discount_code
        FROM sales_orders so
        LEFT JOIN discount_codes dc ON dc.id = so.discount_code_id
@@ -593,6 +593,7 @@ async function getOrder(orgId, orderId) {
     shiftId: o.shift_id,
     branchName: o.branch_name,
     branchNo: o.branch_no,
+    branchAddress: o.branch_address,
     cashierName: o.cashier_name,
     customerName: o.customer_name,
     customerId: o.customer_id,
