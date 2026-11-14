@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import QRCode from "qrcode";
@@ -33,6 +34,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { base64Of } from "@/lib/image";
 import { formatDateTime, formatMoney } from "@/lib/utils";
+import { useEcommerceCart, type EcommerceCartLine } from "@/lib/ecommerce-cart";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
 import type { PublicStoreSeoData } from "@/lib/ecommerce-seo";
@@ -49,7 +51,7 @@ type Product = {
   available: number;
 };
 type StorefrontData = PublicStoreSeoData;
-type CartLine = { productId: number; quantity: number };
+type CartLine = EcommerceCartLine;
 type CustomerAddress = {
   id: number;
   recipientName: string;
@@ -127,15 +129,17 @@ function ProductImage({ product, className = "" }: { product: Product; className
 }
 
 export function Storefront({ slug, initialData }: { slug: string; initialData?: StorefrontData }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const shop = useQuery({
     queryKey: ["public-store", slug],
     queryFn: () => api.get<StorefrontData>(`/ecommerce/public/stores/${slug}`),
     initialData,
     retry: false,
   });
-  const [cart, setCart] = useState<CartLine[]>([]);
-  const [cartOpen, setCartOpen] = useState(false);
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [cart, setCart] = useEcommerceCart(slug);
+  const [cartOpen, setCartOpen] = useState(() => searchParams.get("cart") === "open");
+  const [checkoutOpen, setCheckoutOpen] = useState(() => searchParams.get("checkout") === "1");
   const [category, setCategory] = useState("ทั้งหมด");
   const [search, setSearch] = useState("");
   const [discountInput, setDiscountInput] = useState("");
@@ -143,6 +147,9 @@ export function Storefront({ slug, initialData }: { slug: string; initialData?: 
   const [order, setOrder] = useState<CreatedOrder | null>(null);
   const [saveAddress, setSaveAddress] = useState(false);
   const [customer, setCustomer] = useState({ customerName: "", phone: "", email: "", address: "", postalCode: "", note: "" });
+  useEffect(() => {
+    if (searchParams.has("cart") || searchParams.has("checkout")) router.replace(`/shop/${slug}`, { scroll: false });
+  }, [router, searchParams, slug]);
   const account = useQuery({
     queryKey: ["public-store-customer", slug],
     queryFn: () => api.get<CustomerAccount>(`/ecommerce/public/stores/${slug}/customer/account`),
@@ -204,6 +211,9 @@ export function Storefront({ slug, initialData }: { slug: string; initialData?: 
         ...customer,
         saveAddress,
       });
+      setCart(() => []);
+      setDiscountCode("");
+      setDiscountInput("");
       setOrder(created);
       setCheckoutOpen(false);
       setCartOpen(false);

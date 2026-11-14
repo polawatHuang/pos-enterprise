@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, BadgeCheck, MessageCircle, PackageCheck, Star, Truck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, MessageCircle, PackageCheck, ShoppingCart, Star, Truck, Zap } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
+import { addEcommerceCartItem, writeEcommerceCart } from "@/lib/ecommerce-cart";
 import { formatDateTime, formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { PublicStoreSeoData } from "@/lib/ecommerce-seo";
@@ -28,6 +30,7 @@ export function ProductDetail({
   store: PublicStoreSeoData;
   product: Product;
 }) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [rating, setRating] = useState(5);
   const [orderItemId, setOrderItemId] = useState("");
@@ -47,6 +50,32 @@ export function ProductDetail({
     .filter((item) => item.id !== product.id && (!product.category || item.category === product.category))
     .slice(0, 6);
   const reviewLoginRequired = eligibleQuery.error instanceof ApiError && eligibleQuery.error.status === 401;
+
+  const addToCart = () => {
+    try {
+      if (!addEcommerceCartItem(slug, product.id, product.available)) {
+        toast.error(product.available < 1 ? "สินค้าหมดสต๊อก" : "สินค้าในตะกร้าครบจำนวนที่มีในสต๊อกแล้ว");
+        return;
+      }
+      toast.success(`เพิ่ม ${product.name} ลงตะกร้าแล้ว`);
+      router.push(`/shop/${slug}?cart=open`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "เพิ่มสินค้าลงตะกร้าไม่สำเร็จ");
+    }
+  };
+
+  const buyNow = () => {
+    try {
+      if (product.available < 1) {
+        toast.error("สินค้าหมดสต๊อก");
+        return;
+      }
+      writeEcommerceCart(slug, [{ productId: product.id, quantity: 1 }]);
+      router.push(`/shop/${slug}?checkout=1`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "เริ่มสั่งซื้อไม่สำเร็จ");
+    }
+  };
 
   const submitReview = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -96,9 +125,12 @@ export function ProductDetail({
               <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-2"><Truck className="size-4 text-violet-600" /> จัดส่ง ฿{store.shippingFee}</span>
             </div>
             <div className="mt-auto flex flex-wrap gap-3 pt-8">
-              <Link href={`/shop/${slug}#shop-products`} className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#452082] px-5 text-sm font-semibold text-white transition hover:bg-[#351565]">
-                เลือกซื้อสินค้า <ArrowRight className="size-4" />
-              </Link>
+              <button type="button" onClick={addToCart} disabled={product.available < 1} className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-xl border border-violet-300 bg-violet-50 px-4 text-sm font-semibold text-violet-800 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50">
+                <ShoppingCart className="size-4" /> เพิ่มลงในตะกร้า
+              </button>
+              <button type="button" onClick={buyNow} disabled={product.available < 1} className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#452082] px-5 text-sm font-semibold text-white transition hover:bg-[#351565] disabled:cursor-not-allowed disabled:opacity-50">
+                <Zap className="size-4" /> ซื้อเลย
+              </button>
               {store.customerLoginEnabled && <Link href={`/shop/${slug}/account`} className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                 <BadgeCheck className="size-4" /> บัญชีของฉัน
               </Link>}
