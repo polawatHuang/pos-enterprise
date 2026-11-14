@@ -9,6 +9,7 @@ const { requirePermission } = require('../../core/auth');
 const { audit } = require('../../core/audit');
 const { r2 } = require('./ledger.service');
 const { money, sendCsv } = require('./csv');
+const { paidSalesOrder } = require('../../utils/sales-order-sql');
 
 const router = express.Router();
 const TZ = env.APP_TZ_OFFSET;
@@ -34,9 +35,10 @@ async function pp30(orgId, p) {
   const [orders, docs, credits, input, otherIncome] = await Promise.all([
     db.one(
       `SELECT COALESCE(SUM(total - vat_amount), 0) AS base, COALESCE(SUM(vat_amount), 0) AS vat, COUNT(*) AS n
-         FROM sales_orders
-        WHERE org_id = :orgId AND status NOT IN ('cancelled','refunded')
-          AND CONVERT_TZ(ordered_at, '+00:00', '${TZ}') >= :from AND CONVERT_TZ(ordered_at, '+00:00', '${TZ}') < :next`,
+         FROM sales_orders so
+        WHERE so.org_id = :orgId AND so.status NOT IN ('cancelled','refunded')
+          AND ${paidSalesOrder('so')}
+          AND CONVERT_TZ(so.ordered_at, '+00:00', '${TZ}') >= :from AND CONVERT_TZ(so.ordered_at, '+00:00', '${TZ}') < :next`,
       params,
     ),
     db.one(
