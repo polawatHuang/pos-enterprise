@@ -750,6 +750,7 @@ export interface PosOrder {
   shiftId: number | null;
   branchName: string | null;
   branchNo: string | null;
+  branchAddress?: string | null;
   cashierName: string | null;
   customerName: string | null;
   customerId: number | null;
@@ -862,10 +863,18 @@ export interface PosSettings {
   /** What this till charges into: the branch's own account when it has one */
   bankAccount: BankAccount;
   promptpayEnabled: boolean;
-  paymentBranch: { id: number; name: string; ownPromptpay: boolean; ownBank: boolean } | null;
+  paymentBranch: { id: number; name: string; branchNo: string; address: string | null; ownPromptpay: boolean; ownBank: boolean } | null;
   /** Shop-wide accounts (edited in POS settings) */
   defaults: { promptpayId: string; bankAccount: BankAccount };
-  org: { name: string; legalName: string | null; taxId: string | null; address: string | null; phone: string | null; vatRegistered: boolean };
+  org: {
+    name: string;
+    legalName: string | null;
+    taxId: string | null;
+    address: string | null;
+    phone: string | null;
+    vatRegistered: boolean;
+    branches: { branchNo: string; address: string | null }[];
+  };
 }
 
 /* ------------------------------------------------------------- Phase 3 */

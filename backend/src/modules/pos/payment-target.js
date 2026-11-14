@@ -44,7 +44,7 @@ function parseAccount(v) {
 async function paymentFor(orgId, branchId) {
   const [settings, branch] = await Promise.all([
     getSettings(orgId),
-    branchId ? db.one('SELECT id, name, promptpay_id, bank_account FROM branches WHERE id = :branchId AND org_id = :orgId', { branchId, orgId }) : null,
+    branchId ? db.one('SELECT id, name, branch_no, address, promptpay_id, bank_account FROM branches WHERE id = :branchId AND org_id = :orgId', { branchId, orgId }) : null,
   ]);
   const ownPromptpay = branch?.promptpay_id || null;
   const ownBank = parseAccount(branch?.bank_account);
@@ -53,7 +53,16 @@ async function paymentFor(orgId, branchId) {
     settings,
     promptpayId: ownPromptpay ?? settings.promptpayId,
     bankAccount: bankAccount ? { ...bankAccount, display: formatAccountNo(bankAccount.number) } : null,
-    branch: branch ? { id: branch.id, name: branch.name, ownPromptpay: Boolean(ownPromptpay), ownBank: Boolean(ownBank) } : null,
+    branch: branch
+      ? {
+          id: branch.id,
+          name: branch.name,
+          branchNo: branch.branch_no,
+          address: branch.address,
+          ownPromptpay: Boolean(ownPromptpay),
+          ownBank: Boolean(ownBank),
+        }
+      : null,
   };
 }
 

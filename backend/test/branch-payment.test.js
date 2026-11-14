@@ -33,14 +33,19 @@ before(async () => {
   admin = as(await cookie('admin@example.com'));
   cashier = as(await cookie('cashier@example.com')); // branch 2, no open shift needed
   original = await db.one(
-    'SELECT b.name, b.promptpay_id, b.bank_account, w.id AS wh_id, w.name AS wh_name FROM branches b JOIN warehouses w ON w.branch_id = b.id WHERE b.id = 2 ORDER BY w.id LIMIT 1',
+    'SELECT b.name, b.branch_no, b.address, b.promptpay_id, b.bank_account, w.id AS wh_id, w.name AS wh_name FROM branches b JOIN warehouses w ON w.branch_id = b.id WHERE b.id = 2 ORDER BY w.id LIMIT 1',
   );
   await db.query("DELETE FROM settings WHERE org_id = 1 AND setting_key IN ('pos.promptpay_id', 'org.bank_account')");
   await db.query('UPDATE pos_shifts SET closed_at = UTC_TIMESTAMP() WHERE user_id = 4 AND closed_at IS NULL');
 });
 
 after(async () => {
-  await db.query('UPDATE branches SET name = :n, promptpay_id = :p, bank_account = :b WHERE id = 2', { n: original.name, p: original.promptpay_id, b: original.bank_account });
+  await db.query('UPDATE branches SET name = :n, address = :a, promptpay_id = :p, bank_account = :b WHERE id = 2', {
+    n: original.name,
+    a: original.address,
+    p: original.promptpay_id,
+    b: original.bank_account,
+  });
   await db.query('UPDATE warehouses SET name = :n WHERE id = :id', { n: original.wh_name, id: original.wh_id });
   await db.query("DELETE FROM settings WHERE org_id = 1 AND setting_key IN ('pos.promptpay_id', 'org.bank_account')");
   await db.pool.end();
@@ -92,6 +97,26 @@ test('a branch with its own accounts charges into them; clearing them falls back
   assert.equal((await cashier.get('/api/pos/settings')).body.data.bankAccount.name, 'ร้านหลัก');
 
   assert.equal((await cashier.patch('/api/org/branches/2', { promptpayId: '0812345678' })).status, 403);
+});
+
+test('POS settings return branch-specific receipt addresses only for the signed-in organization', async () => {
+  const before = await db.query('SELECT id, branch_no AS branchNo, address FROM branches WHERE org_id = 1 AND id IN (1, 2)');
+  const hq = before.find((branch) => branch.id === 1);
+  const otherBranch = before.find((branch) => branch.id === 2);
+  try {
+    await admin.patch('/api/org/branches/1', { address: 'ที่อยู่สำนักงานใหญ่ทดสอบ' });
+    await admin.patch('/api/org/branches/2', { address: 'ที่อยู่สาขาสองทดสอบ' });
+
+    const settings = (await cashier.get('/api/pos/settings')).body.data;
+    assert.equal(settings.paymentBranch.address, 'ที่อยู่สาขาสองทดสอบ');
+    assert.equal(settings.paymentBranch.branchNo, original.branch_no);
+    assert.equal(settings.org.branches.find((branch) => branch.branchNo === hq.branchNo).address, 'ที่อยู่สำนักงานใหญ่ทดสอบ');
+    assert.equal(settings.org.branches.find((branch) => branch.branchNo === otherBranch.branchNo).address, 'ที่อยู่สาขาสองทดสอบ');
+  } finally {
+    for (const branch of before) {
+      await db.query('UPDATE branches SET address = :address WHERE id = :id', { id: branch.id, address: branch.address });
+    }
+  }
 });
 
 test("renaming a branch can rename its warehouse; an automatic warehouse name follows the branch", async () => {

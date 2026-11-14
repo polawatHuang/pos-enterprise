@@ -32,7 +32,7 @@ export function BusinessInfoCard() {
       <CardHeader>
         <CardTitle>ข้อมูลกิจการ</CardTitle>
         <CardDescription>
-          ใช้ในหัวเอกสาร และเป็น &quot;ผู้ให้บริการ / ผู้ควบคุมข้อมูลส่วนบุคคล&quot; ในหน้า{" "}
+          ชื่อกิจการและเลขภาษีใช้ร่วมกันทุกสาขา ส่วนที่อยู่ใบเสร็จ POS ใช้ตามที่อยู่ของสาขาที่ออกบิล (ตั้งค่าได้ที่ สาขาและคลังสินค้า) และใช้เป็น &quot;ผู้ให้บริการ / ผู้ควบคุมข้อมูลส่วนบุคคล&quot; ในหน้า{" "}
           <a href="/terms" target="_blank" className="text-primary hover:underline">
             ข้อกำหนดการใช้บริการ
           </a>{" "}
@@ -65,7 +65,8 @@ function BusinessForm({ org }: { org: Organization }) {
     try {
       await api.put("/org/organization", f);
       await qc.invalidateQueries({ queryKey: ["org", "organization"] });
-      toast.success("บันทึกข้อมูลกิจการแล้ว");
+      await qc.invalidateQueries({ queryKey: ["pos", "settings"] });
+      toast.success("บันทึกแล้ว ใบเสร็จ POS ใบถัดไปจะใช้ข้อมูลนี้ (บิลเดิมไม่เปลี่ยน)");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
     } finally {
