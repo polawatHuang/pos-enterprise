@@ -1,4 +1,4 @@
-# POS Enterprise — Frontend (Next.js 16)
+# POSWITHAI — Frontend (Next.js 16)
 
 Deploy บน **Vercel** · ดูคู่มือเต็มที่ [`../docs/DEPLOY_VERCEL.md`](../docs/DEPLOY_VERCEL.md)
 

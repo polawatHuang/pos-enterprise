@@ -351,7 +351,7 @@ function renderFlex(report, { appUrl = null, scheduleTime = null } = {}) {
     footer.push({ type: 'button', style: 'primary', color: GREEN, height: 'sm', action: { type: 'uri', label: 'ดูรายงานเต็ม', uri: `${appUrl.replace(/\/+$/, '')}/dashboard` } });
   }
   footer.push(
-    txt(scheduleTime ? `ส่งอัตโนมัติทุกวัน ${scheduleTime} น. · ปิดได้ที่ ตั้งค่า › แจ้งเตือน LINE` : 'POS Enterprise', {
+    txt(scheduleTime ? `ส่งอัตโนมัติทุกวัน ${scheduleTime} น. · ปิดได้ที่ ตั้งค่า › แจ้งเตือน LINE` : 'POSWITHAI', {
       size: 'xxs',
       color: GREY,
       align: 'center',

@@ -15,7 +15,7 @@ export function Brand({ collapsed = false, className }: { collapsed?: boolean; c
       </div>
       {!collapsed && (
         <div className="leading-tight">
-          <p className="text-sm font-semibold text-white">POS Enterprise</p>
+          <p className="text-sm font-semibold text-white">POSWITHAI</p>
           <p className="text-[11px] text-sidebar-muted">Commerce OS</p>
         </div>
       )}

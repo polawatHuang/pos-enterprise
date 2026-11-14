@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 
-export const alt = "POS Enterprise — POS, inventory, accounting and AI for growing businesses";
+export const alt = "POSWITHAI — POS, inventory, accounting and AI for growing businesses";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -36,7 +36,7 @@ export default function OpenGraphImage() {
           >
             POS
           </div>
-          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: -0.5 }}>POS Enterprise</div>
+          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: -0.5 }}>POSWITHAI</div>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>

@@ -1,5 +1,5 @@
 -- =====================================================================
--- POS Enterprise — full database schema (all modules)
+-- POSWITHAI — full database schema (all modules)
 -- Compatible with MySQL 8.0+ and MariaDB 10.6+ (phpMyAdmin import)
 --
 -- How to import via phpMyAdmin:

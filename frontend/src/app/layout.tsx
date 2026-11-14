@@ -13,7 +13,7 @@ const plexThai = IBM_Plex_Sans_Thai({
 
 export const metadata: Metadata = {
   metadataBase: siteUrl,
-  title: { default: "POS Enterprise", template: "%s · POS Enterprise" },
+  title: { default: "POSWITHAI", template: "%s · POSWITHAI" },
   description: "ระบบบริหารร้านค้าออนไลน์และหน้าร้านแบบครบวงจร พร้อม AI",
   robots: { index: false, follow: false },
 };

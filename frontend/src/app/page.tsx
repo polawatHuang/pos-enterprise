@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { LandingPage } from "@/components/marketing/landing-page";
 import { siteUrl } from "@/lib/site";
 
-const title = "โปรแกรม POS ร้านค้าปลีกหลายสาขา จัดการสต๊อกและบัญชี | POS Enterprise";
+const title = "โปรแกรม POS ร้านค้าปลีกหลายสาขา จัดการสต๊อกและบัญชี | POSWITHAI";
 const description =
-  "ระบบ POS สำหรับร้านค้าปลีกไทยหลายสาขา เชื่อมขายหน้าร้าน สต๊อก จัดซื้อ บัญชี และทีมงานไว้ในที่เดียว ทดลองใช้ POS Enterprise ฟรี 14 วัน";
+  "ระบบ POS สำหรับร้านค้าปลีกไทยหลายสาขา เชื่อมขายหน้าร้าน สต๊อก จัดซื้อ บัญชี และทีมงานไว้ในที่เดียว ทดลองใช้ POSWITHAI ฟรี 14 วัน";
 const keywords = [
   "โปรแกรม POS",
   "ระบบ POS",
@@ -26,11 +26,11 @@ export const metadata: Metadata = {
   description,
   keywords,
   alternates: { canonical: siteUrl },
-  applicationName: "POS Enterprise",
+  applicationName: "POSWITHAI",
   openGraph: {
     type: "website",
     locale: "th_TH",
-    siteName: "POS Enterprise",
+    siteName: "POSWITHAI",
     title,
     description,
     url: siteUrl,
@@ -39,7 +39,7 @@ export const metadata: Metadata = {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "POS Enterprise — ระบบ POS จัดการร้านค้า สต๊อก และบัญชี",
+        alt: "POSWITHAI — ระบบ POS จัดการร้านค้า สต๊อก และบัญชี",
       },
     ],
   },
@@ -67,20 +67,20 @@ export default function Home() {
     {
       "@context": "https://schema.org",
       "@type": "Organization",
-      name: "POS Enterprise",
+      name: "POSWITHAI",
       url: siteUrl.href,
     },
     {
       "@context": "https://schema.org",
       "@type": "WebSite",
-      name: "POS Enterprise",
+      name: "POSWITHAI",
       url: siteUrl.href,
       inLanguage: "th-TH",
     },
     {
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
-      name: "POS Enterprise",
+      name: "POSWITHAI",
       applicationCategory: "BusinessApplication",
       operatingSystem: "Web",
       inLanguage: "th-TH",
@@ -93,7 +93,7 @@ export default function Home() {
         "จัดการทีมงานและสิทธิ์ผู้ใช้",
         "เครื่องมือ AI สำหรับงานธุรกิจ",
       ],
-      provider: { "@type": "Organization", name: "POS Enterprise", url: siteUrl.href },
+      provider: { "@type": "Organization", name: "POSWITHAI", url: siteUrl.href },
     },
   ];
 

@@ -137,7 +137,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Menu className="size-5" />
           </button>
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <p className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground lg:hidden">{current?.label ?? "POS Enterprise"}</p>
+            <p className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground lg:hidden">{current?.label ?? "POSWITHAI"}</p>
             <SearchTrigger />
           </div>
           <NotificationBell />

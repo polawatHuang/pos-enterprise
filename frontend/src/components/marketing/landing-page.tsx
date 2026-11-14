@@ -41,7 +41,7 @@ const features = [
 
 async function CopyrightNotice() {
   await connection();
-  return <span>© {new Date().getFullYear()} POS Enterprise. All rights reserved.</span>;
+  return <span>© {new Date().getFullYear()} POSWITHAI. All rights reserved.</span>;
 }
 
 function DashboardPreview() {
@@ -160,7 +160,7 @@ export function LandingPage() {
     <main className="landing-page min-h-dvh overflow-hidden text-white">
       <header className="landing-header sticky top-0 z-30 border-b border-white/[.06]">
         <div className="mx-auto flex h-[68px] w-full max-w-7xl items-center justify-between px-4 sm:h-[76px] sm:px-8">
-          <Link href="/" className="flex items-center gap-2.5" aria-label="POS Enterprise หน้าแรก">
+          <Link href="/" className="flex items-center gap-2.5" aria-label="POSWITHAI หน้าแรก">
             <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-violet-400 to-indigo-500 text-white shadow-lg shadow-violet-950/40"><Store className="size-[18px]" /></span>
             <span className="text-sm font-semibold tracking-tight text-white sm:text-base">POS <span className="text-violet-300">Enterprise</span></span>
           </Link>
@@ -324,9 +324,9 @@ export function LandingPage() {
 
       <footer className="border-t border-white/[.06]">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 text-[10px] text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:px-8 sm:text-xs">
-          <Link href="/" className="flex items-center gap-2 font-medium text-slate-400"><span className="grid size-6 place-items-center rounded-md bg-violet-500/20 text-violet-200"><Store className="size-3.5" /></span> POS Enterprise</Link>
+          <Link href="/" className="flex items-center gap-2 font-medium text-slate-400"><span className="grid size-6 place-items-center rounded-md bg-violet-500/20 text-violet-200"><Store className="size-3.5" /></span> POSWITHAI</Link>
           <div className="flex flex-wrap gap-x-4 gap-y-2"><Link className="transition hover:text-slate-300" href="/terms">ข้อกำหนด</Link><Link className="transition hover:text-slate-300" href="/privacy">ความเป็นส่วนตัว</Link><Link className="transition hover:text-slate-300" href="/#pricing">แพ็กเกจ</Link><Link className="transition hover:text-slate-300" href="/login">เข้าสู่ระบบ</Link></div>
-          <Suspense fallback={<span>© POS Enterprise. All rights reserved.</span>}>
+          <Suspense fallback={<span>© POSWITHAI. All rights reserved.</span>}>
             <CopyrightNotice />
           </Suspense>
         </div>

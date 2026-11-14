@@ -1,4 +1,4 @@
-# POS Enterprise
+# POSWITHAI
 
 ระบบบริหารร้านค้าแบบครบวงจรสำหรับองค์กร ครอบคลุม POS, สต๊อก, บัญชีและภาษี, Unified Inbox พร้อม AI ปิดการขาย, AI Video, ตั้งเวลาโพสต์ + Affiliate และ Smart Dashboard
 
