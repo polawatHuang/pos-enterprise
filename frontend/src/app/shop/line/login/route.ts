@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
       httpOnly: true,
       secure: request.nextUrl.protocol === "https:",
       sameSite: "lax" as const,
-      path: "/shop/auth/line/callback",
+      path: "/api/social/oauth/line/callback",
       maxAge: 600,
     };
     next.cookies.set("pe_line_state", body.data.state, cookieOptions);

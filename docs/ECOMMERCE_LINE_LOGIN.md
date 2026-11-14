@@ -3,7 +3,7 @@
 ## Configure LINE Login
 
 1. In LINE Developers, create or select a **LINE Login** channel and set its callback URL to:
-   `https://<your-frontend-domain>/shop/auth/line/callback`
+   `https://<your-frontend-domain>/api/social/oauth/line/callback`
 2. Set these backend environment variables (Plesk → Node.js → Custom environment variables):
    - `APP_PUBLIC_URL`: the frontend origin, such as `https://app.example.com` (no path).
    - `LINE_LOGIN_CHANNEL_ID` and `LINE_LOGIN_CHANNEL_SECRET`: credentials from the LINE Login channel.

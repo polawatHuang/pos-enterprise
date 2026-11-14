@@ -132,7 +132,7 @@ async function beginLineLogin(slug) {
      VALUES (:stateHash, :slug, :codeVerifier, UTC_TIMESTAMP() + INTERVAL 10 MINUTE)`,
     { stateHash: hash(state), slug, codeVerifier },
   );
-  const callback = new URL('/shop/auth/line/callback', env.APP_PUBLIC_URL).toString();
+  const callback = new URL('/api/social/oauth/line/callback', env.APP_PUBLIC_URL).toString();
   const authorize = new URL('https://access.line.me/oauth2/v2.1/authorize');
   authorize.search = new URLSearchParams({
     response_type: 'code',
@@ -163,7 +163,7 @@ async function completeLineLogin({ code, state, proxySecret }) {
     await conn.query('DELETE FROM ecommerce_line_login_states WHERE state_hash = :stateHash', { stateHash: row.state_hash });
     return row;
   });
-  const callback = new URL('/shop/auth/line/callback', env.APP_PUBLIC_URL).toString();
+  const callback = new URL('/api/social/oauth/line/callback', env.APP_PUBLIC_URL).toString();
   let tokenResponse;
   try {
     const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
