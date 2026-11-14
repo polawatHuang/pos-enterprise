@@ -19,11 +19,15 @@ async function applyMovement(
     { warehouseId, productId },
   );
   const [[row]] = await conn.query(
-    `SELECT quantity FROM stock_levels WHERE warehouse_id = :warehouseId AND product_id = :productId AND variant_id = 0 FOR UPDATE`,
+    `SELECT quantity, reserved FROM stock_levels WHERE warehouse_id = :warehouseId AND product_id = :productId AND variant_id = 0 FOR UPDATE`,
     { warehouseId, productId },
   );
   const before = Number(row.quantity);
   const after = before + Number(quantity);
+  if (!allowNegative && after < Number(row.reserved) - 1e-9) {
+    const [[p]] = await conn.query('SELECT name FROM products WHERE id = :productId', { productId });
+    throw conflict(`สต๊อก "${p?.name ?? productId}" มีสินค้า ${Number(row.reserved)} ชิ้นที่ถูกจองสำหรับคำสั่งซื้อออนไลน์`);
+  }
   if (after < 0 && !allowNegative) {
     const [[p]] = await conn.query('SELECT name FROM products WHERE id = :productId', { productId });
     throw conflict(`สต๊อก "${p?.name ?? productId}" ไม่พอ (คงเหลือ ${before})`);

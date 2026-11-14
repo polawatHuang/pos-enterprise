@@ -32,6 +32,7 @@ import {
   PlugZap,
   Share2,
   ShoppingCart,
+  ShoppingBag,
   TrendingUp,
   Truck,
   Hourglass,
@@ -138,6 +139,7 @@ export const navGroups: NavGroup[] = [
   {
     label: "ลูกค้าและการตลาด",
     items: [
+      { href: "/ecommerce", label: "ร้านค้าออนไลน์", icon: ShoppingBag, permission: "pos:manage", phase: 1 },
       { href: "/customers", label: "ลูกค้า", icon: Contact, permission: CUSTOMERS_READ, phase: 1, essential: true },
       { href: "/inbox", label: "แชตลูกค้า + AI", icon: MessagesSquare, permission: "inbox:read", phase: 1 },
       { href: "/inbox/aftersales", label: "คืนสินค้า & ข้อเสนอ", icon: PackageX, permission: "inbox:read", phase: 1 },

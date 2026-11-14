@@ -63,7 +63,7 @@ SET time_zone = '+00:00';
 // ---------------------------------------------------------------- core reference data
 out.push('-- Organization & branches');
 insert('organizations', ['id', 'name', 'legal_name', 'tax_id', 'address', 'phone', 'email'], [
-  [1, 'POS Enterprise Demo', 'บริษัท โพสเอ็นเตอร์ไพรส์ เดโม จำกัด', '0105567000001', '99/9 ถนนพระราม 9 แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพฯ 10310', '02-000-0000', 'hello@example.com'],
+  [1, 'POSWITHAI Demo', 'บริษัท พอสวิทเอไอ เดโม จำกัด', '0105567000001', '99/9 ถนนพระราม 9 แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพฯ 10310', '02-000-0000', 'hello@example.com'],
 ]);
 insert('branches', ['id', 'org_id', 'code', 'name', 'branch_no'], [
   [1, 1, 'HQ', 'สำนักงานใหญ่', '00000'],

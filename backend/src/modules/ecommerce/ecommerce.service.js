@@ -1,0 +1,637 @@
+'use strict';
+
+const crypto = require('node:crypto');
+const db = require('../../db/pool');
+const env = require('../../config/env');
+const { AppError, badRequest, conflict, notFound } = require('../../core/errors');
+const { promptPayPayload, isValidPromptPayId } = require('../../utils/promptpay');
+const { localDate } = require('../../utils/dates');
+const { getTaxSettings } = require('../org/tax');
+const { paymentFor } = require('../pos/payment-target');
+const discounts = require('../pos/discounts');
+const pos = require('../pos/pos.service');
+const { applyMovement } = require('../inventory/inventory.service');
+const { consumeFefo } = require('../inventory/lots');
+const { postJournal, saleLines } = require('../accounting/ledger.service');
+const slip2go = require('../../integrations/slip2go');
+const media = require('../video/media');
+
+const SHIPPING_FEE = 60;
+const ORDER_TTL_MINUTES = 30;
+const r2 = (n) => Math.round(Number(n) * 100) / 100;
+const slipSecret = () => env.SLIP2GO_SECRET_KEY || env.SAAS_SLIP2GO_SECRET_KEY || '';
+
+function validImageSignature(buffer, mimeType) {
+  if (mimeType === 'image/jpeg') return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  if (mimeType === 'image/png') return buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  if (mimeType === 'image/webp') return buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
+  return false;
+}
+
+function normalizeItems(items) {
+  const grouped = new Map();
+  for (const item of items) {
+    grouped.set(item.productId, (grouped.get(item.productId) ?? 0) + item.quantity);
+  }
+  if (Array.from(grouped.values()).some((quantity) => quantity > 99)) throw badRequest('สินค้าแต่ละรายการสั่งได้ไม่เกิน 99 ชิ้น');
+  return Array.from(grouped, ([productId, quantity]) => ({ productId, quantity }));
+}
+
+function amountForCode(check, subtotal) {
+  if (!check.valid || check.code?.customerId) return 0;
+  return r2(Math.min(subtotal, Number(check.amount)));
+}
+
+async function storeBySlug(slug, { enabled = true } = {}) {
+  const row = await db.one(
+    `SELECT s.org_id, s.slug, s.warehouse_id, s.is_enabled, o.name AS store_name,
+            w.branch_id, w.name AS warehouse_name
+       FROM ecommerce_stores s
+       JOIN organizations o ON o.id = s.org_id
+       LEFT JOIN warehouses w ON w.id = s.warehouse_id AND w.org_id = s.org_id
+      WHERE s.slug = :slug ${enabled ? 'AND s.is_enabled = 1' : ''}`,
+    { slug },
+  );
+  if (!row) throw notFound('ไม่พบร้านค้าออนไลน์');
+  return row;
+}
+
+async function ensureStore(orgId) {
+  let store = await db.one('SELECT org_id, slug, warehouse_id, is_enabled FROM ecommerce_stores WHERE org_id = :orgId', { orgId });
+  if (store) return store;
+  await db.query(
+    `INSERT IGNORE INTO ecommerce_stores (org_id, slug, warehouse_id, is_enabled)
+     SELECT :orgId, CONCAT('store-', :orgId), (SELECT id FROM warehouses WHERE org_id = :orgId ORDER BY id LIMIT 1), 0
+      FROM organizations WHERE id = :orgId`,
+    { orgId },
+  );
+  store = await db.one('SELECT org_id, slug, warehouse_id, is_enabled FROM ecommerce_stores WHERE org_id = :orgId', { orgId });
+  if (!store) throw notFound('ไม่พบข้อมูลองค์กร');
+  return store;
+}
+
+async function paymentSetup(orgId, branchId) {
+  const payment = await paymentFor(orgId, branchId);
+  const promptpayId = payment.promptpayId ? String(payment.promptpayId).replace(/[\s-]/g, '') : '';
+  return {
+    promptpayId,
+    ready: Boolean(slipSecret() && isValidPromptPayId(promptpayId)),
+  };
+}
+
+async function publicStore(slug) {
+  const store = await storeBySlug(slug);
+  await db.tx((conn) => expirePendingOrders(conn, store.org_id));
+  const setup = await paymentSetup(store.org_id, store.branch_id);
+  const products = store.warehouse_id
+    ? await db.query(
+        `SELECT p.id, p.sku, p.name, p.description, p.image_url, p.price, p.unit,
+                c.name AS category_name, (sl.quantity - sl.reserved) AS available
+           FROM products p
+           JOIN stock_levels sl ON sl.product_id = p.id AND sl.warehouse_id = :warehouseId AND sl.variant_id = 0
+           LEFT JOIN product_categories c ON c.id = p.category_id
+          WHERE p.org_id = :orgId AND p.status = 'active' AND p.open_price = 0
+            AND (c.age_restricted IS NULL OR c.age_restricted = 0)
+            AND sl.quantity > sl.reserved
+          ORDER BY c.sort_order, p.name`,
+        { orgId: store.org_id, warehouseId: store.warehouse_id },
+      )
+    : [];
+  return {
+    store: { name: store.store_name, slug: store.slug, warehouseName: store.warehouse_name },
+    shippingFee: SHIPPING_FEE,
+    paymentReady: setup.ready,
+    products: products.map((p) => ({
+      id: Number(p.id),
+      sku: p.sku,
+      name: p.name,
+      description: p.description,
+      imageUrl: p.image_url,
+      price: Number(p.price),
+      unit: p.unit,
+      category: p.category_name,
+      available: Number(p.available),
+    })),
+  };
+}
+
+async function quote(slug, { items: rawItems, code = '' }) {
+  const store = await storeBySlug(slug);
+  await db.tx((conn) => expirePendingOrders(conn, store.org_id));
+  const items = normalizeItems(rawItems);
+  if (!store.warehouse_id) throw badRequest('ร้านยังไม่ได้เลือกคลังจัดส่ง');
+  const products = await db.query(
+    `SELECT p.id, p.name, p.price, p.status, p.open_price,
+            (sl.quantity - sl.reserved) AS available
+       FROM products p JOIN stock_levels sl
+         ON sl.product_id = p.id AND sl.warehouse_id = :warehouseId AND sl.variant_id = 0
+      WHERE p.org_id = :orgId AND p.id IN (:ids)`,
+    { orgId: store.org_id, warehouseId: store.warehouse_id, ids: items.map((i) => i.productId) },
+  );
+  const byId = new Map(products.map((p) => [Number(p.id), p]));
+  let subtotal = 0;
+  for (const item of items) {
+    const p = byId.get(item.productId);
+    if (!p || p.status !== 'active' || p.open_price) throw badRequest('มีสินค้าที่ไม่พร้อมจำหน่ายในตะกร้า');
+    if (item.quantity > Number(p.available)) throw conflict(`สินค้า "${p.name}" เหลือไม่พอ`);
+    subtotal += Number(p.price) * item.quantity;
+  }
+  subtotal = r2(subtotal);
+  let coupon = { valid: false, reason: null, amount: 0 };
+  if (code.trim()) {
+    const checked = await discounts.check(store.org_id, code, { subtotal, customerId: 0 });
+    coupon = { valid: checked.valid && !checked.code?.customerId, reason: checked.reason, amount: amountForCode(checked, subtotal) };
+    if (checked.valid && checked.code?.customerId) coupon.reason = 'โค้ดนี้สำหรับสมาชิกเฉพาะราย ไม่สามารถใช้กับร้านค้าออนไลน์ได้';
+  }
+  return {
+    subtotal,
+    discount: coupon.amount,
+    shippingFee: SHIPPING_FEE,
+    total: r2(subtotal - coupon.amount + SHIPPING_FEE),
+    coupon,
+  };
+}
+
+async function adminStore(orgId) {
+  const store = await ensureStore(orgId);
+  const [warehouses, warehouse] = await Promise.all([
+    db.query('SELECT id, name, branch_id FROM warehouses WHERE org_id = :orgId ORDER BY id', { orgId }),
+    store.warehouse_id
+      ? db.one('SELECT w.id, w.name, w.branch_id FROM warehouses w WHERE w.id = :id AND w.org_id = :orgId', { id: store.warehouse_id, orgId })
+      : null,
+  ]);
+  const payment = await paymentSetup(orgId, warehouse?.branch_id ?? null);
+  return {
+    slug: store.slug,
+    enabled: Boolean(store.is_enabled),
+    warehouseId: store.warehouse_id == null ? null : Number(store.warehouse_id),
+    warehouseName: warehouse?.name ?? null,
+    warehouses: warehouses.map((w) => ({ id: Number(w.id), name: w.name, branchId: w.branch_id == null ? null : Number(w.branch_id) })),
+    paymentReady: payment.ready,
+    paymentIssues: [
+      ...(!payment.promptpayId ? ['กรุณาตั้งค่า PromptPay ใน POS > ตั้งค่าการชำระเงิน หรือในหน้าสาขา'] : []),
+      ...(payment.promptpayId && !isValidPromptPayId(payment.promptpayId) ? ['PromptPay ID ไม่ถูกต้อง กรุณาตรวจสอบการตั้งค่ารับชำระ'] : []),
+      ...(!slipSecret() ? ['เซิร์ฟเวอร์ยังไม่ได้ตั้งค่า SLIP2GO_SECRET_KEY'] : []),
+    ],
+  };
+}
+
+async function updateAdminStore(orgId, { enabled, warehouseId }) {
+  const store = await ensureStore(orgId);
+  const nextWarehouse = warehouseId === undefined ? store.warehouse_id : warehouseId;
+  const nextEnabled = enabled === undefined ? Boolean(store.is_enabled) : enabled;
+  if (nextEnabled && !nextWarehouse) throw badRequest('ก่อนเปิดร้าน กรุณาเลือกคลังจัดส่ง');
+  if (nextWarehouse != null) {
+    const found = await db.one('SELECT id, branch_id FROM warehouses WHERE id = :id AND org_id = :orgId', { id: nextWarehouse, orgId });
+    if (!found) throw badRequest('ไม่พบคลังจัดส่งในองค์กรนี้');
+    if (nextEnabled && !(await paymentSetup(orgId, found.branch_id)).ready) {
+      throw badRequest('ก่อนเปิดร้าน กรุณาตั้งค่า PromptPay ของร้านและ SLIP2GO_SECRET_KEY บนเซิร์ฟเวอร์ให้พร้อม');
+    }
+  }
+  await db.query(
+    `UPDATE ecommerce_stores SET warehouse_id = :warehouseId, is_enabled = :enabled WHERE org_id = :orgId`,
+    { orgId, warehouseId: nextWarehouse ?? null, enabled: Number(nextEnabled) },
+  );
+  return adminStore(orgId);
+}
+
+async function expirePendingOrders(conn, orgId) {
+  const [expired] = await conn.query(
+    `SELECT e.sales_order_id, e.warehouse_id, so.discount_code_id
+       FROM ecommerce_order_details e JOIN sales_orders so ON so.id = e.sales_order_id
+      WHERE e.org_id = :orgId AND e.payment_status = 'pending' AND e.expires_at <= UTC_TIMESTAMP()
+      FOR UPDATE`,
+    { orgId },
+  );
+  for (const e of expired) {
+    const [items] = await conn.query('SELECT product_id, quantity FROM sales_order_items WHERE order_id = :id ORDER BY product_id', { id: e.sales_order_id });
+    for (const item of items) {
+      await conn.query(
+        `UPDATE stock_levels sl JOIN sales_orders so ON so.id = :orderId AND so.org_id = :orgId
+            SET sl.reserved = GREATEST(sl.reserved - :qty, 0)
+          WHERE sl.product_id = :productId AND sl.variant_id = 0
+            AND sl.warehouse_id = :warehouseId`,
+        { orderId: e.sales_order_id, orgId, warehouseId: e.warehouse_id, qty: Number(item.quantity), productId: item.product_id },
+      );
+    }
+    if (e.discount_code_id) await conn.query('UPDATE discount_codes SET used_count = GREATEST(used_count - 1, 0) WHERE id = :id', { id: e.discount_code_id });
+    await conn.query("UPDATE ecommerce_order_details SET payment_status = 'expired' WHERE sales_order_id = :id", { id: e.sales_order_id });
+    await conn.query("UPDATE sales_orders SET status = 'cancelled' WHERE id = :id AND status = 'pending'", { id: e.sales_order_id });
+  }
+}
+
+async function createOrder(slug, input) {
+  const store = await storeBySlug(slug);
+  if (!store.warehouse_id) throw badRequest('ร้านยังไม่ได้เลือกคลังจัดส่ง');
+  const setup = await paymentSetup(store.org_id, store.branch_id);
+  if (!setup.ready) throw new AppError(503, 'ECOMMERCE_PAYMENT_NOT_READY', 'ร้านยังไม่ได้ตั้งค่ารับชำระผ่าน PromptPay และ Slip2Go');
+  const items = normalizeItems(input.items);
+  const tax = await getTaxSettings(store.org_id);
+  const publicToken = crypto.randomBytes(32).toString('base64url');
+  const receiptToken = crypto.randomBytes(16).toString('base64url');
+  const shortRef = crypto.randomBytes(4).toString('hex').toUpperCase();
+  const draftOrderNo = `WEB-${Date.now()}-${shortRef}`;
+
+  const created = await db.tx(async (conn) => {
+    await expirePendingOrders(conn, store.org_id);
+    const [products] = await conn.query(
+      `SELECT p.id, p.name, p.price, p.cost, p.vat_type, p.status, p.open_price, sl.quantity, sl.reserved
+         FROM products p JOIN stock_levels sl
+           ON sl.product_id = p.id AND sl.warehouse_id = :warehouseId AND sl.variant_id = 0
+        WHERE p.org_id = :orgId AND p.id IN (:ids) FOR UPDATE`,
+      { orgId: store.org_id, warehouseId: store.warehouse_id, ids: items.map((i) => i.productId) },
+    );
+    const byId = new Map(products.map((p) => [Number(p.id), p]));
+    const lines = items.map((item) => {
+      const product = byId.get(item.productId);
+      if (!product || product.status !== 'active' || product.open_price) throw badRequest('มีสินค้าที่ไม่พร้อมจำหน่ายในตะกร้า');
+      const available = Number(product.quantity) - Number(product.reserved);
+      if (item.quantity > available) throw conflict(`สินค้า "${product.name}" เหลือไม่พอ`);
+      return {
+        ...item,
+        name: product.name,
+        unitPrice: Number(product.price),
+        unitCost: Number(product.cost),
+        vatType: product.vat_type,
+        lineTotal: r2(Number(product.price) * item.quantity),
+      };
+    });
+    const subtotal = r2(lines.reduce((sum, line) => sum + line.lineTotal, 0));
+    let codeId = null;
+    let codeDiscount = 0;
+    if (input.discountCode?.trim()) {
+      const redeemed = await discounts.redeemInTx(conn, store.org_id, input.discountCode, { subtotal, customerId: 0 });
+      if (redeemed.code.customer_id) throw badRequest('โค้ดนี้สำหรับสมาชิกเฉพาะราย ไม่สามารถใช้กับร้านค้าออนไลน์ได้');
+      codeId = redeemed.code.id;
+      codeDiscount = r2(Math.min(subtotal, redeemed.amount));
+    }
+    const totals = pos.computeTotals(lines, codeDiscount, tax);
+    const shippingVat = tax.vatRegistered ? r2((SHIPPING_FEE * tax.vatRate) / (100 + tax.vatRate)) : 0;
+    const shippingTotal = r2(totals.total + SHIPPING_FEE);
+    const [sale] = await conn.query(
+      `INSERT INTO sales_orders
+         (org_id, branch_id, order_no, receipt_token, channel, status, subtotal, discount, shipping_fee, vat_amount,
+          total, cost_total, discount_code_id, code_discount, ordered_at)
+       VALUES (:orgId, :branchId, :orderNo, :receiptToken, 'website', 'pending', :subtotal, :discount, :shippingFee,
+               :vat, :total, :cost, :codeId, :codeDiscount, UTC_TIMESTAMP())`,
+      {
+        orgId: store.org_id,
+        branchId: store.branch_id,
+        orderNo: draftOrderNo,
+        receiptToken,
+        subtotal: totals.subtotal,
+        discount: codeDiscount,
+        shippingFee: SHIPPING_FEE,
+        vat: r2(totals.vat + shippingVat),
+        total: shippingTotal,
+        cost: totals.cost,
+        codeId,
+        codeDiscount,
+      },
+    );
+    const salesOrderId = sale.insertId;
+    const orderNo = `WEB-${String(salesOrderId).padStart(9, '0')}`;
+    await conn.query('UPDATE sales_orders SET order_no = :orderNo WHERE id = :id', { orderNo, id: salesOrderId });
+    for (const line of lines) {
+      await conn.query(
+        `INSERT INTO sales_order_items
+           (order_id, product_id, variant_id, name, unit_factor, quantity, unit_price, unit_cost, discount, line_total)
+         VALUES (:orderId, :productId, 0, :name, 1, :quantity, :unitPrice, :unitCost, 0, :lineTotal)`,
+        { orderId: salesOrderId, ...line },
+      );
+      await conn.query(
+        `UPDATE stock_levels SET reserved = reserved + :quantity
+          WHERE warehouse_id = :warehouseId AND product_id = :productId AND variant_id = 0`,
+        { warehouseId: store.warehouse_id, productId: line.productId, quantity: line.quantity },
+      );
+    }
+    await conn.query(
+      `INSERT INTO ecommerce_order_details
+         (sales_order_id, org_id, warehouse_id, public_token, customer_name, phone, email, shipping_address, postal_code, customer_note, expires_at)
+       VALUES (:salesOrderId, :orgId, :warehouseId, :token, :name, :phone, :email, :address, :postalCode, :note,
+               UTC_TIMESTAMP() + INTERVAL :ttl MINUTE)`,
+      {
+        salesOrderId,
+        orgId: store.org_id,
+        warehouseId: store.warehouse_id,
+        token: publicToken,
+        name: input.customerName,
+        phone: input.phone,
+        email: input.email ?? null,
+        address: input.address,
+        postalCode: input.postalCode,
+        note: input.note ?? null,
+        ttl: ORDER_TTL_MINUTES,
+      },
+    );
+    await conn.query(
+      `INSERT IGNORE INTO notifications (org_id, type, severity, title, body, link, permission, ref_key)
+       VALUES (:orgId, 'ecommerce_order', 'info', 'มีคำสั่งซื้อใหม่', :body, '/ecommerce', 'pos:manage', :refKey)`,
+      { orgId: store.org_id, body: `${orderNo} · ${input.customerName} · ${shippingTotal.toLocaleString('th-TH')} บาท`, refKey: `ecommerce:${salesOrderId}` },
+    );
+    return {
+      id: salesOrderId,
+      orderNo,
+      token: publicToken,
+      total: shippingTotal,
+      subtotal: totals.subtotal,
+      discount: codeDiscount,
+      shippingFee: SHIPPING_FEE,
+    };
+  });
+  const qrPayload = promptPayPayload(setup.promptpayId, created.total);
+  const expiry = await db.one('SELECT expires_at FROM ecommerce_order_details WHERE sales_order_id = :id', { id: created.id });
+  return {
+    ...created,
+    expiresAt: expiry?.expires_at ?? null,
+    qrPayload,
+    trackPath: `/shop/${slug}/track/${created.token}`,
+  };
+}
+
+async function tracking(slug, token) {
+  const store = await storeBySlug(slug, { enabled: false });
+  const order = await db.one(
+    `SELECT so.id, so.order_no, so.status, so.subtotal, so.discount, so.shipping_fee, so.total, so.ordered_at,
+            e.public_token, e.customer_name, e.payment_status, e.expires_at, e.shipment_note, e.shipped_at, e.warehouse_id,
+            e.org_id, e.sales_order_id, e.postal_code
+       FROM ecommerce_order_details e JOIN sales_orders so ON so.id = e.sales_order_id
+      WHERE e.org_id = :orgId AND e.public_token = :token`,
+    { orgId: store.org_id, token },
+  );
+  if (!order) throw notFound('ไม่พบคำสั่งซื้อ');
+  if (order.payment_status === 'pending' && new Date(order.expires_at) <= new Date()) {
+    await db.tx((conn) => expirePendingOrders(conn, store.org_id));
+    return tracking(slug, token);
+  }
+  const [items, warehouse] = await Promise.all([
+    db.query('SELECT name, quantity, unit_price, line_total FROM sales_order_items WHERE order_id = :id ORDER BY id', { id: order.id }),
+    db.one('SELECT w.branch_id FROM warehouses w WHERE w.id = :warehouseId AND w.org_id = :orgId', { warehouseId: order.warehouse_id, orgId: store.org_id }),
+  ]);
+  let qrPayload = null;
+  if (order.payment_status === 'pending') {
+    const setup = await paymentSetup(store.org_id, warehouse?.branch_id ?? null);
+    if (setup.ready) qrPayload = promptPayPayload(setup.promptpayId, Number(order.total));
+  }
+  return {
+    orderNo: order.order_no,
+    status: order.payment_status === 'expired' ? 'expired' : order.status,
+    paymentStatus: order.payment_status,
+    customerName: order.customer_name,
+    subtotal: Number(order.subtotal),
+    discount: Number(order.discount),
+    shippingFee: Number(order.shipping_fee),
+    total: Number(order.total),
+    orderedAt: order.ordered_at,
+    expiresAt: order.expires_at,
+    shipmentNote: order.shipment_note,
+    shippedAt: order.shipped_at,
+    qrPayload,
+    items: items.map((i) => ({ name: i.name, quantity: Number(i.quantity), unitPrice: Number(i.unit_price), total: Number(i.line_total) })),
+  };
+}
+
+async function verifySlip(slug, token, { mimeType, imageBase64 }) {
+  const store = await storeBySlug(slug, { enabled: false });
+  const order = await db.one(
+    `SELECT e.sales_order_id, e.warehouse_id, e.payment_status, e.expires_at, so.org_id, so.total, so.order_no, so.status, so.vat_amount, so.cost_total
+       FROM ecommerce_order_details e JOIN sales_orders so ON so.id = e.sales_order_id
+      WHERE e.org_id = :orgId AND e.public_token = :token`,
+    { orgId: store.org_id, token },
+  );
+  if (!order) throw notFound('ไม่พบคำสั่งซื้อ');
+  if (order.payment_status !== 'pending' || order.status !== 'pending') throw conflict('คำสั่งซื้อนี้ไม่อยู่ในสถานะรอชำระเงิน');
+  if (new Date(order.expires_at) <= new Date()) {
+    await db.tx((conn) => expirePendingOrders(conn, store.org_id));
+    throw conflict('รายการชำระเงินหมดอายุแล้ว กรุณาติดต่อร้านค้าก่อนโอนเงิน');
+  }
+  if (!slipSecret()) throw new AppError(503, 'SLIP2GO_NOT_CONFIGURED', 'ร้านค้ายังไม่ได้ตั้งค่าตรวจสอบสลิป Slip2Go');
+  const imageBuffer = Buffer.from(imageBase64, 'base64');
+  if (!imageBuffer.length || imageBuffer.length > 5 * 1024 * 1024 || !validImageSignature(imageBuffer, mimeType)) {
+    throw badRequest('ไฟล์สลิปไม่ถูกต้อง หรือมีขนาดใหญ่เกิน 5 MB');
+  }
+  const result = await slip2go.verifySlipByImage({
+    secretKey: slipSecret(),
+    imageBuffer,
+    mimeType,
+    expectedAmount: Number(order.total),
+  });
+  if (!result.verified) return { verified: false, status: 'pending', message: result.message, code: result.code };
+
+  const key = media.saveFile(imageBuffer, mimeType);
+  try {
+    await db.tx(async (conn) => {
+      const [[locked]] = await conn.query(
+        `SELECT e.sales_order_id, e.warehouse_id, e.org_id, e.payment_status, e.expires_at, e.customer_name,
+                so.status, so.order_no, so.total, so.vat_amount, so.cost_total, so.branch_id, so.customer_id
+           FROM ecommerce_order_details e JOIN sales_orders so ON so.id = e.sales_order_id
+          WHERE e.sales_order_id = :id AND e.org_id = :orgId FOR UPDATE`,
+        { id: order.sales_order_id, orgId: store.org_id },
+      );
+      if (!locked || locked.payment_status !== 'pending' || locked.status !== 'pending') throw conflict('คำสั่งซื้อนี้ได้รับการชำระเงินแล้วหรือหมดอายุ');
+      if (new Date(locked.expires_at) <= new Date()) throw conflict('รายการชำระเงินหมดอายุแล้ว');
+      const [lines] = await conn.query(
+        `SELECT i.product_id, i.name, i.quantity, i.unit_price, i.unit_cost, i.line_total, p.track_expiry
+           FROM sales_order_items i JOIN products p ON p.id = i.product_id WHERE i.order_id = :id ORDER BY i.product_id FOR UPDATE`,
+        { id: order.sales_order_id },
+      );
+      const warehouseId = locked.warehouse_id;
+      if (!warehouseId) throw badRequest('ไม่พบคลังจัดส่งของร้าน');
+      for (const line of lines) {
+        const qty = Number(line.quantity);
+        const allocations = await consumeFefo(conn, { warehouseId, productId: line.product_id, qty, forSale: true });
+        await conn.query(
+          `UPDATE stock_levels SET reserved = GREATEST(reserved - :qty, 0)
+            WHERE warehouse_id = :warehouseId AND product_id = :productId AND variant_id = 0`,
+          { warehouseId, productId: line.product_id, qty },
+        );
+        await conn.query('UPDATE sales_order_items SET lot_allocations = :alloc WHERE order_id = :orderId AND product_id = :productId', {
+          alloc: allocations.length ? JSON.stringify(allocations) : null,
+          orderId: order.sales_order_id,
+          productId: line.product_id,
+        });
+        await applyMovement(conn, {
+          orgId: store.org_id,
+          warehouseId,
+          productId: line.product_id,
+          quantity: -qty,
+          type: 'sale',
+          refType: 'sales_order',
+          refId: order.sales_order_id,
+          note: 'ขายผ่าน E-commerce',
+        });
+      }
+      await conn.query("UPDATE sales_orders SET status = 'paid' WHERE id = :id", { id: order.sales_order_id });
+      await conn.query(
+        `UPDATE ecommerce_order_details SET payment_status = 'paid', slip_storage_key = :key
+          WHERE sales_order_id = :id`,
+        { id: order.sales_order_id, key },
+      );
+      await conn.query(
+        `INSERT INTO payments (org_id, order_id, method, amount, reference)
+         VALUES (:orgId, :orderId, 'promptpay', :amount, :reference)`,
+        { orgId: store.org_id, orderId: order.sales_order_id, amount: Number(locked.total), reference: `Slip2Go ${locked.order_no}` },
+      );
+      await conn.query(
+        `INSERT INTO payment_slips (org_id, trans_ref, amount, order_id, raw)
+         VALUES (:orgId, :ref, :amount, :orderId, :raw)`,
+        {
+          orgId: store.org_id,
+          ref: `WEB-${order.sales_order_id}`,
+          amount: Number(locked.total),
+          orderId: order.sales_order_id,
+          raw: JSON.stringify({ provider: 'slip2go', code: result.code }),
+        },
+      );
+      if (locked.customer_id) {
+        await conn.query('UPDATE customers SET total_spent = total_spent + :total, order_count = order_count + 1 WHERE id = :id', {
+          total: Number(locked.total),
+          id: locked.customer_id,
+        });
+      }
+      await postJournal(conn, {
+        orgId: store.org_id,
+        date: localDate(),
+        description: `ขายออนไลน์ ${locked.order_no}`,
+        refType: 'sales_order',
+        refId: order.sales_order_id,
+        lines: saleLines({
+          total: Number(locked.total),
+          vat: Number(locked.vat_amount),
+          cost: Number(locked.cost_total),
+          payments: [{ method: 'promptpay', amount: Number(locked.total) }],
+        }),
+      });
+    });
+  } catch (err) {
+    media.removeFile(key);
+    throw err;
+  }
+  return { verified: true, status: 'paid', message: result.message };
+}
+
+function mapAdminOrder(row) {
+  return {
+    id: Number(row.id),
+    orderNo: row.order_no,
+    status: row.status,
+    paymentStatus: row.payment_status,
+    customerName: row.customer_name,
+    phone: row.phone,
+    total: Number(row.total),
+    itemCount: Number(row.item_count),
+    createdAt: row.ordered_at,
+    shippedAt: row.shipped_at,
+  };
+}
+
+async function adminOrders(orgId, { status = 'all', q = '' } = {}) {
+  await db.tx((conn) => expirePendingOrders(conn, orgId));
+  const statuses = ['pending', 'paid', 'packed', 'shipped', 'completed', 'cancelled'];
+  const rows = await db.query(
+    `SELECT so.id, so.order_no, so.status, so.total, so.ordered_at, e.payment_status, e.customer_name, e.phone, e.shipped_at,
+            (SELECT COUNT(*) FROM sales_order_items i WHERE i.order_id = so.id) AS item_count
+       FROM sales_orders so JOIN ecommerce_order_details e ON e.sales_order_id = so.id
+      WHERE so.org_id = :orgId AND (:status = 'all' OR so.status = :status)
+        AND (:q = '' OR so.order_no LIKE :search OR e.customer_name LIKE :search OR e.phone LIKE :search)
+      ORDER BY so.id DESC LIMIT 100`,
+    { orgId, status: statuses.includes(status) ? status : 'all', q, search: `%${q}%` },
+  );
+  return rows.map(mapAdminOrder);
+}
+
+async function adminOrder(orgId, id) {
+  const row = await db.one(
+    `SELECT so.*, e.customer_name, e.phone, e.email, e.shipping_address, e.postal_code, e.customer_note,
+            e.payment_status, e.shipment_note, e.shipped_at, e.slip_storage_key, e.shipment_evidence_key
+       FROM sales_orders so JOIN ecommerce_order_details e ON e.sales_order_id = so.id
+      WHERE so.org_id = :orgId AND so.id = :id`,
+    { orgId, id },
+  );
+  if (!row) throw notFound('ไม่พบคำสั่งซื้อ');
+  const items = await db.query('SELECT product_id, name, quantity, unit_price, line_total FROM sales_order_items WHERE order_id = :id ORDER BY id', { id });
+  return {
+    ...mapAdminOrder({ ...row, item_count: items.length }),
+    subtotal: Number(row.subtotal),
+    discount: Number(row.discount),
+    shippingFee: Number(row.shipping_fee),
+    address: row.shipping_address,
+    postalCode: row.postal_code,
+    email: row.email,
+    note: row.customer_note,
+    shipmentNote: row.shipment_note,
+    paymentReference: row.order_no,
+    items: items.map((i) => ({ productId: Number(i.product_id), name: i.name, quantity: Number(i.quantity), unitPrice: Number(i.unit_price), total: Number(i.line_total) })),
+    hasSlip: Boolean(row.slip_storage_key),
+    hasShipmentEvidence: Boolean(row.shipment_evidence_key),
+  };
+}
+
+async function updateOrderStatus(orgId, userId, id, { status, evidence, mimeType, note }) {
+  let key = null;
+  if (status === 'shipped') {
+    const buffer = Buffer.from(evidence ?? '', 'base64');
+    if (!buffer.length || buffer.length > 5 * 1024 * 1024 || !validImageSignature(buffer, mimeType)) {
+      throw badRequest('กรุณาแนบหลักฐานการจัดส่งเป็นรูปภาพ JPEG, PNG หรือ WebP ขนาดไม่เกิน 5 MB');
+    }
+    key = media.saveFile(buffer, mimeType);
+  }
+  try {
+    await db.tx(async (conn) => {
+      const [[order]] = await conn.query(
+        `SELECT so.status FROM sales_orders so JOIN ecommerce_order_details e ON e.sales_order_id = so.id
+          WHERE so.org_id = :orgId AND so.id = :id FOR UPDATE`,
+        { orgId, id },
+      );
+      if (!order) throw notFound('ไม่พบคำสั่งซื้อ');
+      if (status === 'packed') {
+        if (order.status !== 'paid' && order.status !== 'packed') throw conflict('เริ่มแพ็กได้เฉพาะคำสั่งซื้อที่ชำระเงินแล้ว');
+        await conn.query("UPDATE sales_orders SET status = 'packed' WHERE id = :id", { id });
+      } else {
+        if (order.status !== 'paid' && order.status !== 'packed') throw conflict('จัดส่งได้เฉพาะคำสั่งซื้อที่ชำระเงินแล้ว');
+        await conn.query("UPDATE sales_orders SET status = 'shipped' WHERE id = :id", { id });
+        await conn.query(
+          `UPDATE ecommerce_order_details SET shipment_evidence_key = :key, shipment_note = :note,
+                  shipped_at = UTC_TIMESTAMP(), shipped_by = :userId WHERE sales_order_id = :id`,
+          { id, key, note: note || null, userId },
+        );
+      }
+    });
+  } catch (err) {
+    if (key) media.removeFile(key);
+    throw err;
+  }
+  return adminOrder(orgId, id);
+}
+
+async function readAdminFile(orgId, id, kind) {
+  const column = kind === 'slip' ? 'slip_storage_key' : kind === 'shipment' ? 'shipment_evidence_key' : null;
+  if (!column) throw notFound('ไม่พบไฟล์');
+  const row = await db.one(
+    `SELECT e.${column} AS storage_key FROM ecommerce_order_details e
+      WHERE e.org_id = :orgId AND e.sales_order_id = :id`,
+    { orgId, id },
+  );
+  const file = row?.storage_key && media.filePath(row.storage_key);
+  if (!file) throw notFound('ไม่พบไฟล์');
+  const mime = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[media.extOf(row.storage_key)];
+  return { file, mime };
+}
+
+module.exports = {
+  SHIPPING_FEE,
+  ORDER_TTL_MINUTES,
+  validImageSignature,
+  normalizeItems,
+  publicStore,
+  quote,
+  adminStore,
+  updateAdminStore,
+  createOrder,
+  tracking,
+  verifySlip,
+  adminOrders,
+  adminOrder,
+  updateOrderStatus,
+  readAdminFile,
+};

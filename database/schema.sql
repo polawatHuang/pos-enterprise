@@ -20,7 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Drop (reverse dependency order) — safe re-import on an empty install.
 -- WARNING: re-importing this file DELETES ALL DATA.
 -- ---------------------------------------------------------------------
-DROP TABLE IF EXISTS drama_style_previews, drama_episodes, drama_shots, drama_characters, drama_projects, data_requests, trend_product_extras, trend_product_months, trend_categories, leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
+DROP TABLE IF EXISTS drama_style_previews, drama_episodes, drama_shots, drama_characters, drama_projects, data_requests, trend_product_extras, trend_product_months, trend_categories, leave_requests, payroll_remittances, payroll_items, payroll_runs, employees, payment_voucher_items, payment_vouchers, supplier_bills, purchase_request_items, purchase_requests, petty_cash_topups, billing_note_items, stock_documents, payment_intents, tax_invoice_requests, welfare_request_items, welfare_requests, pos_promotion_items, pos_promotion_branches, pos_promotions, sales_return_items, sales_returns, ecommerce_order_details, ecommerce_stores, app_config, stock_lots, stock_transfer_items, stock_transfers, notification_reads, notifications, stock_count_items, stock_counts, payment_slips, cash_movements, held_bills, product_units, cover_assets, cover_projects, document_sequences, channel_profiles, trend_category_benchmarks, trending_snapshots, scrape_runs, trending_products, scrape_sources,
   post_results, scheduled_posts, video_media, video_assets, video_projects, affiliate_links, social_accounts,
   ai_offers, disputes, returns, messages, conversations, ai_agent_profiles, channels,
   tax_reports, document_items, documents, transactions, journal_lines, journal_entries, chart_of_accounts,
@@ -349,6 +349,18 @@ CREATE TABLE stock_levels (
   CONSTRAINT fk_sl_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE ecommerce_stores (
+  org_id       BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  slug         VARCHAR(120) NOT NULL,
+  warehouse_id BIGINT UNSIGNED NULL,
+  is_enabled   TINYINT(1) NOT NULL DEFAULT 0,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_ecommerce_store_slug (slug),
+  CONSTRAINT fk_ecommerce_store_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ecommerce_store_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE stock_lots (
   id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   org_id        BIGINT UNSIGNED NOT NULL,
@@ -655,6 +667,35 @@ CREATE TABLE sales_order_items (
   KEY idx_soi_promo (promotion_id),
   CONSTRAINT fk_soi_order FOREIGN KEY (order_id) REFERENCES sales_orders(id) ON DELETE CASCADE,
   CONSTRAINT fk_soi_product FOREIGN KEY (product_id) REFERENCES products(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE ecommerce_order_details (
+  sales_order_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  org_id         BIGINT UNSIGNED NOT NULL,
+  warehouse_id   BIGINT UNSIGNED NOT NULL,
+  public_token   CHAR(43) NOT NULL,
+  customer_name  VARCHAR(191) NOT NULL,
+  phone          VARCHAR(50) NOT NULL,
+  email          VARCHAR(191) NULL,
+  shipping_address TEXT NOT NULL,
+  postal_code    VARCHAR(12) NOT NULL,
+  customer_note  VARCHAR(500) NULL,
+  payment_status ENUM('pending','paid','expired') NOT NULL DEFAULT 'pending',
+  slip_storage_key VARCHAR(500) NULL,
+  shipment_evidence_key VARCHAR(500) NULL,
+  shipment_note  VARCHAR(255) NULL,
+  expires_at     DATETIME NOT NULL,
+  shipped_at     DATETIME NULL,
+  shipped_by     BIGINT UNSIGNED NULL,
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_ecommerce_public_token (public_token),
+  KEY idx_ecommerce_org_created (org_id, created_at),
+  KEY idx_ecommerce_org_expiry (org_id, payment_status, expires_at),
+  CONSTRAINT fk_ecommerce_order_org FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ecommerce_order_sale FOREIGN KEY (sales_order_id) REFERENCES sales_orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ecommerce_order_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id),
+  CONSTRAINT fk_ecommerce_shipped_by FOREIGN KEY (shipped_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE payments (

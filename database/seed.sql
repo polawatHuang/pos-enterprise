@@ -12,7 +12,7 @@ SET time_zone = '+00:00';
 
 -- Organization & branches
 INSERT INTO organizations (id, name, legal_name, tax_id, address, phone, email) VALUES
-  (1, 'POS Enterprise Demo', 'บริษัท โพสเอ็นเตอร์ไพรส์ เดโม จำกัด', '0105567000001', '99/9 ถนนพระราม 9 แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพฯ 10310', '02-000-0000', 'hello@example.com');
+  (1, 'POSWITHAI Demo', 'บริษัท พอสวิทเอไอ เดโม จำกัด', '0105567000001', '99/9 ถนนพระราม 9 แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพฯ 10310', '02-000-0000', 'hello@example.com');
 INSERT INTO branches (id, org_id, code, name, branch_no) VALUES
   (1, 1, 'HQ', 'สำนักงานใหญ่', '00000'),
   (2, 1, 'SIAM', 'สาขาสยาม', '00001');
