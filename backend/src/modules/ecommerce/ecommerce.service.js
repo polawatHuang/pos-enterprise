@@ -115,7 +115,10 @@ async function publicStore(slug) {
 }
 
 function publicImageUrl(productId, imageUrl) {
-  return typeof imageUrl === 'string' && imageUrl.startsWith('media:')
+  return typeof imageUrl === 'string' && (
+    imageUrl.startsWith('media:') ||
+    imageUrl === `/api/products/${productId}/image`
+  )
     ? `/api/ecommerce/public/products/${productId}/image`
     : imageUrl;
 }
@@ -998,6 +1001,7 @@ module.exports = {
   ORDER_TTL_MINUTES,
   validImageSignature,
   normalizeItems,
+  publicImageUrl,
   publicStore,
   publicProductImage,
   publicStoreIndex,

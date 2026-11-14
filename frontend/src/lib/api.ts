@@ -45,6 +45,8 @@ export const apiUrl = buildUrl;
 /** Resolve a backend API path returned by the server, including direct-API deployments. */
 export function apiAssetUrl(path: string | null | undefined): string | undefined {
   if (!path) return undefined;
+  const productImage = /^\/api\/products\/(\d+)\/image$/.exec(path);
+  if (productImage) path = `/api/ecommerce/public/products/${productImage[1]}/image`;
   return path.startsWith("/api/") ? buildUrl(path.slice(4)) : path;
 }
 
@@ -133,8 +135,11 @@ export async function apiFetch<T>(
  */
 export async function apiBlob(apiPath: string): Promise<Blob> {
   const path = apiPath.replace(/^\/api(?=\/)/, "");
-  const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
-  if (!res.ok) throw new ApiError(res.status, "HTTP_ERROR", `โหลดไฟล์ไม่สำเร็จ (${res.status})`);
+  const url = `${API_BASE}${path}`;
+  const doFetch = () => fetch(url, { credentials: "include" });
+  let res = await doFetch();
+  if (res.status === 401 && (await refreshSession())) res = await doFetch();
+  if (!res.ok) await parse(res);
   return res.blob();
 }
 

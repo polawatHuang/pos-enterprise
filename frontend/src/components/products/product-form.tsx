@@ -7,7 +7,7 @@ import { z } from "zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, apiAssetUrl, ApiError } from "@/lib/api";
+import { api, apiBlob, ApiError } from "@/lib/api";
 import { withOfflineCopy } from "@/lib/offline-cache";
 import type { Category, Product, ProductDetail, Supplier, Warehouse } from "@/lib/types";
 import { lineVatRate, netOfInclusive, useTaxSettings, vatTypeLabel } from "@/lib/tax";
@@ -98,6 +98,7 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
   const [reason, setReason] = useState("แก้ไขจำนวนจากหน้าสินค้า");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [storedImagePreview, setStoredImagePreview] = useState<{ source: string; url: string } | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
   useEffect(
     () => () => {
@@ -105,6 +106,25 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
     },
     [imagePreview],
   );
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    const imageUrl = product?.imageUrl;
+    if (!imageUrl) return;
+    void apiBlob(imageUrl)
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        if (active) setStoredImagePreview({ source: imageUrl, url: objectUrl });
+        else URL.revokeObjectURL(objectUrl);
+      })
+      .catch((error: unknown) => {
+        if (active) toast.error(`โหลดรูปสินค้าไม่สำเร็จ: ${error instanceof Error ? error.message : "กรุณาลองใหม่"}`);
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [product?.imageUrl]);
   const defaultWh = String(warehouses.data?.find((w) => w.branchId === user?.branchId)?.id ?? warehouses.data?.[0]?.id ?? "");
   const changedCounts = (detail.data?.stock ?? []).filter(
     (s) => counts[s.warehouseId] !== undefined && counts[s.warehouseId] !== "" && Number(counts[s.warehouseId]) !== s.quantity,
@@ -267,6 +287,8 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
     onSaved(saved);
   };
 
+  const storedImageUrl = storedImagePreview && storedImagePreview.source === product?.imageUrl ? storedImagePreview.url : null;
+
   return (
     <DialogContent title={isNew ? "เพิ่มสินค้า" : `แก้ไข ${product.name}`} className="max-w-2xl">
       <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4" noValidate>
@@ -274,10 +296,10 @@ export function ProductFormDialog({ product, onSaved }: { product?: Product | nu
           <Field label="รูปสินค้า (ไม่บังคับ)" className="sm:col-span-2">
             <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border p-3">
               <div className="flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
-                {(imagePreview ?? (!removeImage ? product?.imageUrl : null)) ? (
+                {(imagePreview ?? (!removeImage ? storedImageUrl : null)) ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={imagePreview ?? apiAssetUrl(product?.imageUrl) ?? ""}
+                    src={imagePreview ?? storedImageUrl ?? ""}
                     alt="ตัวอย่างรูปสินค้า"
                     className="size-full object-cover"
                   />
