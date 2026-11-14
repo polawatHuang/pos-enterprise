@@ -54,6 +54,9 @@ const schema = z.object({
   PUBLIC_API_URL: z.string().url().optional(),
   // Public origin of the web app (Vercel). OAuth callbacks redirect back here; defaults to the first CORS origin.
   APP_PUBLIC_URL: z.string().url().optional(),
+  LINE_LOGIN_CHANNEL_ID: z.string().regex(/^\d+$/).optional(),
+  LINE_LOGIN_CHANNEL_SECRET: z.string().min(1).optional(),
+  ECOMMERCE_AUTH_PROXY_SECRET: z.string().min(32).optional(),
   // Slip2Go verifies SaaS payment slips. A separate key can be configured for platform billing.
   SAAS_SLIP2GO_SECRET_KEY: z.string().optional(),
   SLIP2GO_SECRET_KEY: z.string().optional(),

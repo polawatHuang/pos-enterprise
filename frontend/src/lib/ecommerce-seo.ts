@@ -4,6 +4,7 @@ export type PublicStoreSeoData = {
   store: { name: string; slug: string; warehouseName: string | null };
   shippingFee: number;
   paymentReady: boolean;
+  customerLoginEnabled?: boolean;
   products: {
     id: number;
     sku: string;
@@ -17,7 +18,7 @@ export type PublicStoreSeoData = {
   }[];
 };
 
-export type PublicStoreIndexItem = { slug: string; updatedAt: string };
+export type PublicStoreIndexItem = { slug: string; updatedAt: string; productIds: number[] };
 
 function publicApiOrigin() {
   const raw = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL;
