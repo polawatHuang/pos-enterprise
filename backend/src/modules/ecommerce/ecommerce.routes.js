@@ -25,6 +25,10 @@ const limiter = (windowMs, limit, message) => rateLimit({
 const orderLimiter = limiter(60 * 60 * 1000, 12, 'สร้างคำสั่งซื้อบ่อยเกินไป กรุณาลองใหม่ภายหลัง');
 const slipLimiter = limiter(15 * 60 * 1000, 10, 'ตรวจสอบสลิปบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่');
 
+router.get('/public/stores', async (_req, res) => {
+  res.json({ data: await service.publicStoreIndex() });
+});
+
 router.get('/public/stores/:slug', validate({ params: slugParam }), async (req, res) => {
   res.json({ data: await service.publicStore(req.valid.params.slug) });
 });
@@ -92,7 +96,8 @@ router.patch(
     body: z.object({
       enabled: z.boolean().optional(),
       warehouseId: z.coerce.number().int().positive().nullable().optional(),
-    }).refine((body) => body.enabled !== undefined || body.warehouseId !== undefined, 'ไม่มีข้อมูลที่ต้องบันทึก'),
+      storeName: z.string().trim().min(2).max(191).optional(),
+    }).refine((body) => body.enabled !== undefined || body.warehouseId !== undefined || body.storeName !== undefined, 'ไม่มีข้อมูลที่ต้องบันทึก'),
   }),
   async (req, res) => {
     res.json({ data: await service.updateAdminStore(req.user.orgId, req.valid.body) });

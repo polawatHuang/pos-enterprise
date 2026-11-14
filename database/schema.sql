@@ -352,6 +352,7 @@ CREATE TABLE stock_levels (
 CREATE TABLE ecommerce_stores (
   org_id       BIGINT UNSIGNED NOT NULL PRIMARY KEY,
   slug         VARCHAR(120) NOT NULL,
+  store_name   VARCHAR(191) NOT NULL DEFAULT 'ร้านค้าออนไลน์',
   warehouse_id BIGINT UNSIGNED NULL,
   is_enabled   TINYINT(1) NOT NULL DEFAULT 0,
   created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

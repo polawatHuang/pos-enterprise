@@ -44,10 +44,9 @@ function amountForCode(check, subtotal) {
 
 async function storeBySlug(slug, { enabled = true } = {}) {
   const row = await db.one(
-    `SELECT s.org_id, s.slug, s.warehouse_id, s.is_enabled, o.name AS store_name,
+    `SELECT s.org_id, s.slug, s.store_name, s.warehouse_id, s.is_enabled,
             w.branch_id, w.name AS warehouse_name
        FROM ecommerce_stores s
-       JOIN organizations o ON o.id = s.org_id
        LEFT JOIN warehouses w ON w.id = s.warehouse_id AND w.org_id = s.org_id
       WHERE s.slug = :slug ${enabled ? 'AND s.is_enabled = 1' : ''}`,
     { slug },
@@ -57,7 +56,7 @@ async function storeBySlug(slug, { enabled = true } = {}) {
 }
 
 async function ensureStore(orgId) {
-  let store = await db.one('SELECT org_id, slug, warehouse_id, is_enabled FROM ecommerce_stores WHERE org_id = :orgId', { orgId });
+  let store = await db.one('SELECT org_id, slug, store_name, warehouse_id, is_enabled FROM ecommerce_stores WHERE org_id = :orgId', { orgId });
   if (store) return store;
   await db.query(
     `INSERT IGNORE INTO ecommerce_stores (org_id, slug, warehouse_id, is_enabled)
@@ -65,7 +64,7 @@ async function ensureStore(orgId) {
       FROM organizations WHERE id = :orgId`,
     { orgId },
   );
-  store = await db.one('SELECT org_id, slug, warehouse_id, is_enabled FROM ecommerce_stores WHERE org_id = :orgId', { orgId });
+  store = await db.one('SELECT org_id, slug, store_name, warehouse_id, is_enabled FROM ecommerce_stores WHERE org_id = :orgId', { orgId });
   if (!store) throw notFound('ไม่พบข้อมูลองค์กร');
   return store;
 }
@@ -113,6 +112,27 @@ async function publicStore(slug) {
       available: Number(p.available),
     })),
   };
+}
+
+async function publicStoreIndex() {
+  const rows = await db.query(
+    `SELECT s.slug, s.updated_at
+       FROM ecommerce_stores s
+      WHERE s.is_enabled = 1
+        AND s.warehouse_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+            FROM products p
+            JOIN stock_levels sl
+              ON sl.product_id = p.id AND sl.warehouse_id = s.warehouse_id AND sl.variant_id = 0
+            LEFT JOIN product_categories c ON c.id = p.category_id
+           WHERE p.org_id = s.org_id AND p.status = 'active' AND p.open_price = 0
+             AND (c.age_restricted IS NULL OR c.age_restricted = 0)
+             AND sl.quantity > sl.reserved
+        )
+      ORDER BY s.org_id`,
+  );
+  return rows.map((row) => ({ slug: row.slug, updatedAt: row.updated_at }));
 }
 
 async function quote(slug, { items: rawItems, code = '' }) {
@@ -163,6 +183,7 @@ async function adminStore(orgId) {
   const payment = await paymentSetup(orgId, warehouse?.branch_id ?? null);
   return {
     slug: store.slug,
+    storeName: store.store_name,
     enabled: Boolean(store.is_enabled),
     warehouseId: store.warehouse_id == null ? null : Number(store.warehouse_id),
     warehouseName: warehouse?.name ?? null,
@@ -176,7 +197,7 @@ async function adminStore(orgId) {
   };
 }
 
-async function updateAdminStore(orgId, { enabled, warehouseId }) {
+async function updateAdminStore(orgId, { enabled, warehouseId, storeName }) {
   const store = await ensureStore(orgId);
   const nextWarehouse = warehouseId === undefined ? store.warehouse_id : warehouseId;
   const nextEnabled = enabled === undefined ? Boolean(store.is_enabled) : enabled;
@@ -189,8 +210,11 @@ async function updateAdminStore(orgId, { enabled, warehouseId }) {
     }
   }
   await db.query(
-    `UPDATE ecommerce_stores SET warehouse_id = :warehouseId, is_enabled = :enabled WHERE org_id = :orgId`,
-    { orgId, warehouseId: nextWarehouse ?? null, enabled: Number(nextEnabled) },
+    `UPDATE ecommerce_stores
+        SET warehouse_id = :warehouseId, is_enabled = :enabled,
+            store_name = COALESCE(:storeName, store_name)
+      WHERE org_id = :orgId`,
+    { orgId, warehouseId: nextWarehouse ?? null, enabled: Number(nextEnabled), storeName: storeName ?? null },
   );
   return adminStore(orgId);
 }
@@ -624,6 +648,7 @@ module.exports = {
   validImageSignature,
   normalizeItems,
   publicStore,
+  publicStoreIndex,
   quote,
   adminStore,
   updateAdminStore,
